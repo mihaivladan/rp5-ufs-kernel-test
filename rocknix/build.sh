@@ -62,10 +62,10 @@ cp .config "${out}/kernel.config"
 make "${make_args[@]}" -j"$(nproc)" prepare
 release=$(make "${make_args[@]}" -s kernelrelease)
 test "${release}" = '7.2.0-consoleos-diag-ufs1'
-make "${make_args[@]}" -j"$(nproc)" DTC_FLAGS=-@ qcom/sm8250-retroidpocket-rp5.dtb qcom/sm8250-retroidpocket-rp5-visionox.dtb
+make "${make_args[@]}" -j"$(nproc)" DTC_FLAGS=-@ qcom/sm8250-retroidpocket-rp5.dtb
 if [[ "${1:-all}" == prepare ]]; then
     printf 'RK_WORK_DIR=%s\n' "${work}" >> "${GITHUB_ENV:?}"
-    echo 'Preparation passed: patches, diagnostics, kernel release and both RP5 DTBs.'
+    echo 'Preparation passed: patches, diagnostics, kernel release and the installed RP5 board DTB.'
     exit 0
 fi
 else
