@@ -1,0 +1,51 @@
+name: RP5 UFS test kernel
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  kernel:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Fetch installed Armada kernel recipe
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: armada-os/armada-packages
+          ref: 24d88394fd6ae777e7616c3ec245a7a35b5d2f81
+          path: upstream
+          persist-credentials: false
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            /kernel/
+            /toolchain.env
+      - name: Prepare patch and provenance
+        run: python3 prepare.py upstream
+      - name: Install build host tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y podman zstd
+      - name: Build kernel only
+        run: |
+          set -euo pipefail
+          bash upstream/kernel/build.sh 2>&1 | tee build.log
+      - name: Verify artifact
+        run: bash verify.sh upstream/kernel/out
+      - name: Upload kernel and build records
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: rp5-7.2.3-consoleos-ufs1
+          retention-days: 7
+          compression-level: 0
+          if-no-files-found: error
+          path: |
+            upstream/kernel/out/
+            build.log
+            provenance.json
