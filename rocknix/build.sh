@@ -2,13 +2,14 @@
 set -euo pipefail
 kit=$(pwd)
 out="${kit}/rocknix-out"
-work=$(mktemp -d /tmp/rocknix-kernel.XXXXXX)
 mkdir -p "${out}"
 export ARCH=arm64
 make_args=(ARCH=arm64 CC=gcc-14 HOSTCC=gcc-14 HOSTCXX=g++-14)
 export KBUILD_BUILD_USER=consoleos KBUILD_BUILD_HOST=github-arm
 export KBUILD_BUILD_TIMESTAMP='2026-09-01 00:00:00 UTC'
 export LOCALVERSION=
+if [[ "${1:-all}" != compile ]]; then
+work=$(mktemp -d /tmp/rocknix-kernel.XXXXXX)
 cd "${work}"
 curl -fL --retry 3 -o release.tar https://github.com/ROCKNIX/distribution/releases/download/20260901/ROCKNIX-SM8250.aarch64-20260901.tar
 echo '3c23a04b76a9237b4d824819d80cc83c98ce118d33e1bd979a2a68ff40f034cb  release.tar' | sha256sum -c -
@@ -61,7 +62,20 @@ cp .config "${out}/kernel.config"
 make "${make_args[@]}" -j"$(nproc)" prepare
 release=$(make "${make_args[@]}" -s kernelrelease)
 test "${release}" = '7.2.0-consoleos-diag-ufs1'
-make "${make_args[@]}" -j"$(nproc)" DTC_FLAGS=-@ Image modules qcom/sm8250-retroidpocket-rp5.dtb qcom/sm8250-retroidpocket-rp5-visionox.dtb
+make "${make_args[@]}" -j"$(nproc)" DTC_FLAGS=-@ qcom/sm8250-retroidpocket-rp5.dtb qcom/sm8250-retroidpocket-rp5-visionox.dtb
+if [[ "${1:-all}" == prepare ]]; then
+    printf 'RK_WORK_DIR=%s\n' "${work}" >> "${GITHUB_ENV:?}"
+    echo 'Preparation passed: patches, diagnostics, kernel release and both RP5 DTBs.'
+    exit 0
+fi
+else
+    work="${RK_WORK_DIR:?Missing prepared kernel directory}"
+fi
+source_dir="${work}/linux-7.2"
+cd "${source_dir}"
+release=$(make "${make_args[@]}" -s kernelrelease)
+test "${release}" = '7.2.0-consoleos-diag-ufs1'
+make "${make_args[@]}" -j"$(nproc)" Image modules
 stage="${work}/stage"
 mkdir -p "${stage}/boot" "${stage}/lib/modules"
 cp arch/arm64/boot/Image "${stage}/boot/KERNEL"

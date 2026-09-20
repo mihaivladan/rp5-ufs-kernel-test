@@ -29,10 +29,14 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y build-essential gcc-14 g++-14 bc bison flex libssl-dev libelf-dev dwarves zstd xz-utils cpio kmod rsync squashfs-tools
           df -h /
-      - name: Build only the diagnostic kernel and modules
+      - name: Validate sources, diagnostics and RP5 device trees
         run: |
           set -euo pipefail
-          bash rocknix/build.sh 2>&1 | tee rocknix-build.log
+          bash rocknix/build.sh prepare 2>&1 | tee rocknix-build.log
+      - name: Compile kernel and modules
+        run: |
+          set -euo pipefail
+          bash rocknix/build.sh compile 2>&1 | tee -a rocknix-build.log
       - name: Upload results and logs
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a

@@ -93,6 +93,15 @@ def apply_patches(repo, source, fix):
                         "sha256": hashlib.sha256(patch.read_bytes()).hexdigest()})
     dts = repo / "projects/ROCKNIX/devices/SM8250/linux/dts"
     shutil.copytree(dts, source / "arch/arm64/boot/dts", dirs_exist_ok=True)
+    # Vendored board files also need Kbuild targets; the Visionox variant is
+    # absent from the upstream Makefile even though ROCKNIX supplies its DTS.
+    makefile = source / "arch/arm64/boot/dts/qcom/Makefile"
+    contents = makefile.read_text()
+    for name in ("sm8250-retroidpocket-rp5", "sm8250-retroidpocket-rp5-visionox"):
+        require((source / f"arch/arm64/boot/dts/qcom/{name}.dts").is_file(), f"Missing {name} DTS")
+        if f"{name}.dtb" not in contents:
+            contents += f"\ndtb-$(CONFIG_ARCH_QCOM) += {name}.dtb\n"
+    makefile.write_text(contents)
     return records
 
 
