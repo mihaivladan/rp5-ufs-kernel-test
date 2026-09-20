@@ -1,0 +1,116 @@
+#!/usr/bin/env python3
+"""Reuse checksum-verified stock boot assets and exact-release kernel patches."""
+import hashlib
+import json
+from pathlib import Path
+import shutil
+import subprocess
+import sys
+import tarfile
+import zlib
+
+STOCK_KERNEL_SHA = "758d4a9e31ebdfe125369f82158f038521eee5e4e5d7b7e5b2da0dddee499ea4"
+FIX_SHA = "67340039b880e85485875d896fc2e9e517e9a808beba996f1e8b151853397fd5"
+REVISION = "1ebff24f36501fb6493beb2bf83bf2604536d9aa"
+
+
+def require(ok, message):
+    if not ok:
+        raise SystemExit(message)
+
+
+def cpio_names(data):
+    offset = 0
+    names = []
+    while data[offset:offset + 6] in (b"070701", b"070702"):
+        fields = [int(data[offset + 6 + i * 8:offset + 14 + i * 8], 16) for i in range(13)]
+        size, namelen = fields[6], fields[11]
+        name = data[offset + 110:offset + 110 + namelen - 1].decode()
+        offset = (offset + 110 + namelen + 3) & ~3
+        require(offset + size <= len(data), "Truncated initramfs entry")
+        offset = (offset + size + 3) & ~3
+        if name == "TRAILER!!!":
+            return names
+        require(not name.startswith("/") and ".." not in Path(name).parts, "Unexpected initramfs path")
+        names.append(name)
+    raise SystemExit("Incomplete stock initramfs")
+
+
+def extract_stock(archive, work):
+    with tarfile.open(archive) as tf:
+        for basename in ("KERNEL", "SYSTEM"):
+            matches = [m for m in tf.getmembers() if m.isfile() and Path(m.name).name == basename]
+            require(len(matches) == 1, f"Expected exactly one stock {basename}")
+            with tf.extractfile(matches[0]) as source, (work / basename).open("wb") as target:
+                shutil.copyfileobj(source, target)
+    image = (work / "KERNEL").read_bytes()
+    require(hashlib.sha256(image).hexdigest() == STOCK_KERNEL_SHA, "Release kernel differs from saved device baseline")
+    require(image[56:60] == b"ARMd", "Expected stock flat ARM64 Image")
+    candidates = []
+    offset = 0
+    while True:
+        offset = image.find(b"\x1f\x8b\x08", offset)
+        if offset < 0:
+            break
+        try:
+            decoder = zlib.decompressobj(31)
+            raw = decoder.decompress(image[offset:], 64 * 1024 * 1024)
+            if decoder.eof and raw.startswith(b"070701"):
+                names = cpio_names(raw)
+                if "init" in names:
+                    require(not any(".ko" in n or n.startswith("lib/modules/") for n in names),
+                            "Stock initramfs contains version-specific kernel modules")
+                    candidates.append(raw)
+        except zlib.error:
+            pass
+        offset += 3
+    require(len(candidates) == 1, "Expected one module-free stock initramfs")
+    (work / "initramfs.cpio").write_bytes(candidates[0])
+    return hashlib.sha256(candidates[0]).hexdigest()
+
+
+def apply_patches(repo, source, fix):
+    revision = subprocess.check_output(["git", "-C", str(repo), "rev-parse", "HEAD"], text=True).strip()
+    require(revision == REVISION, "Incorrect ROCKNIX source revision")
+    p = repo / "projects/ROCKNIX/packages/linux/patches"
+    project = repo / "projects/ROCKNIX/patches/linux"
+    device = repo / "projects/ROCKNIX/devices/SM8250/patches/linux"
+    # Exact scripts/unpack order for this release. No linux/SM8250/default
+    # package subdirectories or project patch directories exist at this pin.
+    directories = [p, p / "aarch64", p / "mainline", p / "SM8250", p / "default",
+                   p / "7.2", p / "7.2/aarch64", project, project / "aarch64",
+                   project / "7.2", device]
+    patches = [patch for directory in directories for patch in sorted(directory.glob("*.patch"))]
+    require(len(patches) == 35, "Unexpected release patch count; review selection")
+    require(hashlib.sha256(fix.read_bytes()).hexdigest() == FIX_SHA, "UFS fix checksum mismatch")
+    records = []
+    for patch in patches + [fix]:
+        print(f"Applying {patch.name}", flush=True)
+        payload = patch.read_text().replace("@TARGET_CPU@", "cortex-a76.cortex-a55").replace("@DEVICE@", "SM8250")
+        # Preserve upstream's patch behavior; never skip a failed patch.
+        subprocess.run(["patch", "-p1", "--batch", "--forward"], input=payload, text=True, cwd=source, check=True)
+        records.append({"path": str(patch.relative_to(repo)) if patch in patches else fix.name,
+                        "sha256": hashlib.sha256(patch.read_bytes()).hexdigest()})
+    dts = repo / "projects/ROCKNIX/devices/SM8250/linux/dts"
+    shutil.copytree(dts, source / "arch/arm64/boot/dts", dirs_exist_ok=True)
+    return records
+
+
+def main():
+    require(len(sys.argv) == 6, "Usage: prepare.py RELEASE_TAR WORK SOURCE RECIPE OUTPUT")
+    archive, work, source, repo, out = (Path(p).resolve() for p in sys.argv[1:])
+    out.mkdir(parents=True, exist_ok=True)
+    initramfs_sha = extract_stock(archive, work)
+    records = apply_patches(repo, source, Path(__file__).resolve().parent.parent / "ufs-lane-clocks.patch")
+    (out / "provenance.json").write_text(json.dumps({
+        "rocknix_revision": REVISION, "stock_kernel_sha256": STOCK_KERNEL_SHA,
+        "initramfs_sha256": initramfs_sha, "patches": records,
+        "fix_commit": "f07317a8d57f382ec505597816271dd72ffa20c7",
+        "baseline": "ROCKNIX 20260901 / Linux 7.2.0",
+        "build": "Native GitHub ARM runner, distro compiler; all modules rebuilt",
+        "deployment": "Not installed; matching modules must be integrated with SYSTEM before boot"
+    }, indent=2) + "\n")
+
+
+if __name__ == "__main__":
+    main()
