@@ -84,11 +84,18 @@ def apply_patches(repo, source, fix):
     require(len(patches) == 35, "Unexpected release patch count; review selection")
     require(hashlib.sha256(fix.read_bytes()).hexdigest() == FIX_SHA, "UFS fix checksum mismatch")
     records = []
-    for patch in patches + [fix]:
+    display_fix = Path(__file__).resolve().parent / "dpu-cstate-init.patch"
+    require(hashlib.sha256(display_fix.read_bytes()).hexdigest() ==
+            "e4ea3fd8ff2f5f036544abaacace08f7eb0d9e85a67ca150104dfd4f0dd41072",
+            "DPU initialization fix checksum mismatch")
+    for patch in patches + [fix, display_fix]:
         print(f"Applying {patch.name}", flush=True)
         payload = patch.read_text().replace("@TARGET_CPU@", "cortex-a76.cortex-a55").replace("@DEVICE@", "SM8250")
         # Preserve upstream's patch behavior; never skip a failed patch.
-        subprocess.run(["patch", "-p1", "--batch", "--forward"], input=payload, text=True, cwd=source, check=True)
+        args = ["patch", "-p1", "--batch", "--forward"]
+        if patch == display_fix:
+            args.append("--fuzz=0")
+        subprocess.run(args, input=payload, text=True, cwd=source, check=True)
         records.append({"path": str(patch.relative_to(repo)) if patch in patches else fix.name,
                         "sha256": hashlib.sha256(patch.read_bytes()).hexdigest()})
     dts = repo / "projects/ROCKNIX/devices/SM8250/linux/dts"
@@ -115,6 +122,7 @@ def main():
         "rocknix_revision": REVISION, "stock_kernel_sha256": STOCK_KERNEL_SHA,
         "initramfs_sha256": initramfs_sha, "patches": records,
         "fix_commit": "f07317a8d57f382ec505597816271dd72ffa20c7",
+        "display_fix": "Initialize DPU CRTC state before ROCKNIX resource-cleanup writes num_mixers",
         "baseline": "ROCKNIX 20260901 / Linux 7.2.0",
         "build": "Native GitHub ARM runner, distro compiler; all modules rebuilt",
         "deployment": "Not installed; matching modules must be integrated with SYSTEM before boot"

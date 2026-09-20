@@ -61,7 +61,7 @@ PY
 cp .config "${out}/kernel.config"
 make "${make_args[@]}" -j"$(nproc)" prepare
 release=$(make "${make_args[@]}" -s kernelrelease)
-test "${release}" = '7.2.0-consoleos-diag-ufs1'
+test "${release}" = '7.2.0-consoleos-diag-ufs2'
 make "${make_args[@]}" -j"$(nproc)" DTC_FLAGS=-@ qcom/sm8250-retroidpocket-rp5.dtb
 if [[ "${1:-all}" == prepare ]]; then
     printf 'RK_WORK_DIR=%s\n' "${work}" >> "${GITHUB_ENV:?}"
@@ -74,7 +74,9 @@ fi
 source_dir="${work}/linux-7.2"
 cd "${source_dir}"
 release=$(make "${make_args[@]}" -s kernelrelease)
-test "${release}" = '7.2.0-consoleos-diag-ufs1'
+test "${release}" = '7.2.0-consoleos-diag-ufs2'
+# The previous build exposed an uninitialized cstate pointer in this file.
+printf '\nCFLAGS_dpu_crtc.o += -Werror=uninitialized -Werror=maybe-uninitialized\n' >> drivers/gpu/drm/msm/disp/dpu1/Makefile
 make "${make_args[@]}" -j"$(nproc)" Image modules
 stage="${work}/stage"
 mkdir -p "${stage}/boot" "${stage}/lib/modules"
@@ -86,6 +88,8 @@ depmod -b "${stage}" "${release}"
 cp System.map Module.symvers "${out}/"
 objcopy --dump-section .BTF="${out}/vmlinux.btf" vmlinux
 cp drivers/ufs/host/ufs-qcom.c drivers/ufs/host/ufs-qcom.h "${out}/"
+cp drivers/gpu/drm/msm/disp/dpu1/dpu_crtc.c drivers/gpu/drm/msm/disp/dpu1/dpu_crtc.o "${out}/"
+objdump -drS drivers/gpu/drm/msm/disp/dpu1/dpu_crtc.o > "${out}/dpu_crtc-disassembly.txt"
 test -s "${stage}/boot/KERNEL"
 test -s "${stage}/lib/modules/${release}/modules.dep"
 test -s "${out}/vmlinux.btf"
