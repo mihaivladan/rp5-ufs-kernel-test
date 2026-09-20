@@ -47,15 +47,22 @@ def main():
     original_build = build.read_text()
     marker = '# ---------- 5. Build ----------'
     stage_marker = '# ---------- 7. Package ----------'
+    version_marker = 'KVER=$(make "${MAKE_ARGS[@]}" -s kernelrelease)'
     require(original_build.count(marker) == 1 and original_build.count(stage_marker) == 1,
             "Unexpected build-script layout")
+    require(original_build.count(version_marker) == 1, "Unexpected kernelrelease query")
 
     # All preconditions checked before changing this disposable checkout.
     name = "9999-consoleos-ufs-lane-clocks.patch"
     (kernel / "patches" / name).write_bytes(patch)
     series.write_text(series.read_text().rstrip() + "\n" + name + "\n")
     config.write_text(original_config.rstrip() + '\nCONFIG_LOCALVERSION="-consoleos-ufs1"\n# CONFIG_LOCALVERSION_AUTO is not set\n')
-    guarded = original_build.replace(marker, '''# Refuse a package that could be mistaken for the installed kernel.
+    # kernelrelease explicitly skips config synchronization. Refresh auto.conf
+    # after merging the fragment, before querying its CONFIG_LOCALVERSION.
+    guarded = original_build.replace(version_marker, '''make "${MAKE_ARGS[@]}" prepare
+cp .config "${OUT_DIR}/kernel.config"
+''' + version_marker)
+    guarded = guarded.replace(marker, '''# Refuse a package that could be mistaken for the installed kernel.
 test "${KVER}" = "7.2.3-consoleos-ufs1"
 grep -qx 'CONFIG_SCSI_UFS_QCOM=y' .config
 grep -qx 'CONFIG_DEBUG_INFO_BTF=y' .config
