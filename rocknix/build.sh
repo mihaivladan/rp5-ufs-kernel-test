@@ -42,6 +42,7 @@ bash scripts/kconfig/merge_config.sh -m .config "${kit}/rocknix/diagnostics.conf
 scripts/config --set-str INITRAMFS_SOURCE "${work}/initramfs.cpio"
 scripts/config --set-str EXTRA_FIRMWARE_DIR "${source_dir}/external-firmware"
 make "${make_args[@]}" olddefconfig
+cp .config "${out}/kernel.config"
 python3 - "${kit}/rocknix/diagnostics.config" <<'PY'
 from pathlib import Path
 import sys
@@ -50,6 +51,10 @@ requested = [line for line in Path(sys.argv[1]).read_text().splitlines() if line
 missing = [line for line in requested if line not in actual]
 if missing:
     raise SystemExit('Diagnostic settings did not resolve: ' + ', '.join(missing))
+# In Linux 7.2, genpd diagnostics are guarded directly by CONFIG_DEBUG_FS.
+genpd = Path('drivers/pmdomain/core.c').read_text()
+if '#ifdef CONFIG_DEBUG_FS' not in genpd or '"pm_genpd_summary"' not in genpd:
+    raise SystemExit('Expected Linux 7.2 power-domain debugfs implementation missing')
 print('All diagnostic settings verified.')
 PY
 cp .config "${out}/kernel.config"
