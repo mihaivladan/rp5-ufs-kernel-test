@@ -107,6 +107,7 @@ def apply_patches(repo, source, fix, profile):
         "stock-pruned": "sm8250-retroidpocket-rp5-stock-pruned",
     }
     custom_name = custom_names.get(profile)
+    matrix_names = []
     if custom_name:
         custom_dts = Path(__file__).resolve().parent / f"{custom_name}.dts"
         require(custom_dts.is_file(), f"Missing {profile} RP5 DTS")
@@ -115,6 +116,28 @@ def apply_patches(repo, source, fix, profile):
             reference = Path(__file__).resolve().parent / "sm8250-retroidpocket-rp5-minsleep4.dts"
             require(reference.is_file(), "Missing minsleep4 reference DTS")
             shutil.copyfile(reference, source / "arch/arm64/boot/dts/qcom" / reference.name)
+    elif profile == "reenable-matrix":
+        root = Path(__file__).resolve().parent
+        for filename in (
+            "sm8250-retroidpocket-rp5-minsleep4.dts",
+            "sm8250-retroidpocket-rp5-stock-pruned.dts",
+        ):
+            origin = root / filename
+            require(origin.is_file(), f"Missing matrix reference DTS: {filename}")
+            shutil.copyfile(origin, source / "arch/arm64/boot/dts/qcom" / filename)
+        manifest_path = root / "reenable-matrix.json"
+        generator = root / "generate-reenable-matrix.py"
+        require(manifest_path.is_file() and generator.is_file(), "Missing matrix inputs")
+        manifest = json.loads(manifest_path.read_text())
+        matrix_names = [
+            manifest["candidate_prefix"] + candidate["id"]
+            for candidate in manifest["candidates"]
+        ]
+        subprocess.run(
+            [sys.executable, str(generator), str(manifest_path),
+             str(source / "arch/arm64/boot/dts/qcom")],
+            check=True,
+        )
     # Match the board used by the saved device baseline. This release predates
     # the separate Visionox DTS found in newer ROCKNIX revisions.
     makefile = source / "arch/arm64/boot/dts/qcom/Makefile"
@@ -124,6 +147,12 @@ def apply_patches(repo, source, fix, profile):
         names.append(custom_name)
     if profile == "stock-pruned":
         names.append("sm8250-retroidpocket-rp5-minsleep4")
+    elif profile == "reenable-matrix":
+        names.extend([
+            "sm8250-retroidpocket-rp5-minsleep4",
+            "sm8250-retroidpocket-rp5-stock-pruned",
+            *matrix_names,
+        ])
     for name in names:
         require((source / f"arch/arm64/boot/dts/qcom/{name}.dts").is_file(), f"Missing {name} DTS")
         if f"{name}.dtb" not in contents:
@@ -138,14 +167,17 @@ def main():
     out.mkdir(parents=True, exist_ok=True)
     initramfs_sha = extract_stock(archive, work)
     profile = os.environ.get("ROCKNIX_PROFILE", "diagnostic")
-    require(profile in ("diagnostic", "minimal-sleep", "cpu-icc-off", "stock-pruned"),
+    require(profile in (
+        "diagnostic", "minimal-sleep", "cpu-icc-off", "stock-pruned",
+        "reenable-matrix",
+    ),
             f"Unsupported ROCKNIX_PROFILE: {profile}")
     records = apply_patches(
         repo, source,
         Path(__file__).resolve().parent.parent / "ufs-lane-clocks.patch",
         profile,
     )
-    dt_only = profile in ("cpu-icc-off", "stock-pruned")
+    dt_only = profile in ("cpu-icc-off", "stock-pruned", "reenable-matrix")
     (out / "provenance.json").write_text(json.dumps({
         "rocknix_revision": REVISION, "stock_kernel_sha256": STOCK_KERNEL_SHA,
         "initramfs_sha256": initramfs_sha, "patches": records,

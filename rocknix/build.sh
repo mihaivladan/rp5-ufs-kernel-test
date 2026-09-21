@@ -28,6 +28,12 @@ stock-pruned)
     artifact_name='unused-device-tree-only.tar.zst'
     dtb_name='sm8250-retroidpocket-rp5-stock-pruned'
     ;;
+reenable-matrix)
+    config_fragment="${kit}/rocknix/cpu-icc-off.config"
+    expected_release='7.2.0'
+    artifact_name='unused-device-tree-only.tar.zst'
+    dtb_name='sm8250-retroidpocket-rp5-stock-pruned'
+    ;;
 *)
     echo "Unknown ROCKNIX_PROFILE: ${profile}" >&2
     exit 2
@@ -117,7 +123,25 @@ cp .config "${out}/kernel.config"
 make "${make_args[@]}" -j"$(nproc)" prepare
 release=$(make "${make_args[@]}" -s kernelrelease)
 test "${release}" = "${expected_release}"
-make "${make_args[@]}" -j"$(nproc)" DTC_FLAGS=-@ "qcom/${dtb_name}.dtb"
+if [[ "${profile}" == reenable-matrix ]]; then
+    mapfile -t matrix_dtb_names < <(python3 - "${kit}/rocknix/reenable-matrix.json" <<'PY'
+import json, sys
+data = json.load(open(sys.argv[1]))
+for candidate in data["candidates"]:
+    print(data["candidate_prefix"] + candidate["id"])
+PY
+)
+    matrix_targets=(
+        qcom/sm8250-retroidpocket-rp5-minsleep4.dtb
+        qcom/sm8250-retroidpocket-rp5-stock-pruned.dtb
+    )
+    for name in "${matrix_dtb_names[@]}"; do
+        matrix_targets+=("qcom/${name}.dtb")
+    done
+    make "${make_args[@]}" -j"$(nproc)" DTC_FLAGS=-@ "${matrix_targets[@]}"
+else
+    make "${make_args[@]}" -j"$(nproc)" DTC_FLAGS=-@ "qcom/${dtb_name}.dtb"
+fi
 if [[ "${profile}" == minimal-sleep ]]; then
     python3 "${kit}/rocknix/verify-minimal-dtb.py" \
         "arch/arm64/boot/dts/qcom/${dtb_name}.dtb" | tee "${out}/minimal-dtb-verification.txt"
@@ -150,6 +174,39 @@ elif [[ "${profile}" == stock-pruned ]]; then
     sha256sum "${dtb_name}.dtb" > STOCK-PRUNED-SHA256SUMS
     printf '%s\n' \
         'Stock-kernel pruned DTB checks passed. Exact minsleep4 tree plus two disabled stock-only deferred consumers.' \
+        > BUILD-SUCCESS.txt
+    cd "${source_dir}"
+elif [[ "${profile}" == reenable-matrix ]]; then
+    python3 "${kit}/rocknix/verify-minimal-dtb.py" \
+        arch/arm64/boot/dts/qcom/sm8250-retroidpocket-rp5-minsleep4.dtb \
+        | tee "${out}/minsleep4-reference-verification.txt"
+    python3 "${kit}/rocknix/verify-minimal-dtb.py" \
+        arch/arm64/boot/dts/qcom/sm8250-retroidpocket-rp5-stock-pruned.dtb \
+        | tee "${out}/stock-pruned-dtb-verification.txt"
+    python3 "${kit}/rocknix/verify-stock-pruned-dtb.py" \
+        arch/arm64/boot/dts/qcom/sm8250-retroidpocket-rp5-minsleep4.dtb \
+        arch/arm64/boot/dts/qcom/sm8250-retroidpocket-rp5-stock-pruned.dtb \
+        | tee "${out}/stock-pruned-delta-verification.txt"
+    echo 'b366273b3061a724f81e3c6e1c78b41b7f2046c63c571f66d3f459e12d34d4d5  arch/arm64/boot/dts/qcom/sm8250-retroidpocket-rp5-stock-pruned.dtb' \
+        | sha256sum -c -
+    python3 "${kit}/rocknix/verify-reenable-matrix.py" \
+        arch/arm64/boot/dts/qcom/sm8250-retroidpocket-rp5-stock-pruned.dtb \
+        "${kit}/rocknix/reenable-matrix.json" \
+        arch/arm64/boot/dts/qcom \
+        | tee "${out}/reenable-matrix-verification.txt"
+    mkdir -p "${out}/generated-dts"
+    cp "${kit}/rocknix/reenable-matrix.json" "${out}/"
+    cp arch/arm64/boot/dts/qcom/sm8250-retroidpocket-rp5-stock-pruned.dtb "${out}/"
+    for name in "${matrix_dtb_names[@]}"; do
+        cp "arch/arm64/boot/dts/qcom/${name}.dtb" "${out}/"
+        cp "arch/arm64/boot/dts/qcom/${name}.dts" "${out}/generated-dts/"
+    done
+    cd "${out}"
+    sha256sum sm8250-retroidpocket-rp5-stock-pruned.dtb \
+        sm8250-retroidpocket-rp5-reenable-*.dtb \
+        reenable-matrix.json generated-dts/*.dts > REENABLE-MATRIX-SHA256SUMS
+    printf '%s\n' \
+        'RP5 stock-kernel re-enable matrix passed: proven baseline plus eleven exact subsystem candidates; CPU ICC removal fixed.' \
         > BUILD-SUCCESS.txt
     cd "${source_dir}"
 fi

@@ -15,3 +15,21 @@ The output is a distinct `7.2.0-consoleos-diag-ufs1` package with a raw ARM64 Im
 **Do not copy the new kernel alone over the SD's KERNEL.** ROCKNIX's stock initramfs checks that SYSTEM contains the running kernel's modules. Deployment must first integrate the matching module tree into a separate SYSTEM/test boot setup and preserve the original KERNEL, SYSTEM and boot configuration. This packaging and on-device validation remain separate steps. The existing stock backup is retained locally and is not published here.
 
 The extra diagnostics do not provide electrical power measurements for every component, and the UFS fix is not yet proven to meet the RP5 standby target. First verify boot/storage/audio, then clock-reference balance and suspend residency, then battery drain.
+# RP5 subsystem re-enable matrix
+
+The `reenable-matrix` profile builds eleven Device Tree candidates from the
+proven stock-kernel pruned baseline. `reenable-matrix.json` is the source of
+truth for each coherent subsystem group. `generate-reenable-matrix.py` creates
+the candidate DTS files, and `verify-reenable-matrix.py` rejects any compiled
+artifact whose semantic delta contains anything beyond the named
+`disabled`-to-`okay` status changes.
+
+Every candidate retains the stock `7.2.0` kernel, removes all eight CPU ICC
+paths and all 56 CPU OPP peak-bandwidth values, and retains CPU frequency
+control. The workflow also requires the compiled baseline to reproduce the
+SHA-256 of the DTB that recorded stock-kernel AOSD, CXSD and DDR residency.
+
+Run the public workflow **ROCKNIX RP5 subsystem re-enable matrix**. Its artifact
+contains the proven baseline, all eleven candidate DTBs, generated DTS files,
+the manifest, semantic verification output, provenance and checksums. These
+artifacts are build candidates only; none is installed automatically.

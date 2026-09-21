@@ -1,0 +1,168 @@
+{
+  "schema": 1,
+  "baseline": "sm8250-retroidpocket-rp5-stock-pruned",
+  "candidate_prefix": "sm8250-retroidpocket-rp5-reenable-",
+  "fixed_invariants": [
+    "stock ROCKNIX 7.2.0 kernel and modules",
+    "all eight CPU interconnect paths absent",
+    "all 56 CPU OPP peak-bandwidth properties absent",
+    "cpufreq operating-points-v2 and qcom,freq-domain properties retained"
+  ],
+  "candidates": [
+    {
+      "id": "display-internal",
+      "description": "Internal framebuffer, DPU/MDSS, DSI panel path and panel rail; DisplayPort remains disabled",
+      "nodes": [
+        "framebuffer",
+        "mdss",
+        "mdss_dsi0",
+        "mdss_dsi0_phy",
+        "dispcc",
+        "vdda_panel"
+      ]
+    },
+    {
+      "id": "gpu",
+      "description": "Adreno GPU, GMU, GPU clock controller and GPU SMMU",
+      "nodes": [
+        "gpu",
+        "gmu",
+        "gpucc",
+        "adreno_smmu"
+      ]
+    },
+    {
+      "id": "gamepad",
+      "description": "Retroid gamepad UART, its QUP provider and MCU rail",
+      "nodes": [
+        "qupv3_id_2",
+        "uart16",
+        "vreg_mcu_3v3"
+      ]
+    },
+    {
+      "id": "ufs",
+      "description": "Internal UFS controller, PHY and shared 1.8 V rail",
+      "nodes": [
+        "ufs_mem_hc",
+        "ufs_mem_phy",
+        "vreg_s4a_1p8"
+      ]
+    },
+    {
+      "id": "wireless",
+      "description": "PCIe Wi-Fi, QCA6390 PMU, Bluetooth UART, QUP provider and shared rail",
+      "nodes": [
+        "pcie0",
+        "pcie0_phy",
+        "uart6",
+        "/qca6390-pmu",
+        "qupv3_id_0",
+        "vreg_s4a_1p8"
+      ]
+    },
+    {
+      "id": "usb-typec",
+      "description": "USB controller and PHYs, Type-C, VBUS, retimer I2C, QUP provider and shared rail",
+      "nodes": [
+        "usb_1",
+        "usb_1_dwc3",
+        "usb_1_hsphy",
+        "usb_1_qmpphy",
+        "pm8150b_typec",
+        "pm8150b_vbus",
+        "i2c15",
+        "qupv3_id_2",
+        "vreg_s4a_1p8"
+      ]
+    },
+    {
+      "id": "audio",
+      "description": "ADSP, LPASS pinctrl, codec macros, SoundWire, sound card and audio rails",
+      "nodes": [
+        "adsp",
+        "lpass_tlmm",
+        "sound",
+        "wcd938x",
+        "rxmacro",
+        "txmacro",
+        "vamacro",
+        "wsamacro",
+        "swr0",
+        "swr1",
+        "swr2",
+        "vreg_s4a_1p8",
+        "vdc_5v"
+      ]
+    },
+    {
+      "id": "touchscreen",
+      "description": "Touchscreen I2C, QUP provider and its 1.8 V supply chain",
+      "nodes": [
+        "qupv3_id_1",
+        "i2c13",
+        "vreg_s4a_1p8",
+        "vreg_l1c_1p8"
+      ]
+    },
+    {
+      "id": "fan-leds-haptics",
+      "description": "Fan, RGB LEDs, haptics and their board rails",
+      "nodes": [
+        "fan",
+        "pm8150b_haptics",
+        "pm8150l_lpg",
+        "qupv3_id_0",
+        "i2c3",
+        "i2c5",
+        "/multi-ledr1",
+        "/multi-ledl1",
+        "/multi-ledr2",
+        "/multi-ledl2",
+        "/multi-ledr3",
+        "/multi-ledl3",
+        "/multi-ledr4",
+        "/multi-ledl4",
+        "vbat",
+        "vdc_3v3",
+        "vdc_5v",
+        "vreg_fan_pwr",
+        "vreg_mcu_3v3"
+      ]
+    },
+    {
+      "id": "crypto-bwmon",
+      "description": "QCE crypto accelerator and both Qualcomm bandwidth monitors",
+      "nodes": [
+        "crypto",
+        "/soc@0/pmu@9091000",
+        "/soc@0/pmu@90b6400"
+      ]
+    },
+    {
+      "id": "media-dsp",
+      "description": "Video codec and clocks plus camera clocks, CDSP and SLPI",
+      "nodes": [
+        "venus",
+        "videocc",
+        "camcc",
+        "cdsp",
+        "slpi"
+      ]
+    }
+  ],
+  "deferred": [
+    {
+      "node": "mdss_dp",
+      "reason": "External DisplayPort will be tested only after internal display and USB/Type-C pass independently"
+    },
+    {
+      "node": "uart12",
+      "reason": "Debug UART is not required by the product path and chosen stdout remains removed"
+    },
+    {
+      "node": "vreg_l8c_1p8",
+      "reason": "No enabled RP5 consumer references L8C; restore only after the shared S4A rail passes"
+    }
+  ]
+}
