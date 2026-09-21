@@ -11,8 +11,10 @@
 
 /*
  * Final retained Linux ICC consumer discriminator. Keep the CPU OPP tables and
- * EPSS frequency domains, but remove both CPU interconnect paths and every OPP
+ * EPSS frequency domains, but remove the CPU interconnect path and every OPP
  * bandwidth value so qcom-cpufreq-hw cannot create a CPU DDR/L3 ICC request.
+ * interconnect-names is absent in the compiled stock tree; delete it here as a
+ * defensive source-level no-op.
  */
 &cpu0 {
 	/delete-property/ interconnects;

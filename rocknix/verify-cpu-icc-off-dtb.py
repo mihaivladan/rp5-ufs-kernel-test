@@ -109,7 +109,12 @@ def main() -> int:
     cpu_paths = ("/cpus/cpu@0",) + tuple(f"/cpus/cpu@{index}00" for index in range(1, 8))
     for cpu in cpu_paths:
         expected_removed.add((cpu, "interconnects"))
-        expected_removed.add((cpu, "interconnect-names"))
+        if (cpu, "interconnects") not in stock:
+            raise SystemExit(f"Stock CPU interconnect property missing: {cpu}/interconnects")
+        # The source-level override deletes this defensively, but the compiled
+        # ROCKNIX baseline has no interconnect-names property on these CPUs.
+        if (cpu, "interconnect-names") in stock or (cpu, "interconnect-names") in candidate:
+            raise SystemExit(f"Unexpected CPU interconnect-names property: {cpu}")
         for retained in ("operating-points-v2", "qcom,freq-domain"):
             key = (cpu, retained)
             if (
@@ -159,8 +164,9 @@ def main() -> int:
     if model != "Retroid Pocket 5":
         raise SystemExit(f"Wrong model: {model!r}")
     print(f"Verified identical node set: {len(stock_nodes)} nodes")
-    print("Verified exactly 72 removed properties and no additions or value changes:")
-    print("  16 CPU interconnect/interconnect-name properties across 8 CPUs")
+    print("Verified exactly 64 removed properties and no additions or value changes:")
+    print("  8 CPU interconnect properties across 8 CPUs")
+    print("  compiled stock and candidate both omit CPU interconnect-names")
     print("  56 opp-peak-kBps properties across 17 + 18 + 21 CPU OPPs")
     print("Verified operating-points-v2 and qcom,freq-domain unchanged on all 8 CPUs")
     print(
