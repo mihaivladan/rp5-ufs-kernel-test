@@ -2,6 +2,7 @@
 """Reuse checksum-verified stock boot assets and exact-release kernel patches."""
 import hashlib
 import json
+import os
 from pathlib import Path
 import shutil
 import subprocess
@@ -69,7 +70,7 @@ def extract_stock(archive, work):
     return hashlib.sha256(candidates[0]).hexdigest()
 
 
-def apply_patches(repo, source, fix):
+def apply_patches(repo, source, fix, profile):
     revision = subprocess.check_output(["git", "-C", str(repo), "rev-parse", "HEAD"], text=True).strip()
     require(revision == REVISION, "Incorrect ROCKNIX source revision")
     p = repo / "projects/ROCKNIX/packages/linux/patches"
@@ -100,14 +101,23 @@ def apply_patches(repo, source, fix):
                         "sha256": hashlib.sha256(patch.read_bytes()).hexdigest()})
     dts = repo / "projects/ROCKNIX/devices/SM8250/linux/dts"
     shutil.copytree(dts, source / "arch/arm64/boot/dts", dirs_exist_ok=True)
-    minimal_dts = Path(__file__).resolve().parent / "sm8250-retroidpocket-rp5-minsleep4.dts"
-    require(minimal_dts.is_file(), "Missing matched minimal RP5 DTS")
-    shutil.copyfile(minimal_dts, source / "arch/arm64/boot/dts/qcom" / minimal_dts.name)
+    custom_names = {
+        "minimal-sleep": "sm8250-retroidpocket-rp5-minsleep4",
+        "cpu-icc-off": "sm8250-retroidpocket-rp5-cpu-icc-off",
+    }
+    custom_name = custom_names.get(profile)
+    if custom_name:
+        custom_dts = Path(__file__).resolve().parent / f"{custom_name}.dts"
+        require(custom_dts.is_file(), f"Missing {profile} RP5 DTS")
+        shutil.copyfile(custom_dts, source / "arch/arm64/boot/dts/qcom" / custom_dts.name)
     # Match the board used by the saved device baseline. This release predates
     # the separate Visionox DTS found in newer ROCKNIX revisions.
     makefile = source / "arch/arm64/boot/dts/qcom/Makefile"
     contents = makefile.read_text()
-    for name in ("sm8250-retroidpocket-rp5", "sm8250-retroidpocket-rp5-minsleep4"):
+    names = ["sm8250-retroidpocket-rp5"]
+    if custom_name:
+        names.append(custom_name)
+    for name in names:
         require((source / f"arch/arm64/boot/dts/qcom/{name}.dts").is_file(), f"Missing {name} DTS")
         if f"{name}.dtb" not in contents:
             contents += f"\ndtb-$(CONFIG_ARCH_QCOM) += {name}.dtb\n"
@@ -120,15 +130,31 @@ def main():
     archive, work, source, repo, out = (Path(p).resolve() for p in sys.argv[1:])
     out.mkdir(parents=True, exist_ok=True)
     initramfs_sha = extract_stock(archive, work)
-    records = apply_patches(repo, source, Path(__file__).resolve().parent.parent / "ufs-lane-clocks.patch")
+    profile = os.environ.get("ROCKNIX_PROFILE", "diagnostic")
+    require(profile in ("diagnostic", "minimal-sleep", "cpu-icc-off"),
+            f"Unsupported ROCKNIX_PROFILE: {profile}")
+    records = apply_patches(
+        repo, source,
+        Path(__file__).resolve().parent.parent / "ufs-lane-clocks.patch",
+        profile,
+    )
+    dt_only = profile == "cpu-icc-off"
     (out / "provenance.json").write_text(json.dumps({
         "rocknix_revision": REVISION, "stock_kernel_sha256": STOCK_KERNEL_SHA,
         "initramfs_sha256": initramfs_sha, "patches": records,
         "fix_commit": "f07317a8d57f382ec505597816271dd72ffa20c7",
         "display_fix": "Initialize DPU CRTC state before ROCKNIX resource-cleanup writes num_mixers",
         "baseline": "ROCKNIX 20260901 / Linux 7.2.0",
-        "build": "Native GitHub ARM runner, distro compiler; all modules rebuilt",
-        "deployment": "Not installed; matching modules must be integrated with SYSTEM before boot"
+        "build": (
+            "Native GitHub ARM runner; Device Tree only, stock kernel retained"
+            if dt_only else
+            "Native GitHub ARM runner, distro compiler; all modules rebuilt"
+        ),
+        "deployment": (
+            "Not installed; intended only for the exact verified stock RP5 kernel"
+            if dt_only else
+            "Not installed; matching modules must be integrated with SYSTEM before boot"
+        )
     }, indent=2) + "\n")
 
 

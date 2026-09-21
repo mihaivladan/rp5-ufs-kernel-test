@@ -16,6 +16,12 @@ minimal-sleep)
     artifact_name="rocknix-${expected_release}.tar.zst"
     dtb_name='sm8250-retroidpocket-rp5-minsleep4'
     ;;
+cpu-icc-off)
+    config_fragment="${kit}/rocknix/cpu-icc-off.config"
+    expected_release='7.2.0'
+    artifact_name='unused-device-tree-only.tar.zst'
+    dtb_name='sm8250-retroidpocket-rp5-cpu-icc-off'
+    ;;
 *)
     echo "Unknown ROCKNIX_PROFILE: ${profile}" >&2
     exit 2
@@ -109,6 +115,18 @@ make "${make_args[@]}" -j"$(nproc)" DTC_FLAGS=-@ "qcom/${dtb_name}.dtb"
 if [[ "${profile}" == minimal-sleep ]]; then
     python3 "${kit}/rocknix/verify-minimal-dtb.py" \
         "arch/arm64/boot/dts/qcom/${dtb_name}.dtb" | tee "${out}/minimal-dtb-verification.txt"
+elif [[ "${profile}" == cpu-icc-off ]]; then
+    make "${make_args[@]}" -j"$(nproc)" DTC_FLAGS=-@ qcom/sm8250-retroidpocket-rp5.dtb
+    python3 "${kit}/rocknix/verify-cpu-icc-off-dtb.py" \
+        arch/arm64/boot/dts/qcom/sm8250-retroidpocket-rp5.dtb \
+        "arch/arm64/boot/dts/qcom/${dtb_name}.dtb" | tee "${out}/cpu-icc-off-dtb-verification.txt"
+    cp "arch/arm64/boot/dts/qcom/${dtb_name}.dtb" "${out}/"
+    cd "${out}"
+    sha256sum "${dtb_name}.dtb" > CPU-ICC-OFF-SHA256SUMS
+    printf '%s\n' \
+        'Full RP5 DTB semantic comparison passed. Stock kernel retained; not installed or boot-tested.' \
+        > BUILD-SUCCESS.txt
+    cd "${source_dir}"
 fi
 if [[ "${1:-all}" == prepare ]]; then
     printf 'RK_WORK_DIR=%s\n' "${work}" >> "${GITHUB_ENV:?}"

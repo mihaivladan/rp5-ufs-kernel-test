@@ -1,0 +1,112 @@
+// SPDX-License-Identifier: BSD-3-Clause
+/*
+ * Full RP5 one-variable sleep discriminator.
+ *
+ * Keep the complete stock RP5 hardware description. Remove only the CPU
+ * DDR/L3 interconnect paths and their OPP bandwidth values that distinguished
+ * the successful minsleep4 baseline from minsleep3.
+ */
+
+#include "sm8250-retroidpocket-rp5.dts"
+
+/*
+ * Final retained Linux ICC consumer discriminator. Keep the CPU OPP tables and
+ * EPSS frequency domains, but remove both CPU interconnect paths and every OPP
+ * bandwidth value so qcom-cpufreq-hw cannot create a CPU DDR/L3 ICC request.
+ */
+&cpu0 {
+	/delete-property/ interconnects;
+	/delete-property/ interconnect-names;
+};
+
+&cpu1 {
+	/delete-property/ interconnects;
+	/delete-property/ interconnect-names;
+};
+
+&cpu2 {
+	/delete-property/ interconnects;
+	/delete-property/ interconnect-names;
+};
+
+&cpu3 {
+	/delete-property/ interconnects;
+	/delete-property/ interconnect-names;
+};
+
+&cpu4 {
+	/delete-property/ interconnects;
+	/delete-property/ interconnect-names;
+};
+
+&cpu5 {
+	/delete-property/ interconnects;
+	/delete-property/ interconnect-names;
+};
+
+&cpu6 {
+	/delete-property/ interconnects;
+	/delete-property/ interconnect-names;
+};
+
+&cpu7 {
+	/delete-property/ interconnects;
+	/delete-property/ interconnect-names;
+};
+
+&cpu0_opp1 { /delete-property/ opp-peak-kBps; };
+&cpu0_opp2 { /delete-property/ opp-peak-kBps; };
+&cpu0_opp3 { /delete-property/ opp-peak-kBps; };
+&cpu0_opp4 { /delete-property/ opp-peak-kBps; };
+&cpu0_opp5 { /delete-property/ opp-peak-kBps; };
+&cpu0_opp6 { /delete-property/ opp-peak-kBps; };
+&cpu0_opp7 { /delete-property/ opp-peak-kBps; };
+&cpu0_opp8 { /delete-property/ opp-peak-kBps; };
+&cpu0_opp9 { /delete-property/ opp-peak-kBps; };
+&cpu0_opp10 { /delete-property/ opp-peak-kBps; };
+&cpu0_opp11 { /delete-property/ opp-peak-kBps; };
+&cpu0_opp12 { /delete-property/ opp-peak-kBps; };
+&cpu0_opp13 { /delete-property/ opp-peak-kBps; };
+&cpu0_opp14 { /delete-property/ opp-peak-kBps; };
+&cpu0_opp15 { /delete-property/ opp-peak-kBps; };
+&cpu0_opp16 { /delete-property/ opp-peak-kBps; };
+&cpu0_opp17 { /delete-property/ opp-peak-kBps; };
+&cpu4_opp1 { /delete-property/ opp-peak-kBps; };
+&cpu4_opp2 { /delete-property/ opp-peak-kBps; };
+&cpu4_opp3 { /delete-property/ opp-peak-kBps; };
+&cpu4_opp4 { /delete-property/ opp-peak-kBps; };
+&cpu4_opp5 { /delete-property/ opp-peak-kBps; };
+&cpu4_opp6 { /delete-property/ opp-peak-kBps; };
+&cpu4_opp7 { /delete-property/ opp-peak-kBps; };
+&cpu4_opp8 { /delete-property/ opp-peak-kBps; };
+&cpu4_opp9 { /delete-property/ opp-peak-kBps; };
+&cpu4_opp10 { /delete-property/ opp-peak-kBps; };
+&cpu4_opp11 { /delete-property/ opp-peak-kBps; };
+&cpu4_opp12 { /delete-property/ opp-peak-kBps; };
+&cpu4_opp13 { /delete-property/ opp-peak-kBps; };
+&cpu4_opp14 { /delete-property/ opp-peak-kBps; };
+&cpu4_opp15 { /delete-property/ opp-peak-kBps; };
+&cpu4_opp16 { /delete-property/ opp-peak-kBps; };
+&cpu4_opp17 { /delete-property/ opp-peak-kBps; };
+&cpu4_opp18 { /delete-property/ opp-peak-kBps; };
+&cpu7_opp1 { /delete-property/ opp-peak-kBps; };
+&cpu7_opp2 { /delete-property/ opp-peak-kBps; };
+&cpu7_opp3 { /delete-property/ opp-peak-kBps; };
+&cpu7_opp4 { /delete-property/ opp-peak-kBps; };
+&cpu7_opp5 { /delete-property/ opp-peak-kBps; };
+&cpu7_opp6 { /delete-property/ opp-peak-kBps; };
+&cpu7_opp7 { /delete-property/ opp-peak-kBps; };
+&cpu7_opp8 { /delete-property/ opp-peak-kBps; };
+&cpu7_opp9 { /delete-property/ opp-peak-kBps; };
+&cpu7_opp10 { /delete-property/ opp-peak-kBps; };
+&cpu7_opp11 { /delete-property/ opp-peak-kBps; };
+&cpu7_opp12 { /delete-property/ opp-peak-kBps; };
+&cpu7_opp13 { /delete-property/ opp-peak-kBps; };
+&cpu7_opp14 { /delete-property/ opp-peak-kBps; };
+&cpu7_opp15 { /delete-property/ opp-peak-kBps; };
+&cpu7_opp16 { /delete-property/ opp-peak-kBps; };
+&cpu7_opp17 { /delete-property/ opp-peak-kBps; };
+&cpu7_opp18 { /delete-property/ opp-peak-kBps; };
+&cpu7_opp19 { /delete-property/ opp-peak-kBps; };
+&cpu7_opp20 { /delete-property/ opp-peak-kBps; };
+&cpu7_opp21 { /delete-property/ opp-peak-kBps; };
