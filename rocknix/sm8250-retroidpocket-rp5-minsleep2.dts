@@ -1,0 +1,103 @@
+// SPDX-License-Identifier: BSD-3-Clause
+/*
+ * RP5 minimal-sleep discriminator.
+ *
+ * The base board DTS enables the complete handheld.  The minsleep2 kernel
+ * deliberately omits the drivers below, so the matching tree must disable
+ * their consumers as well.  Leaving enabled consumers without drivers keeps
+ * GCC, interconnect and RPMh power-domain suppliers in sync_state pending.
+ */
+
+#include "sm8250-retroidpocket-rp5.dts"
+
+/ {
+	chosen {
+		/delete-property/ stdout-path;
+	};
+};
+
+/* Display and its boot framebuffer. */
+&framebuffer { status = "disabled"; };
+&mdss { status = "disabled"; };
+&mdss_dp { status = "disabled"; };
+&mdss_dsi0 { status = "disabled"; };
+&mdss_dsi0_phy { status = "disabled"; };
+&dispcc { status = "disabled"; };
+
+/* GPU, GMU and the GPU-local suppliers. */
+&gpu { status = "disabled"; };
+&gmu { status = "disabled"; };
+&gpucc { status = "disabled"; };
+&adreno_smmu { status = "disabled"; };
+
+/* Camera/video blocks and clocks omitted from the kernel. */
+&venus { status = "disabled"; };
+&videocc { status = "disabled"; };
+&camcc { status = "disabled"; };
+
+/* PCIe/Wi-Fi/Bluetooth. */
+&pcie0 { status = "disabled"; };
+&pcie0_phy { status = "disabled"; };
+&uart6 { status = "disabled"; };
+&{/qca6390-pmu} { status = "disabled"; };
+
+/* Internal UFS is not the SD boot path used by this experiment. */
+&ufs_mem_hc { status = "disabled"; };
+&ufs_mem_phy { status = "disabled"; };
+
+/* USB and Type-C data/role blocks.  Charging is not used during the proof. */
+&usb_1 { status = "disabled"; };
+&usb_1_dwc3 { status = "disabled"; };
+&usb_1_hsphy { status = "disabled"; };
+&usb_1_qmpphy { status = "disabled"; };
+&pm8150b_typec { status = "disabled"; };
+&pm8150b_vbus { status = "disabled"; };
+&i2c15 { status = "disabled"; };
+
+/* QCE and the two bandwidth monitors were compiled out. */
+&crypto { status = "disabled"; };
+&{/soc@0/pmu@9091000} { status = "disabled"; };
+&{/soc@0/pmu@90b6400} { status = "disabled"; };
+
+/* DSP remote processors, RPMsg clients and audio endpoints. */
+&adsp { status = "disabled"; };
+&cdsp { status = "disabled"; };
+&slpi { status = "disabled"; };
+&sound { status = "disabled"; };
+&wcd938x { status = "disabled"; };
+&rxmacro { status = "disabled"; };
+&txmacro { status = "disabled"; };
+&wsamacro { status = "disabled"; };
+&swr0 { status = "disabled"; };
+&swr1 { status = "disabled"; };
+&swr2 { status = "disabled"; };
+
+/* All GENI users are absent; disable both the children and their providers. */
+&i2c3 { status = "disabled"; };
+&i2c5 { status = "disabled"; };
+&i2c13 { status = "disabled"; };
+&uart12 { status = "disabled"; };
+&uart16 { status = "disabled"; };
+&qupv3_id_0 { status = "disabled"; };
+&qupv3_id_1 { status = "disabled"; };
+&qupv3_id_2 { status = "disabled"; };
+
+/* LEDs, fan, haptics and their dedicated fixed rails. */
+&fan { status = "disabled"; };
+&pm8150b_haptics { status = "disabled"; };
+&pm8150l_lpg { status = "disabled"; };
+&{/multi-ledr1} { status = "disabled"; };
+&{/multi-ledl1} { status = "disabled"; };
+&{/multi-ledr2} { status = "disabled"; };
+&{/multi-ledl2} { status = "disabled"; };
+&{/multi-ledr3} { status = "disabled"; };
+&{/multi-ledl3} { status = "disabled"; };
+&{/multi-ledr4} { status = "disabled"; };
+&{/multi-ledl4} { status = "disabled"; };
+&vbat { status = "disabled"; };
+&vdc_3v3 { status = "disabled"; };
+&vdc_5v { status = "disabled"; };
+&vdda_panel { status = "disabled"; };
+&vreg_s4a_1p8 { status = "disabled"; };
+&vreg_fan_pwr { status = "disabled"; };
+&vreg_mcu_3v3 { status = "disabled"; };

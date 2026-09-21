@@ -100,11 +100,14 @@ def apply_patches(repo, source, fix):
                         "sha256": hashlib.sha256(patch.read_bytes()).hexdigest()})
     dts = repo / "projects/ROCKNIX/devices/SM8250/linux/dts"
     shutil.copytree(dts, source / "arch/arm64/boot/dts", dirs_exist_ok=True)
+    minimal_dts = Path(__file__).resolve().parent / "sm8250-retroidpocket-rp5-minsleep2.dts"
+    require(minimal_dts.is_file(), "Missing matched minimal RP5 DTS")
+    shutil.copyfile(minimal_dts, source / "arch/arm64/boot/dts/qcom" / minimal_dts.name)
     # Match the board used by the saved device baseline. This release predates
     # the separate Visionox DTS found in newer ROCKNIX revisions.
     makefile = source / "arch/arm64/boot/dts/qcom/Makefile"
     contents = makefile.read_text()
-    for name in ("sm8250-retroidpocket-rp5",):
+    for name in ("sm8250-retroidpocket-rp5", "sm8250-retroidpocket-rp5-minsleep2"):
         require((source / f"arch/arm64/boot/dts/qcom/{name}.dts").is_file(), f"Missing {name} DTS")
         if f"{name}.dtb" not in contents:
             contents += f"\ndtb-$(CONFIG_ARCH_QCOM) += {name}.dtb\n"

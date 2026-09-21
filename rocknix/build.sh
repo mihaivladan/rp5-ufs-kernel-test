@@ -12,14 +12,16 @@ diagnostic)
     ;;
 minimal-sleep)
     config_fragment="${kit}/rocknix/minimal-sleep.config"
-    expected_release='7.2.0-consoleos-minsleep1'
+    expected_release='7.2.0-consoleos-minsleep2'
     artifact_name="rocknix-${expected_release}.tar.zst"
+    dtb_name='sm8250-retroidpocket-rp5-minsleep2'
     ;;
 *)
     echo "Unknown ROCKNIX_PROFILE: ${profile}" >&2
     exit 2
     ;;
 esac
+: "${dtb_name:=sm8250-retroidpocket-rp5}"
 export ARCH=arm64
 make_args=(ARCH=arm64 CC=gcc-14 HOSTCC=gcc-14 HOSTCXX=g++-14)
 export KBUILD_BUILD_USER=consoleos KBUILD_BUILD_HOST=github-arm
@@ -103,7 +105,11 @@ cp .config "${out}/kernel.config"
 make "${make_args[@]}" -j"$(nproc)" prepare
 release=$(make "${make_args[@]}" -s kernelrelease)
 test "${release}" = "${expected_release}"
-make "${make_args[@]}" -j"$(nproc)" DTC_FLAGS=-@ qcom/sm8250-retroidpocket-rp5.dtb
+make "${make_args[@]}" -j"$(nproc)" DTC_FLAGS=-@ "qcom/${dtb_name}.dtb"
+if [[ "${profile}" == minimal-sleep ]]; then
+    python3 "${kit}/rocknix/verify-minimal-dtb.py" \
+        "arch/arm64/boot/dts/qcom/${dtb_name}.dtb" | tee "${out}/minimal-dtb-verification.txt"
+fi
 if [[ "${1:-all}" == prepare ]]; then
     printf 'RK_WORK_DIR=%s\n' "${work}" >> "${GITHUB_ENV:?}"
     echo 'Preparation passed: patches, diagnostics, kernel release and the installed RP5 board DTB.'
@@ -124,7 +130,7 @@ make "${make_args[@]}" -j"$(nproc)" Image modules
 stage="${work}/stage"
 mkdir -p "${stage}/boot" "${stage}/lib/modules"
 cp arch/arm64/boot/Image "${stage}/boot/KERNEL"
-cp arch/arm64/boot/dts/qcom/sm8250-retroidpocket-rp5*.dtb "${stage}/boot/"
+cp "arch/arm64/boot/dts/qcom/${dtb_name}.dtb" "${stage}/boot/"
 make "${make_args[@]}" INSTALL_MOD_PATH="${stage}" INSTALL_MOD_STRIP=1 modules_install
 rm -f "${stage}/lib/modules/${release}/build" "${stage}/lib/modules/${release}/source"
 depmod -b "${stage}" "${release}"
