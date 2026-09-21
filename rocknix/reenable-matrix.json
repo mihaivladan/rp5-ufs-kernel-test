@@ -32,6 +32,22 @@
       ]
     },
     {
+      "id": "display-gpu",
+      "description": "Integration candidate combining the passing internal display and GPU slices so DRM binds Adreno and loads GMU firmware",
+      "nodes": [
+        "framebuffer",
+        "mdss",
+        "mdss_dsi0",
+        "mdss_dsi0_phy",
+        "dispcc",
+        "vdda_panel",
+        "gpu",
+        "gmu",
+        "gpucc",
+        "adreno_smmu"
+      ]
+    },
+    {
       "id": "gamepad",
       "description": "Retroid gamepad UART, its QUP provider and MCU rail",
       "nodes": [

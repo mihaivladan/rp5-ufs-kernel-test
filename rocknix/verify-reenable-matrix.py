@@ -93,7 +93,7 @@ def main() -> int:
     baseline_path = Path(sys.argv[1])
     manifest = json.loads(Path(sys.argv[2]).read_text())
     candidate_dir = Path(sys.argv[3])
-    if manifest.get("schema") != 1 or len(manifest.get("candidates", [])) != 11:
+    if manifest.get("schema") != 1 or len(manifest.get("candidates", [])) != 12:
         raise SystemExit("Unexpected matrix manifest")
     baseline_nodes, baseline = parse_fdt(baseline_path)
     verify_cpu_invariants(baseline_nodes, baseline, "baseline")
@@ -141,7 +141,7 @@ def main() -> int:
     print("Verified fixed CPU invariant: 8 ICC paths absent; 56 OPP bandwidth values absent")
     for ident, count in verified:
         print(f"Verified {ident}: exactly {count} disabled-to-okay status changes")
-    print(f"Verified {len(verified)} independent subsystem candidates")
+    print("Verified 11 independent subsystem candidates plus 1 integration candidate")
     return 0
 
 
