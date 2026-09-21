@@ -1,0 +1,44 @@
+name: RP5 AOP DDR diagnostic module
+on:
+  push:
+    branches: [codex/rp5-aop-ddr-diag]
+    paths: ['aop-diag/**', '.github/workflows/aop-diag.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  module:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: ROCKNIX/distribution
+          ref: 1ebff24f36501fb6493beb2bf83bf2604536d9aa
+          path: upstream-rocknix
+          persist-credentials: false
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            /projects/ROCKNIX/packages/linux/
+            /projects/ROCKNIX/devices/SM8250/linux/
+            /projects/ROCKNIX/devices/SM8250/patches/linux/
+            /projects/ROCKNIX/patches/linux/
+      - name: Install native build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-14 make bc bison flex libssl-dev libelf-dev kmod
+      - name: Build module for stock 7.2.0
+        run: |
+          set -euo pipefail
+          bash aop-diag/build.sh 2>&1 | tee aop-build.log
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: always()
+        with:
+          name: rp5-aop-ddr-diag
+          retention-days: 7
+          path: |
+            aop-out/
+            aop-build.log
