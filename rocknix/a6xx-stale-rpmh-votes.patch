@@ -1,0 +1,38 @@
+From d9108bfdb746 Mon Sep 17 00:00:00 2001
+From: Shivam Rawat <shivrawa@qti.qualcomm.com>
+Subject: [PATCH] drm/msm/a6xx: Fix stale rpmh votes after suspend
+
+The Linux 7.2 implementation clears GMU_STATUS_FW_START and returns from
+a6xx_rpmh_stop(), which skips the GPU RSCC power-off sequence and leaves
+stale BCM votes.  This is the upstream fix carried by Linux 7.3 and stable
+updates: run the stop sequence when firmware was started, and hold the GMU
+CM3 in reset before asking RSCC to power down.
+
+Upstream commit: d9108bfdb746
+Fixes: f248d5d5159a ("drm/msm/a6xx: Fix PDC sleep sequence")
+---
+ drivers/gpu/drm/msm/adreno/a6xx_gmu.c | 5 ++++-
+ 1 file changed, 4 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/gpu/drm/msm/adreno/a6xx_gmu.c b/drivers/gpu/drm/msm/adreno/a6xx_gmu.c
+--- a/drivers/gpu/drm/msm/adreno/a6xx_gmu.c
++++ b/drivers/gpu/drm/msm/adreno/a6xx_gmu.c
+@@ -642,7 +642,7 @@ static void a6xx_rpmh_stop(struct a6xx_gmu *gmu)
+ 	int ret;
+ 	u32 val;
+ 
+-	if (test_and_clear_bit(GMU_STATUS_FW_START, &gmu->status))
++	if (!test_and_clear_bit(GMU_STATUS_FW_START, &gmu->status))
+ 		return;
+ 
+ 	if (adreno_is_a840(adreno_gpu))
+@@ -1465,6 +1465,9 @@ static void a6xx_gmu_shutdown(struct a6xx_gmu *gmu)
+ 	/* Stop the interrupts and mask the hardware */
+ 	a6xx_gmu_irq_disable(gmu);
+ 
++	/* Halt the gmu cm3 core */
++	gmu_write(gmu, REG_A6XX_GMU_CM3_SYSRESET, 1);
++
+ 	/* Tell RPMh to power off the GPU */
+ 	a6xx_rpmh_stop(gmu);
+ 

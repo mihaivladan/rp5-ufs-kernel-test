@@ -10,6 +10,11 @@ diagnostic)
     expected_release='7.2.0-consoleos-diag-ufs2'
     artifact_name="rocknix-${expected_release}.tar.zst"
     ;;
+gpu-rpmh-fix)
+    config_fragment="${kit}/rocknix/gpu-rpmh-fix.config"
+    expected_release='7.2.0-consoleos-gpu-rpmh1'
+    artifact_name="rocknix-${expected_release}.tar.zst"
+    ;;
 minimal-sleep)
     config_fragment="${kit}/rocknix/minimal-sleep.config"
     expected_release='7.2.0-consoleos-minsleep4'
@@ -238,7 +243,7 @@ source_dir="${work}/linux-7.2"
 cd "${source_dir}"
 release=$(make "${make_args[@]}" -s kernelrelease)
 test "${release}" = "${expected_release}"
-if [[ "${profile}" == diagnostic ]]; then
+if [[ "${profile}" == diagnostic || "${profile}" == gpu-rpmh-fix ]]; then
     # The previous build exposed an uninitialized cstate pointer in this file.
     printf '\nCFLAGS_dpu_crtc.o += -Werror=uninitialized -Werror=maybe-uninitialized\n' >> drivers/gpu/drm/msm/disp/dpu1/Makefile
 fi
@@ -252,7 +257,10 @@ rm -f "${stage}/lib/modules/${release}/build" "${stage}/lib/modules/${release}/s
 depmod -b "${stage}" "${release}"
 cp System.map Module.symvers "${out}/"
 cp drivers/ufs/host/ufs-qcom.c drivers/ufs/host/ufs-qcom.h "${out}/"
-if [[ "${profile}" == diagnostic ]]; then
+if [[ "${profile}" == gpu-rpmh-fix ]]; then
+    cp drivers/gpu/drm/msm/adreno/a6xx_gmu.c "${out}/"
+fi
+if [[ "${profile}" == diagnostic || "${profile}" == gpu-rpmh-fix ]]; then
     objcopy --dump-section .BTF="${out}/vmlinux.btf" vmlinux
     cp drivers/gpu/drm/msm/disp/dpu1/dpu_crtc.c drivers/gpu/drm/msm/disp/dpu1/dpu_crtc.o "${out}/"
     objdump -drS drivers/gpu/drm/msm/disp/dpu1/dpu_crtc.o > "${out}/dpu_crtc-disassembly.txt"
@@ -261,7 +269,7 @@ elif [[ "${profile}" == gmu-clock-reset ]]; then
 fi
 test -s "${stage}/boot/KERNEL"
 test -s "${stage}/lib/modules/${release}/modules.dep"
-if [[ "${profile}" == diagnostic ]]; then
+if [[ "${profile}" == diagnostic || "${profile}" == gpu-rpmh-fix ]]; then
     test -s "${out}/vmlinux.btf"
 fi
 tar -C "${stage}" -cf - boot lib | zstd -T0 -10 -o "${out}/${artifact_name}"

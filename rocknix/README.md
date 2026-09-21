@@ -15,6 +15,22 @@ The output is a distinct `7.2.0-consoleos-diag-ufs1` package with a raw ARM64 Im
 **Do not copy the new kernel alone over the SD's KERNEL.** ROCKNIX's stock initramfs checks that SYSTEM contains the running kernel's modules. Deployment must first integrate the matching module tree into a separate SYSTEM/test boot setup and preserve the original KERNEL, SYSTEM and boot configuration. This packaging and on-device validation remain separate steps. The existing stock backup is retained locally and is not published here.
 
 The extra diagnostics do not provide electrical power measurements for every component, and the UFS fix is not yet proven to meet the RP5 standby target. First verify boot/storage/audio, then clock-reference balance and suspend residency, then battery drain.
+
+## GPU stale RPMh vote fix
+
+The `gpu-rpmh-fix` profile applies upstream commit `d9108bfdb746`,
+`drm/msm/a6xx: Fix stale rpmh votes after suspend`, to the exact ROCKNIX
+Linux 7.2 source. Linux 7.2 has an inverted `GMU_STATUS_FW_START` condition in
+`a6xx_rpmh_stop()`: after GMU firmware starts, the first shutdown clears the
+flag and returns before requesting GPU RSCC power collapse. The upstream fix
+runs the RSCC stop sequence when firmware was started and places the GMU CM3
+in reset before the power-off request.
+
+Run **ROCKNIX RP5 GPU stale RPMh vote fix**. The output release is
+`7.2.0-consoleos-gpu-rpmh1` and includes the same diagnostics and BTF as the
+working diagnostic kernel. Device deployment remains a one-shot test with the
+matching module image and preserved stock recovery.
+
 # RP5 subsystem re-enable matrix
 
 The `reenable-matrix` profile builds eleven independent Device Tree candidates

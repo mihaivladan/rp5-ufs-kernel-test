@@ -1,0 +1,52 @@
+name: ROCKNIX RP5 GPU stale RPMh vote fix
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  kernel:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 150
+    env:
+      ROCKNIX_PROFILE: gpu-rpmh-fix
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Fetch exact ROCKNIX release recipe
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: ROCKNIX/distribution
+          ref: 1ebff24f36501fb6493beb2bf83bf2604536d9aa
+          path: upstream-rocknix
+          persist-credentials: false
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            /projects/ROCKNIX/packages/linux/
+            /projects/ROCKNIX/devices/SM8250/linux/
+            /projects/ROCKNIX/devices/SM8250/patches/linux/
+            /projects/ROCKNIX/patches/linux/
+      - name: Install native build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential gcc-14 g++-14 bc bison flex libssl-dev libelf-dev dwarves zstd xz-utils cpio kmod rsync squashfs-tools
+          df -h /
+      - name: Validate sources and apply upstream stale-vote fix
+        run: |
+          set -euo pipefail
+          bash rocknix/build.sh prepare 2>&1 | tee rocknix-build.log
+      - name: Compile kernel and modules
+        run: |
+          set -euo pipefail
+          bash rocknix/build.sh compile 2>&1 | tee -a rocknix-build.log
+      - name: Upload results and logs
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: rocknix-rp5-gpu-rpmh-fix
+          retention-days: 7
+          compression-level: 0
+          if-no-files-found: error
+          path: |
+            rocknix-out/
+            rocknix-build.log
