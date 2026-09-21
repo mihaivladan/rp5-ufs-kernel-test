@@ -67,7 +67,17 @@ import sys
 actual = set(Path('.config').read_text().splitlines())
 requested = [line for line in Path(sys.argv[1]).read_text().splitlines()
              if line.startswith('CONFIG_') or line.startswith('# CONFIG_')]
-missing = [line for line in requested if line not in actual]
+enabled = {line.split('=', 1)[0] for line in actual if line.startswith('CONFIG_')}
+missing = []
+for line in requested:
+    if line.startswith('# CONFIG_') and line.endswith(' is not set'):
+        symbol = line[2:-11]
+        # Kconfig may omit an unset child symbol entirely when its parent is off.
+        # Both forms mean that the feature cannot be built.
+        if symbol in enabled:
+            missing.append(line)
+    elif line not in actual:
+        missing.append(line)
 if missing:
     raise SystemExit('Requested settings did not resolve: ' + ', '.join(missing))
 # In Linux 7.2, genpd diagnostics are guarded directly by CONFIG_DEBUG_FS.
