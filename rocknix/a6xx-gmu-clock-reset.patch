@@ -1,0 +1,16 @@
+--- a/drivers/gpu/drm/msm/adreno/a6xx_gmu.c
++++ b/drivers/gpu/drm/msm/adreno/a6xx_gmu.c
+@@ -1503,6 +1503,13 @@ int a6xx_gmu_stop(struct a6xx_gpu *a6xx_gpu)
+ 
+ 	clk_bulk_disable_unprepare(gmu->nr_clocks, gmu->clocks);
+ 
++	/*
++	 * Diagnostic: return the disabled GMU core clock to its passive XO rate.
++	 * The RP5 otherwise retains the 200 MHz runtime-resume programming after
++	 * every clock is disabled and both GPU power domains report off.
++	 */
++	WARN_ON_ONCE(clk_set_rate(gmu->core_clk, 19200000));
++
+ 	pm_runtime_put_sync(gmu->dev);
+ 
+ 	return 0;

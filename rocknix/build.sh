@@ -16,6 +16,11 @@ minimal-sleep)
     artifact_name="rocknix-${expected_release}.tar.zst"
     dtb_name='sm8250-retroidpocket-rp5-minsleep4'
     ;;
+gmu-clock-reset)
+    config_fragment="${kit}/rocknix/gmu-clock-reset.config"
+    expected_release='7.2.0-consoleos-gmuclk1'
+    artifact_name="rocknix-${expected_release}.tar.zst"
+    ;;
 cpu-icc-off)
     config_fragment="${kit}/rocknix/cpu-icc-off.config"
     expected_release='7.2.0'
@@ -117,6 +122,17 @@ if sys.argv[2] == 'minimal-sleep':
     absent = sorted(required - actual)
     if absent:
         raise SystemExit('Minimal boot requirements missing: ' + ', '.join(absent))
+elif sys.argv[2] == 'gmu-clock-reset':
+    gmu = Path('drivers/gpu/drm/msm/adreno/a6xx_gmu.c').read_text()
+    marker = 'WARN_ON_ONCE(clk_set_rate(gmu->core_clk, 19200000));'
+    if gmu.count(marker) != 1:
+        raise SystemExit('Exact GMU clock-reset marker missing or duplicated')
+    stop = gmu.index('int a6xx_gmu_stop(')
+    disable = gmu.index('clk_bulk_disable_unprepare(gmu->nr_clocks, gmu->clocks);', stop)
+    reset = gmu.index(marker, disable)
+    power_put = gmu.index('pm_runtime_put_sync(gmu->dev);', reset)
+    if not stop < disable < reset < power_put:
+        raise SystemExit('GMU clock reset is outside the guarded suspend window')
 print(f'All {sys.argv[2]} settings verified.')
 PY
 cp .config "${out}/kernel.config"
@@ -240,6 +256,8 @@ if [[ "${profile}" == diagnostic ]]; then
     objcopy --dump-section .BTF="${out}/vmlinux.btf" vmlinux
     cp drivers/gpu/drm/msm/disp/dpu1/dpu_crtc.c drivers/gpu/drm/msm/disp/dpu1/dpu_crtc.o "${out}/"
     objdump -drS drivers/gpu/drm/msm/disp/dpu1/dpu_crtc.o > "${out}/dpu_crtc-disassembly.txt"
+elif [[ "${profile}" == gmu-clock-reset ]]; then
+    cp drivers/gpu/drm/msm/adreno/a6xx_gmu.c "${out}/a6xx_gmu.c"
 fi
 test -s "${stage}/boot/KERNEL"
 test -s "${stage}/lib/modules/${release}/modules.dep"

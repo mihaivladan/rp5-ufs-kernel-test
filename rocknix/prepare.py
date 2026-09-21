@@ -89,15 +89,23 @@ def apply_patches(repo, source, fix, profile):
     require(hashlib.sha256(display_fix.read_bytes()).hexdigest() ==
             "e4ea3fd8ff2f5f036544abaacace08f7eb0d9e85a67ca150104dfd4f0dd41072",
             "DPU initialization fix checksum mismatch")
-    for patch in patches + [fix, display_fix]:
+    extra_patches = []
+    if profile == "gmu-clock-reset":
+        gmu_reset = Path(__file__).resolve().parent / "a6xx-gmu-clock-reset.patch"
+        require(gmu_reset.is_file(), "Missing GMU clock-reset patch")
+        require(hashlib.sha256(gmu_reset.read_bytes()).hexdigest() ==
+                "91e28ba23946dae574a2fc86e534f143c598a4ac044540e7bdfd38ab20f0d588",
+                "GMU clock-reset patch checksum mismatch")
+        extra_patches.append(gmu_reset)
+    for patch in patches + [fix, display_fix, *extra_patches]:
         print(f"Applying {patch.name}", flush=True)
         payload = patch.read_text().replace("@TARGET_CPU@", "cortex-a76.cortex-a55").replace("@DEVICE@", "SM8250")
         # Preserve upstream's patch behavior; never skip a failed patch.
         args = ["patch", "-p1", "--batch", "--forward"]
-        if patch == display_fix:
+        if patch in (display_fix, *extra_patches):
             args.append("--fuzz=0")
         subprocess.run(args, input=payload, text=True, cwd=source, check=True)
-        records.append({"path": str(patch.relative_to(repo)) if patch in patches else fix.name,
+        records.append({"path": str(patch.relative_to(repo)) if patch in patches else patch.name,
                         "sha256": hashlib.sha256(patch.read_bytes()).hexdigest()})
     dts = repo / "projects/ROCKNIX/devices/SM8250/linux/dts"
     shutil.copytree(dts, source / "arch/arm64/boot/dts", dirs_exist_ok=True)
@@ -169,7 +177,7 @@ def main():
     profile = os.environ.get("ROCKNIX_PROFILE", "diagnostic")
     require(profile in (
         "diagnostic", "minimal-sleep", "cpu-icc-off", "stock-pruned",
-        "reenable-matrix",
+        "reenable-matrix", "gmu-clock-reset",
     ),
             f"Unsupported ROCKNIX_PROFILE: {profile}")
     records = apply_patches(
