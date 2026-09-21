@@ -1,5 +1,9 @@
 # RP5 UFS clock-fix kernel experiment
 
+The separate [ROCKNIX minimal sleep profile](rocknix/MINIMAL-SLEEP.md) builds a
+one-purpose native Linux kernel for a local SD suspend/resume proof with optional
+RP5 hardware compiled out. Its workflow is `ROCKNIX RP5 minimal sleep kernel`.
+
 This directory is a standalone, manually triggered GitHub Actions build kit. It builds only an Armada kernel package on an `ubuntu-24.04-arm` runner. It does not build ROCKNIX, publish a container image, connect to a device, or install anything.
 
 ## Source and change

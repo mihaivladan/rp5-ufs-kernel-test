@@ -3,6 +3,23 @@ set -euo pipefail
 kit=$(pwd)
 out="${kit}/rocknix-out"
 mkdir -p "${out}"
+profile="${ROCKNIX_PROFILE:-diagnostic}"
+case "${profile}" in
+diagnostic)
+    config_fragment="${kit}/rocknix/diagnostics.config"
+    expected_release='7.2.0-consoleos-diag-ufs2'
+    artifact_name="rocknix-${expected_release}.tar.zst"
+    ;;
+minimal-sleep)
+    config_fragment="${kit}/rocknix/minimal-sleep.config"
+    expected_release='7.2.0-consoleos-minsleep1'
+    artifact_name="rocknix-${expected_release}.tar.zst"
+    ;;
+*)
+    echo "Unknown ROCKNIX_PROFILE: ${profile}" >&2
+    exit 2
+    ;;
+esac
 export ARCH=arm64
 make_args=(ARCH=arm64 CC=gcc-14 HOSTCC=gcc-14 HOSTCXX=g++-14)
 export KBUILD_BUILD_USER=consoleos KBUILD_BUILD_HOST=github-arm
@@ -39,29 +56,43 @@ print('Reused stock firmware:', firmware)
 PY
 rm -rf "${work}/stock-root"
 rm "${work}/release.tar" "${work}/SYSTEM" "${work}/linux.tar.xz"
-bash scripts/kconfig/merge_config.sh -m .config "${kit}/rocknix/diagnostics.config"
+bash scripts/kconfig/merge_config.sh -m .config "${config_fragment}"
 scripts/config --set-str INITRAMFS_SOURCE "${work}/initramfs.cpio"
 scripts/config --set-str EXTRA_FIRMWARE_DIR "${source_dir}/external-firmware"
 make "${make_args[@]}" olddefconfig
 cp .config "${out}/kernel.config"
-python3 - "${kit}/rocknix/diagnostics.config" <<'PY'
+python3 - "${config_fragment}" "${profile}" <<'PY'
 from pathlib import Path
 import sys
 actual = set(Path('.config').read_text().splitlines())
-requested = [line for line in Path(sys.argv[1]).read_text().splitlines() if line]
+requested = [line for line in Path(sys.argv[1]).read_text().splitlines()
+             if line.startswith('CONFIG_') or line.startswith('# CONFIG_')]
 missing = [line for line in requested if line not in actual]
 if missing:
-    raise SystemExit('Diagnostic settings did not resolve: ' + ', '.join(missing))
+    raise SystemExit('Requested settings did not resolve: ' + ', '.join(missing))
 # In Linux 7.2, genpd diagnostics are guarded directly by CONFIG_DEBUG_FS.
 genpd = Path('drivers/pmdomain/core.c').read_text()
 if '#ifdef CONFIG_DEBUG_FS' not in genpd or '"pm_genpd_summary"' not in genpd:
     raise SystemExit('Expected Linux 7.2 power-domain debugfs implementation missing')
-print('All diagnostic settings verified.')
+if sys.argv[2] == 'minimal-sleep':
+    required = {
+        'CONFIG_ARM_PSCI_CPUIDLE=y', 'CONFIG_ARM_PSCI_CPUIDLE_DOMAIN=y',
+        'CONFIG_INPUT_PM8941_PWRKEY=y', 'CONFIG_MMC_SDHCI_MSM=y',
+        'CONFIG_QCOM_AOSS_QMP=y', 'CONFIG_QCOM_RPMH=y',
+        'CONFIG_QCOM_RPMHPD=y', 'CONFIG_QCOM_STATS=y',
+        'CONFIG_REGULATOR_QCOM_RPMH=y', 'CONFIG_QCOM_CLK_RPMH=y',
+        'CONFIG_INTERCONNECT_QCOM_SM8250=y', 'CONFIG_EXT4_FS=y',
+        'CONFIG_SQUASHFS=y', 'CONFIG_VFAT_FS=y',
+    }
+    absent = sorted(required - actual)
+    if absent:
+        raise SystemExit('Minimal boot requirements missing: ' + ', '.join(absent))
+print(f'All {sys.argv[2]} settings verified.')
 PY
 cp .config "${out}/kernel.config"
 make "${make_args[@]}" -j"$(nproc)" prepare
 release=$(make "${make_args[@]}" -s kernelrelease)
-test "${release}" = '7.2.0-consoleos-diag-ufs2'
+test "${release}" = "${expected_release}"
 make "${make_args[@]}" -j"$(nproc)" DTC_FLAGS=-@ qcom/sm8250-retroidpocket-rp5.dtb
 if [[ "${1:-all}" == prepare ]]; then
     printf 'RK_WORK_DIR=%s\n' "${work}" >> "${GITHUB_ENV:?}"
@@ -74,9 +105,11 @@ fi
 source_dir="${work}/linux-7.2"
 cd "${source_dir}"
 release=$(make "${make_args[@]}" -s kernelrelease)
-test "${release}" = '7.2.0-consoleos-diag-ufs2'
-# The previous build exposed an uninitialized cstate pointer in this file.
-printf '\nCFLAGS_dpu_crtc.o += -Werror=uninitialized -Werror=maybe-uninitialized\n' >> drivers/gpu/drm/msm/disp/dpu1/Makefile
+test "${release}" = "${expected_release}"
+if [[ "${profile}" == diagnostic ]]; then
+    # The previous build exposed an uninitialized cstate pointer in this file.
+    printf '\nCFLAGS_dpu_crtc.o += -Werror=uninitialized -Werror=maybe-uninitialized\n' >> drivers/gpu/drm/msm/disp/dpu1/Makefile
+fi
 make "${make_args[@]}" -j"$(nproc)" Image modules
 stage="${work}/stage"
 mkdir -p "${stage}/boot" "${stage}/lib/modules"
@@ -88,12 +121,14 @@ depmod -b "${stage}" "${release}"
 cp System.map Module.symvers "${out}/"
 objcopy --dump-section .BTF="${out}/vmlinux.btf" vmlinux
 cp drivers/ufs/host/ufs-qcom.c drivers/ufs/host/ufs-qcom.h "${out}/"
-cp drivers/gpu/drm/msm/disp/dpu1/dpu_crtc.c drivers/gpu/drm/msm/disp/dpu1/dpu_crtc.o "${out}/"
-objdump -drS drivers/gpu/drm/msm/disp/dpu1/dpu_crtc.o > "${out}/dpu_crtc-disassembly.txt"
+if [[ "${profile}" == diagnostic ]]; then
+    cp drivers/gpu/drm/msm/disp/dpu1/dpu_crtc.c drivers/gpu/drm/msm/disp/dpu1/dpu_crtc.o "${out}/"
+    objdump -drS drivers/gpu/drm/msm/disp/dpu1/dpu_crtc.o > "${out}/dpu_crtc-disassembly.txt"
+fi
 test -s "${stage}/boot/KERNEL"
 test -s "${stage}/lib/modules/${release}/modules.dep"
 test -s "${out}/vmlinux.btf"
-tar -C "${stage}" -cf - boot lib | zstd -T0 -10 -o "${out}/rocknix-${release}.tar.zst"
+tar -C "${stage}" -cf - boot lib | zstd -T0 -10 -o "${out}/${artifact_name}"
 cd "${out}"
-sha256sum ./*.tar.zst > SHA256SUMS
-printf '%s\n' 'Build and artifact checks passed. Not installed or boot-tested.' > BUILD-SUCCESS.txt
+sha256sum "${artifact_name}" > SHA256SUMS
+printf '%s\n' "Build and artifact checks passed for ${profile}. Not installed or boot-tested." > BUILD-SUCCESS.txt
