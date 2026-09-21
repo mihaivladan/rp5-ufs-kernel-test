@@ -11,6 +11,7 @@
 #include <linux/platform_device.h>
 #include <linux/seq_file.h>
 #include <linux/soc/qcom/qcom_aoss.h>
+#include <linux/firmware/qcom/qcom_scm.h>
 #include <linux/uaccess.h>
 #include <linux/workqueue.h>
 #include <linux/ktime.h>
@@ -24,10 +25,12 @@ MODULE_PARM_DESC(firmware_sha256, "Host-verified SHA256 of BOTH AOP partitions")
 static struct qmp *qmp;
 static struct dentry *root;
 static struct platform_device *diag_device;
-static void __iomem *ddr_ring, *aop_ring;
+static void __iomem *aop_ring;
 static DEFINE_MUTEX(control_lock);
 static bool logging_dirty;
 static int last_qmp_result;
+static u32 probe_address, probe_value;
+static int probe_result = -ENODATA;
 
 struct snapshot {
 	u64 ticks_before, ticks_after;
@@ -42,7 +45,7 @@ static void capture(struct snapshot *s)
 	s->ticks_before = arch_timer_read_counter();
 	/* Message RAM only permits scalar 32-bit accesses. */
 	for (i = 0; i < WORDS; i++) {
-		s->ddr[i] = readl(ddr_ring + 4 * i);
+		s->ddr[i] = 0; /* DDR bank direct access is forbidden: resets RP5. */
 		s->aop[i] = readl(aop_ring + 4 * i);
 	}
 	s->ticks_after = arch_timer_read_counter();
@@ -94,6 +97,15 @@ static ssize_t control_write(struct file *f, const char __user *buf,
 		mod_delayed_work(system_freezable_wq, &logging_timeout, 300 * HZ);
 	} else if (sysfs_streq(command, "starc_off")) {
 		ret = stop_logging();
+	} else if (sysfs_streq(command, "scm_aop") ||
+		   sysfs_streq(command, "scm_ddr") ||
+		   sysfs_streq(command, "scm_arc")) {
+		probe_address = sysfs_streq(command, "scm_aop") ? 0x0c370000 :
+			(sysfs_streq(command, "scm_ddr") ? 0x0c360000 : 0x0b7f00c0);
+		probe_value = 0;
+		/* Protected IO service, never fall back to AP memory access. */
+		probe_result = qcom_scm_io_readl(probe_address, &probe_value);
+		ret = probe_result;
 	} else {
 		ret = -EINVAL;
 	}
@@ -113,9 +125,6 @@ static void print_snapshot(struct seq_file *m, const char *name,
 	if (!s->valid)
 		return;
 	for (i = 0; i < WORDS; i += 4)
-		seq_printf(m, "ddr %02u %08x %08x %08x %08x\n", i / 4,
-		 s->ddr[i], s->ddr[i+1], s->ddr[i+2], s->ddr[i+3]);
-	for (i = 0; i < WORDS; i += 4)
 		seq_printf(m, "aop %02u %08x %08x %08x %08x\n", i / 4,
 		 s->aop[i], s->aop[i+1], s->aop[i+2], s->aop[i+3]);
 }
@@ -128,6 +137,8 @@ static int snapshot_show(struct seq_file *m, void *unused)
 	capture(now);
 	seq_printf(m, "schema 1 firmware %s logging_dirty %u qmp_result %d\n",
 		   FW_HASH, logging_dirty, last_qmp_result);
+	seq_printf(m, "secure_probe address %08x result %d value %08x ddr_unavailable 1\n",
+		   probe_address, probe_result, probe_value);
 	print_snapshot(m, "suspend_noirq", &entry);
 	print_snapshot(m, "resume_noirq", &resume);
 	print_snapshot(m, "awake", now);
@@ -189,9 +200,8 @@ static int __init diag_init(void)
 	}
 	if (IS_ERR(qmp))
 		return PTR_ERR(qmp);
-	ddr_ring = ioremap(0x0c360000, 1024);
 	aop_ring = ioremap(0x0c370000, 1024);
-	if (!ddr_ring || !aop_ring) {
+	if (!aop_ring) {
 		ret = -ENOMEM;
 		goto unmap;
 	}
@@ -217,7 +227,6 @@ device:
 driver:
 	platform_driver_unregister(&diag_driver);
 unmap:
-	if (ddr_ring) iounmap(ddr_ring);
 	if (aop_ring) iounmap(aop_ring);
 	qmp_put(qmp);
 	return ret;
@@ -230,7 +239,6 @@ static void __exit diag_exit(void)
 		pr_err("rp5_aop_diag: AOP logging state uncertain; reboot to restore defaults\n");
 	platform_device_unregister(diag_device);
 	platform_driver_unregister(&diag_driver);
-	iounmap(ddr_ring);
 	iounmap(aop_ring);
 	qmp_put(qmp);
 }
