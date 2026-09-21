@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Reject a minsleep2 DTB unless its disabled and retained slices match."""
+"""Reject a minsleep3 DTB unless its disabled and retained slices match."""
 from pathlib import Path
 import subprocess
 import sys
@@ -49,6 +49,7 @@ def main():
         "i2c13", "uart12", "uart16", "qupv3_id_0", "qupv3_id_1",
         "qupv3_id_2", "fan", "pm8150b_haptics", "pm8150l_lpg", "vbat",
         "vdc_3v3", "vdc_5v", "vdda_panel", "vreg_s4a_1p8",
+        "vreg_l1c_1p8", "vreg_l8c_1p8",
         "vreg_fan_pwr", "vreg_mcu_3v3",
     )
     disabled_paths = (

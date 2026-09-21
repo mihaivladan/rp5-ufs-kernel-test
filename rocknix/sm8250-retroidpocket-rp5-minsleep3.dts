@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: BSD-3-Clause
 /*
- * RP5 minimal-sleep discriminator.
+ * RP5 minimal-sleep discriminator, third revision.
  *
- * The base board DTS enables the complete handheld.  The minsleep2 kernel
+ * The base board DTS enables the complete handheld. The minsleep3 kernel
  * deliberately omits the drivers below, so the matching tree must disable
  * their consumers as well.  Leaving enabled consumers without drivers keeps
  * GCC, interconnect and RPMh power-domain suppliers in sync_state pending.
@@ -99,5 +99,10 @@
 &vdc_5v { status = "disabled"; };
 &vdda_panel { status = "disabled"; };
 &vreg_s4a_1p8 { status = "disabled"; };
+/* L1C and L8C are fed only by vreg_s4a_1p8. Leaving them enabled makes
+ * their regulator-bus supply resolver devices defer forever.
+ */
+&vreg_l1c_1p8 { status = "disabled"; };
+&vreg_l8c_1p8 { status = "disabled"; };
 &vreg_fan_pwr { status = "disabled"; };
 &vreg_mcu_3v3 { status = "disabled"; };
