@@ -69,6 +69,42 @@ def main() -> int:
         added = sorted(candidate_nodes - stock_nodes)
         raise SystemExit(f"Node set changed; missing={missing}, added={added}")
 
+    def phandle_map(properties):
+        result = {}
+        per_node = {}
+        for (node, name), value in properties.items():
+            if name not in ("phandle", "linux,phandle"):
+                continue
+            if len(value) != 4:
+                raise SystemExit(f"Invalid {name} length on {node}")
+            number = struct.unpack(">I", value)[0]
+            if number in result and result[number] != node:
+                raise SystemExit(f"Duplicate phandle {number}: {node} and {result[number]}")
+            if node in per_node and per_node[node] != number:
+                raise SystemExit(f"Mismatched phandle properties on {node}")
+            result[number] = node
+            per_node[node] = number
+        return result
+
+    stock_phandles = phandle_map(stock)
+    candidate_phandles = phandle_map(candidate)
+
+    def equal_after_phandle_resolution(left, right):
+        if left == right:
+            return True
+        if len(left) != len(right) or len(left) % 4:
+            return False
+        left_cells = struct.unpack(f">{len(left) // 4}I", left)
+        right_cells = struct.unpack(f">{len(right) // 4}I", right)
+        for left_cell, right_cell in zip(left_cells, right_cells):
+            if left_cell == right_cell:
+                continue
+            left_path = stock_phandles.get(left_cell)
+            right_path = candidate_phandles.get(right_cell)
+            if left_path is None or left_path != right_path:
+                return False
+        return True
+
     expected_removed = set()
     cpu_paths = ("/cpus/cpu@0",) + tuple(f"/cpus/cpu@{index}00" for index in range(1, 8))
     for cpu in cpu_paths:
@@ -76,7 +112,10 @@ def main() -> int:
         expected_removed.add((cpu, "interconnect-names"))
         for retained in ("operating-points-v2", "qcom,freq-domain"):
             key = (cpu, retained)
-            if key not in stock or candidate.get(key) != stock[key]:
+            if (
+                key not in stock or key not in candidate
+                or not equal_after_phandle_resolution(stock[key], candidate[key])
+            ):
                 raise SystemExit(f"CPU frequency property missing or changed: {cpu}/{retained}")
 
     expected_opp_counts = {
@@ -97,7 +136,15 @@ def main() -> int:
 
     removed = set(stock) - set(candidate)
     added = set(candidate) - set(stock)
-    changed = {key for key in stock.keys() & candidate.keys() if stock[key] != candidate[key]}
+    renumbered = {
+        key for key in stock.keys() & candidate.keys()
+        if stock[key] != candidate[key]
+        and equal_after_phandle_resolution(stock[key], candidate[key])
+    }
+    changed = {
+        key for key in stock.keys() & candidate.keys()
+        if not equal_after_phandle_resolution(stock[key], candidate[key])
+    }
     if removed != expected_removed:
         raise SystemExit(
             f"Removed property set mismatch; missing={sorted(expected_removed - removed)}, "
@@ -116,7 +163,10 @@ def main() -> int:
     print("  16 CPU interconnect/interconnect-name properties across 8 CPUs")
     print("  56 opp-peak-kBps properties across 17 + 18 + 21 CPU OPPs")
     print("Verified operating-points-v2 and qcom,freq-domain unchanged on all 8 CPUs")
-    print("Verified full Retroid Pocket 5 hardware tree otherwise byte-for-byte semantic equal")
+    print(
+        "Verified full Retroid Pocket 5 hardware tree otherwise semantic equal; "
+        f"resolved compiler phandle renumbering in {len(renumbered)} properties"
+    )
     return 0
 
 
