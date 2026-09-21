@@ -104,12 +104,17 @@ def apply_patches(repo, source, fix, profile):
     custom_names = {
         "minimal-sleep": "sm8250-retroidpocket-rp5-minsleep4",
         "cpu-icc-off": "sm8250-retroidpocket-rp5-cpu-icc-off",
+        "stock-pruned": "sm8250-retroidpocket-rp5-stock-pruned",
     }
     custom_name = custom_names.get(profile)
     if custom_name:
         custom_dts = Path(__file__).resolve().parent / f"{custom_name}.dts"
         require(custom_dts.is_file(), f"Missing {profile} RP5 DTS")
         shutil.copyfile(custom_dts, source / "arch/arm64/boot/dts/qcom" / custom_dts.name)
+        if profile == "stock-pruned":
+            reference = Path(__file__).resolve().parent / "sm8250-retroidpocket-rp5-minsleep4.dts"
+            require(reference.is_file(), "Missing minsleep4 reference DTS")
+            shutil.copyfile(reference, source / "arch/arm64/boot/dts/qcom" / reference.name)
     # Match the board used by the saved device baseline. This release predates
     # the separate Visionox DTS found in newer ROCKNIX revisions.
     makefile = source / "arch/arm64/boot/dts/qcom/Makefile"
@@ -117,6 +122,8 @@ def apply_patches(repo, source, fix, profile):
     names = ["sm8250-retroidpocket-rp5"]
     if custom_name:
         names.append(custom_name)
+    if profile == "stock-pruned":
+        names.append("sm8250-retroidpocket-rp5-minsleep4")
     for name in names:
         require((source / f"arch/arm64/boot/dts/qcom/{name}.dts").is_file(), f"Missing {name} DTS")
         if f"{name}.dtb" not in contents:
@@ -131,14 +138,14 @@ def main():
     out.mkdir(parents=True, exist_ok=True)
     initramfs_sha = extract_stock(archive, work)
     profile = os.environ.get("ROCKNIX_PROFILE", "diagnostic")
-    require(profile in ("diagnostic", "minimal-sleep", "cpu-icc-off"),
+    require(profile in ("diagnostic", "minimal-sleep", "cpu-icc-off", "stock-pruned"),
             f"Unsupported ROCKNIX_PROFILE: {profile}")
     records = apply_patches(
         repo, source,
         Path(__file__).resolve().parent.parent / "ufs-lane-clocks.patch",
         profile,
     )
-    dt_only = profile == "cpu-icc-off"
+    dt_only = profile in ("cpu-icc-off", "stock-pruned")
     (out / "provenance.json").write_text(json.dumps({
         "rocknix_revision": REVISION, "stock_kernel_sha256": STOCK_KERNEL_SHA,
         "initramfs_sha256": initramfs_sha, "patches": records,

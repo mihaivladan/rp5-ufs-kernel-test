@@ -1,0 +1,13 @@
+// SPDX-License-Identifier: BSD-3-Clause
+/*
+ * Stock-kernel discriminator derived from the proven minsleep4 DTB.
+ *
+ * The full stock kernel registers two drivers that the minimal kernel omits.
+ * Disable their nodes so the stock-kernel boot reaches the same empty
+ * devices_deferred provider gate before suspend.
+ */
+
+#include "sm8250-retroidpocket-rp5-minsleep4.dts"
+
+&lpass_tlmm { status = "disabled"; };
+&vamacro { status = "disabled"; };

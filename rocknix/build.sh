@@ -22,6 +22,12 @@ cpu-icc-off)
     artifact_name='unused-device-tree-only.tar.zst'
     dtb_name='sm8250-retroidpocket-rp5-cpu-icc-off'
     ;;
+stock-pruned)
+    config_fragment="${kit}/rocknix/cpu-icc-off.config"
+    expected_release='7.2.0'
+    artifact_name='unused-device-tree-only.tar.zst'
+    dtb_name='sm8250-retroidpocket-rp5-stock-pruned'
+    ;;
 *)
     echo "Unknown ROCKNIX_PROFILE: ${profile}" >&2
     exit 2
@@ -125,6 +131,25 @@ elif [[ "${profile}" == cpu-icc-off ]]; then
     sha256sum "${dtb_name}.dtb" > CPU-ICC-OFF-SHA256SUMS
     printf '%s\n' \
         'Full RP5 DTB semantic comparison passed. Stock kernel retained; not installed or boot-tested.' \
+        > BUILD-SUCCESS.txt
+    cd "${source_dir}"
+elif [[ "${profile}" == stock-pruned ]]; then
+    make "${make_args[@]}" -j"$(nproc)" DTC_FLAGS=-@ qcom/sm8250-retroidpocket-rp5-minsleep4.dtb
+    python3 "${kit}/rocknix/verify-minimal-dtb.py" \
+        arch/arm64/boot/dts/qcom/sm8250-retroidpocket-rp5-minsleep4.dtb \
+        | tee "${out}/minsleep4-reference-verification.txt"
+    python3 "${kit}/rocknix/verify-minimal-dtb.py" \
+        "arch/arm64/boot/dts/qcom/${dtb_name}.dtb" \
+        | tee "${out}/stock-pruned-dtb-verification.txt"
+    python3 "${kit}/rocknix/verify-stock-pruned-dtb.py" \
+        arch/arm64/boot/dts/qcom/sm8250-retroidpocket-rp5-minsleep4.dtb \
+        "arch/arm64/boot/dts/qcom/${dtb_name}.dtb" \
+        | tee "${out}/stock-pruned-delta-verification.txt"
+    cp "arch/arm64/boot/dts/qcom/${dtb_name}.dtb" "${out}/"
+    cd "${out}"
+    sha256sum "${dtb_name}.dtb" > STOCK-PRUNED-SHA256SUMS
+    printf '%s\n' \
+        'Stock-kernel pruned DTB checks passed. Exact minsleep4 tree plus two disabled stock-only deferred consumers.' \
         > BUILD-SUCCESS.txt
     cd "${source_dir}"
 fi
