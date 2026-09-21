@@ -129,15 +129,17 @@ make "${make_args[@]}" INSTALL_MOD_PATH="${stage}" INSTALL_MOD_STRIP=1 modules_i
 rm -f "${stage}/lib/modules/${release}/build" "${stage}/lib/modules/${release}/source"
 depmod -b "${stage}" "${release}"
 cp System.map Module.symvers "${out}/"
-objcopy --dump-section .BTF="${out}/vmlinux.btf" vmlinux
 cp drivers/ufs/host/ufs-qcom.c drivers/ufs/host/ufs-qcom.h "${out}/"
 if [[ "${profile}" == diagnostic ]]; then
+    objcopy --dump-section .BTF="${out}/vmlinux.btf" vmlinux
     cp drivers/gpu/drm/msm/disp/dpu1/dpu_crtc.c drivers/gpu/drm/msm/disp/dpu1/dpu_crtc.o "${out}/"
     objdump -drS drivers/gpu/drm/msm/disp/dpu1/dpu_crtc.o > "${out}/dpu_crtc-disassembly.txt"
 fi
 test -s "${stage}/boot/KERNEL"
 test -s "${stage}/lib/modules/${release}/modules.dep"
-test -s "${out}/vmlinux.btf"
+if [[ "${profile}" == diagnostic ]]; then
+    test -s "${out}/vmlinux.btf"
+fi
 tar -C "${stage}" -cf - boot lib | zstd -T0 -10 -o "${out}/${artifact_name}"
 cd "${out}"
 sha256sum "${artifact_name}" > SHA256SUMS
