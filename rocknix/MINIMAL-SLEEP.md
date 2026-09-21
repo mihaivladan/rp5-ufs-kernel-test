@@ -1,7 +1,7 @@
 # RP5 minimal sleep kernel
 
 `ROCKNIX RP5 minimal sleep kernel` builds a distinct
-`7.2.0-consoleos-minsleep3` kernel from the same pinned ROCKNIX 20260901
+`7.2.0-consoleos-minsleep4` kernel from the same pinned ROCKNIX 20260901
 source, stock initramfs and firmware used by the validated UFS2 diagnostic
 kernel.
 
@@ -10,13 +10,20 @@ RPMh/AOSS, regulators, clocks, interconnects, filesystems and Qualcomm sleep
 statistics. It compiles out display/GPU, camera/video, audio, PCIe/Wi-Fi,
 Bluetooth, USB, internal UFS, DSP remote processors, RPMsg, QCE, interconnect
 bandwidth monitors, all Qualcomm GENI users, and the PWM fan driver. Its
-matched `sm8250-retroidpocket-rp5-minsleep3.dtb` explicitly disables those
+matched `sm8250-retroidpocket-rp5-minsleep4.dtb` explicitly disables those
 compiled-out consumers and their dedicated fixed rails. CI decompiles the
 result through `fdtget`, rejects any expected consumer not marked disabled,
 and rejects any retained SD, power-key, GCC, AOSS, RPMh or interconnect node
 that became disabled. It also disables the PM8150L L1 and L8 children whose
 input is the disabled `vreg_s4a_1p8` rail, so the regulator supply resolver
 cannot remain deferred.
+
+The fourth revision removes `interconnects` and `interconnect-names` from all
+eight CPU nodes and removes `opp-peak-kBps` from all 56 CPU OPPs. It retains
+`operating-points-v2` and each `qcom,freq-domain`, so EPSS CPU frequency
+control remains described while `qcom-cpufreq-hw` has no CPU DDR/L3 ICC path
+to vote. CI rejects the DTB unless all eight CPU paths and all 56 OPP bandwidth
+values are absent while the frequency properties remain present.
 The proof recorder must therefore run locally from SD; this kernel is not
 expected to provide SSH or a visible display.
 

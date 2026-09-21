@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Reject a minsleep3 DTB unless its disabled and retained slices match."""
+"""Reject a minsleep4 DTB unless its pruned slice and CPU ICC deletion match."""
 from pathlib import Path
 import subprocess
 import sys
@@ -29,6 +29,10 @@ def status(dtb, path):
     if result.returncode:
         return None
     return result.stdout.strip()
+
+
+def has_property(dtb, path, name):
+    return fdtget(dtb, path, name, check=False).returncode == 0
 
 
 def main():
@@ -87,6 +91,51 @@ def main():
         if value == "disabled":
             failures.append(f"retained {symbol} ({path}) is disabled")
 
+    cpu_paths = ("/cpus/cpu@0",) + tuple(
+        f"/cpus/cpu@{index}00" for index in range(1, 8)
+    )
+    checked_cpus = []
+    for path in cpu_paths:
+        fdtget(dtb, "-p", path)
+        present = {
+            name: has_property(dtb, path, name)
+            for name in (
+                "interconnects", "interconnect-names",
+                "operating-points-v2", "qcom,freq-domain",
+            )
+        }
+        checked_cpus.append((path, present))
+        for name in ("interconnects", "interconnect-names"):
+            if present[name]:
+                failures.append(f"CPU ICC property remained: {path}/{name}")
+        for name in ("operating-points-v2", "qcom,freq-domain"):
+            if not present[name]:
+                failures.append(f"required CPU frequency property missing: {path}/{name}")
+
+    expected_opp_counts = {
+        "cpu0_opp_table": 17,
+        "cpu4_opp_table": 18,
+        "cpu7_opp_table": 21,
+    }
+    checked_opps = []
+    for symbol, expected_count in expected_opp_counts.items():
+        path = symbol_path(dtb, symbol)
+        children = [
+            name for name in fdtget(dtb, "-l", path).stdout.splitlines()
+            if name.startswith("opp-")
+        ]
+        if len(children) != expected_count:
+            failures.append(
+                f"{symbol} has {len(children)} OPPs, expected {expected_count}"
+            )
+        for child in children:
+            child_path = f"{path}/{child}"
+            if has_property(dtb, child_path, "opp-peak-kBps"):
+                failures.append(f"CPU OPP bandwidth remained: {child_path}")
+            if not has_property(dtb, child_path, "opp-hz"):
+                failures.append(f"CPU OPP frequency missing: {child_path}")
+        checked_opps.append((symbol, path, len(children)))
+
     if failures:
         raise SystemExit("Minimal DTB verification failed:\n  " + "\n  ".join(failures))
 
@@ -96,6 +145,12 @@ def main():
     print(f"Verified {len(checked_retained)} retained core nodes:")
     for symbol, path, value in checked_retained:
         print(f"  retained {symbol}: {path} status={value or '<implicit okay>'}")
+    print(f"Verified {len(checked_cpus)} CPUs retain frequency control with no ICC properties:")
+    for path, _ in checked_cpus:
+        print(f"  CPU ICC removed, OPP/frequency-domain retained: {path}")
+    print(f"Verified CPU OPP bandwidth removal across {sum(x[2] for x in checked_opps)} OPPs:")
+    for symbol, path, count in checked_opps:
+        print(f"  {symbol}: {path}, {count} OPPs, no opp-peak-kBps")
 
 
 if __name__ == "__main__":

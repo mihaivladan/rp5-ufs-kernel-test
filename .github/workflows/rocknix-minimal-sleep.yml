@@ -8,7 +8,7 @@ on:
       - 'rocknix/build.sh'
       - 'rocknix/prepare.py'
       - 'rocknix/minimal-sleep.config'
-      - 'rocknix/sm8250-retroidpocket-rp5-minsleep3.dts'
+      - 'rocknix/sm8250-retroidpocket-rp5-minsleep4.dts'
       - 'rocknix/verify-minimal-dtb.py'
       - 'rocknix/dpu-cstate-init.patch'
       - 'ufs-lane-clocks.patch'
@@ -54,7 +54,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
-          name: rocknix-rp5-minimal-sleep3
+          name: rocknix-rp5-minimal-sleep4
           retention-days: 7
           compression-level: 0
           if-no-files-found: error

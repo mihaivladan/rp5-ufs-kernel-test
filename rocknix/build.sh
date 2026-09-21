@@ -12,9 +12,9 @@ diagnostic)
     ;;
 minimal-sleep)
     config_fragment="${kit}/rocknix/minimal-sleep.config"
-    expected_release='7.2.0-consoleos-minsleep3'
+    expected_release='7.2.0-consoleos-minsleep4'
     artifact_name="rocknix-${expected_release}.tar.zst"
-    dtb_name='sm8250-retroidpocket-rp5-minsleep3'
+    dtb_name='sm8250-retroidpocket-rp5-minsleep4'
     ;;
 *)
     echo "Unknown ROCKNIX_PROFILE: ${profile}" >&2
