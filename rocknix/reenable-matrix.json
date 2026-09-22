@@ -191,7 +191,7 @@
     },
     {
       "id": "display-gpu-gamepad-active-only-ufs-wireless-usb-typec-audio",
-      "description": "Phase 6 cumulative product candidate adding ADSP, LPASS pinctrl, codec macros, SoundWire, sound card, its required DisplayPort codec provider and the 5 V audio rail to Phase 5 while reusing the proven shared 1.8 V rail",
+      "description": "Phase 6 fix candidate adding the complete audio and required DisplayPort codec slice to Phase 5 while making the observed persistent Bluetooth UART6 ICC paths active-only",
       "nodes": [
         "framebuffer",
         "mdss",
@@ -235,7 +235,8 @@
         "swr2",
         "vdc_5v"
       ],
-      "uart16_icc_tags": "active-only"
+      "uart16_icc_tags": "active-only",
+      "uart6_icc_tags": "active-only"
     },
     {
       "id": "gamepad",

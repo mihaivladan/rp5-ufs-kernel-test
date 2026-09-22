@@ -14,6 +14,9 @@ ACTIVE_ONLY_CANDIDATES = {
     "display-gpu-gamepad-active-only-ufs-wireless-usb-typec",
     "display-gpu-gamepad-active-only-ufs-wireless-usb-typec-audio",
 }
+UART6_ACTIVE_ONLY_CANDIDATES = {
+    "display-gpu-gamepad-active-only-ufs-wireless-usb-typec-audio",
+}
 
 
 def parse_fdt(path: Path):
@@ -155,6 +158,33 @@ def main() -> int:
                     f"expected={expected_icc.hex()} actual={None if new_icc is None else new_icc.hex()}"
                 )
             expected.add(key)
+        uart6_icc_tags = candidate.get("uart6_icc_tags")
+        if uart6_icc_tags is not None:
+            if (
+                ident not in UART6_ACTIVE_ONLY_CANDIDATES
+                or uart6_icc_tags != "active-only"
+            ):
+                raise SystemExit(f"Unexpected UART6 ICC override: {ident}: {uart6_icc_tags!r}")
+            uart6 = resolve("uart6", baseline)
+            uart6_key = (uart6, "interconnects")
+            old_uart6_icc = baseline.get(uart6_key)
+            new_uart6_icc = new.get(uart6_key)
+            if old_uart6_icc is None or len(old_uart6_icc) != 48:
+                raise SystemExit(f"Unexpected baseline UART6 ICC encoding: {old_uart6_icc!r}")
+            uart6_cells = list(struct.unpack(">12I", old_uart6_icc))
+            tag_cells = (2, 5, 8, 11)
+            if any(uart6_cells[index] != 0 for index in tag_cells):
+                raise SystemExit(f"Baseline UART6 ICC tags are not all zero: {uart6_cells}")
+            for index in tag_cells:
+                uart6_cells[index] = 3
+            expected_uart6_icc = struct.pack(">12I", *uart6_cells)
+            if new_uart6_icc != expected_uart6_icc:
+                raise SystemExit(
+                    f"UART6 ICC tags are not exactly active-only: "
+                    f"expected={expected_uart6_icc.hex()} "
+                    f"actual={None if new_uart6_icc is None else new_uart6_icc.hex()}"
+                )
+            expected.add(uart6_key)
         added = set(new) - set(baseline)
         removed = set(baseline) - set(new)
         changed = {
@@ -169,7 +199,12 @@ def main() -> int:
             )
         verify_cpu_invariants(new_nodes, new, ident)
         candidate_properties[ident] = new
-        verified.append((ident, len(expected_paths), icc_tags is not None))
+        verified.append((
+            ident,
+            len(expected_paths),
+            icc_tags is not None,
+            uart6_icc_tags is not None,
+        ))
 
     phase2 = candidate_properties["display-gpu-gamepad-active-only"]
     phase3 = candidate_properties["display-gpu-gamepad-active-only-ufs"]
@@ -232,21 +267,24 @@ def main() -> int:
             "vamacro", "wsamacro", "swr0", "swr1", "swr2", "vdc_5v", "mdss_dp",
         )
     }
+    expected_phase6_delta.add((resolve("uart6", baseline), "interconnects"))
     if phase6_delta != expected_phase6_delta:
         raise SystemExit(
-            f"Phase 6 is not an exact thirteen-status delta from Phase 5: "
+            f"Phase 6 is not an exact thirteen-status plus UART6-tag delta from Phase 5: "
             f"actual={sorted(phase6_delta)} expected={sorted(expected_phase6_delta)}"
         )
 
     print(f"Verified baseline node set: {len(baseline_nodes)} nodes")
     print("Verified fixed CPU invariant: 8 ICC paths absent; 56 OPP bandwidth values absent")
-    for ident, count, has_icc_override in verified:
+    for ident, count, has_icc_override, has_uart6_icc_override in verified:
         suffix = "; UART16 ICC tags exactly active-only" if has_icc_override else ""
+        if has_uart6_icc_override:
+            suffix += "; UART6 ICC tags exactly active-only"
         print(f"Verified {ident}: exactly {count} disabled-to-okay status changes{suffix}")
     print("Verified Phase 3 relative delta: exactly UFS controller, PHY and shared 1.8 V rail disabled-to-okay")
     print("Verified Phase 4 relative delta: exactly PCIe controller, PCIe PHY, Bluetooth UART, QCA6390 PMU and QUP0 disabled-to-okay")
     print("Verified Phase 5 relative delta: exactly USB controller, DWC3 child, HS PHY, SuperSpeed PHY, PMIC Type-C, PMIC VBUS and I2C15 disabled-to-okay")
-    print("Verified Phase 6 relative delta: exactly ADSP, LPASS pinctrl, sound card, external codec, four codec macros, three SoundWire controllers, required DisplayPort codec provider and 5 V rail disabled-to-okay")
+    print("Verified Phase 6 relative delta: exactly ADSP, LPASS pinctrl, sound card, external codec, four codec macros, three SoundWire controllers, required DisplayPort codec provider and 5 V rail disabled-to-okay; exactly four UART6 ICC tag cells active-only")
     print("Verified 11 independent subsystem candidates plus 8 cumulative integration candidates")
     return 0
 

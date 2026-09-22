@@ -16,6 +16,9 @@ ACTIVE_ONLY_CANDIDATES = {
     "display-gpu-gamepad-active-only-ufs-wireless-usb-typec",
     "display-gpu-gamepad-active-only-ufs-wireless-usb-typec-audio",
 }
+UART6_ACTIVE_ONLY_CANDIDATES = {
+    "display-gpu-gamepad-active-only-ufs-wireless-usb-typec-audio",
+}
 
 
 def load_manifest(path: Path) -> dict:
@@ -52,6 +55,13 @@ def load_manifest(path: Path) -> dict:
             raise SystemExit(f"Invalid UART16 ICC tag mode: {ident}: {icc_tags!r}")
         if icc_tags and (ident not in ACTIVE_ONLY_CANDIDATES or "uart16" not in nodes):
             raise SystemExit(f"UART16 ICC override is outside its exact candidate: {ident}")
+        uart6_icc_tags = candidate.get("uart6_icc_tags")
+        if uart6_icc_tags not in (None, "active-only"):
+            raise SystemExit(f"Invalid UART6 ICC tag mode: {ident}: {uart6_icc_tags!r}")
+        if uart6_icc_tags and (
+            ident not in UART6_ACTIVE_ONLY_CANDIDATES or "uart6" not in nodes
+        ):
+            raise SystemExit(f"UART6 ICC override is outside its exact candidate: {ident}")
         ids.append(ident)
     if len(ids) != len(set(ids)):
         raise SystemExit("Duplicate candidate id")
@@ -63,6 +73,15 @@ def load_manifest(path: Path) -> dict:
     if actual_active_only != ACTIVE_ONLY_CANDIDATES:
         raise SystemExit(
             f"Unexpected UART16 active-only candidate set: {sorted(actual_active_only)}"
+        )
+    actual_uart6_active_only = {
+        candidate["id"]
+        for candidate in candidates
+        if candidate.get("uart6_icc_tags") == "active-only"
+    }
+    if actual_uart6_active_only != UART6_ACTIVE_ONLY_CANDIDATES:
+        raise SystemExit(
+            f"Unexpected UART6 active-only candidate set: {sorted(actual_uart6_active_only)}"
         )
     by_id = {candidate["id"]: candidate for candidate in candidates}
     phase2_nodes = set(by_id["display-gpu-gamepad-active-only"]["nodes"])
@@ -115,7 +134,10 @@ def main() -> int:
             " */",
             "",
         ]
-        if candidate.get("uart16_icc_tags") == "active-only":
+        if (
+            candidate.get("uart16_icc_tags") == "active-only"
+            or candidate.get("uart6_icc_tags") == "active-only"
+        ):
             lines.extend([
                 "#include <dt-bindings/interconnect/qcom,icc.h>",
                 "",
@@ -124,13 +146,29 @@ def main() -> int:
             '#include "sm8250-retroidpocket-rp5-stock-pruned.dts"',
             "",
         ])
-        special_uart = candidate.get("uart16_icc_tags") == "active-only"
+        special_uart16 = candidate.get("uart16_icc_tags") == "active-only"
+        special_uart6 = candidate.get("uart6_icc_tags") == "active-only"
         lines.extend(
             f'{target(node)} {{ status = "okay"; }};'
             for node in candidate["nodes"]
-            if not (special_uart and node == "uart16")
+            if not (
+                (special_uart16 and node == "uart16")
+                or (special_uart6 and node == "uart6")
+            )
         )
-        if special_uart:
+        if special_uart6:
+            lines.extend([
+                "",
+                "&uart6 {",
+                '    status = "okay";',
+                "    interconnects =",
+                "        <&qup_virt MASTER_QUP_CORE_0 QCOM_ICC_TAG_ACTIVE_ONLY",
+                "         &qup_virt SLAVE_QUP_CORE_0 QCOM_ICC_TAG_ACTIVE_ONLY>,",
+                "        <&gem_noc MASTER_AMPSS_M0 QCOM_ICC_TAG_ACTIVE_ONLY",
+                "         &config_noc SLAVE_QUP_0 QCOM_ICC_TAG_ACTIVE_ONLY>;",
+                "};",
+            ])
+        if special_uart16:
             lines.extend([
                 "",
                 "&uart16 {",
