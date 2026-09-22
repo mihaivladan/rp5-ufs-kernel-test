@@ -1,0 +1,13 @@
+diff --git a/drivers/remoteproc/qcom_q6v5_pas.c b/drivers/remoteproc/qcom_q6v5_pas.c
+index 0e9e764..a689997 100644
+--- a/drivers/remoteproc/qcom_q6v5_pas.c
++++ b/drivers/remoteproc/qcom_q6v5_pas.c
+@@ -921,7 +921,7 @@ static const struct qcom_pas_data sm8250_adsp_resource = {
+ 	.firmware_name = "adsp.mdt",
+ 	.pas_id = 1,
+ 	.minidump_id = 5,
+-	.auto_boot = true,
++	.auto_boot = false,
+ 	.proxy_pd_names = (char*[]){
+ 		"lcx",
+ 		"lmx",

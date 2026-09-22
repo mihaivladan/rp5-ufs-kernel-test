@@ -97,7 +97,7 @@ def apply_patches(repo, source, fix, profile):
                 "91e28ba23946dae574a2fc86e534f143c598a4ac044540e7bdfd38ab20f0d588",
                 "GMU clock-reset patch checksum mismatch")
         extra_patches.append(gmu_reset)
-    elif profile in ("gpu-rpmh-fix", "sleepstate-handshake"):
+    elif profile in ("gpu-rpmh-fix", "sleepstate-handshake", "adsp-no-auto-ab"):
         rpmh_fix = Path(__file__).resolve().parent / "a6xx-stale-rpmh-votes.patch"
         require(rpmh_fix.is_file(), "Missing upstream stale RPMh vote fix")
         require(hashlib.sha256(rpmh_fix.read_bytes()).hexdigest() ==
@@ -111,6 +111,13 @@ def apply_patches(repo, source, fix, profile):
                 "f8d91b9aa78409f838dc4b38a1b25ce46ed0979e7daf9484d30c43e5ef8dd112",
                 "SMP2P sleep-state patch checksum mismatch")
         extra_patches.append(sleepstate_fix)
+    if profile == "adsp-no-auto-ab":
+        no_auto = Path(__file__).resolve().parent / "sm8250-adsp-no-auto-boot.patch"
+        require(no_auto.is_file(), "Missing SM8250 ADSP no-auto-boot patch")
+        require(hashlib.sha256(no_auto.read_bytes()).hexdigest() ==
+                "27a92a7e9bc3a37e1954efa97e518cb7808505cc04dc4eb246803ca07da61805",
+                "SM8250 ADSP no-auto-boot patch checksum mismatch")
+        extra_patches.append(no_auto)
     for patch in patches + [fix, display_fix, *extra_patches]:
         print(f"Applying {patch.name}", flush=True)
         payload = patch.read_text().replace("@TARGET_CPU@", "cortex-a76.cortex-a55").replace("@DEVICE@", "SM8250")
@@ -121,7 +128,7 @@ def apply_patches(repo, source, fix, profile):
         subprocess.run(args, input=payload, text=True, cwd=source, check=True)
         records.append({"path": str(patch.relative_to(repo)) if patch in patches else patch.name,
                         "sha256": hashlib.sha256(patch.read_bytes()).hexdigest()})
-    if profile in ("gpu-rpmh-fix", "sleepstate-handshake"):
+    if profile in ("gpu-rpmh-fix", "sleepstate-handshake", "adsp-no-auto-ab"):
         gmu_source = (source / "drivers/gpu/drm/msm/adreno/a6xx_gmu.c").read_text()
         require("if (!test_and_clear_bit(GMU_STATUS_FW_START, &gmu->status))" in gmu_source,
                 "Corrected GMU firmware-start condition missing")
@@ -133,6 +140,13 @@ def apply_patches(repo, source, fix, profile):
                 "case PM_POST_SUSPEND:" in sleepstate_source and
                 "PROC_AWAKE_ID\t12" in sleepstate_source,
                 "SMP2P sleep-state handshake implementation missing")
+    if profile == "adsp-no-auto-ab":
+        pas_source = (source / "drivers/remoteproc/qcom_q6v5_pas.c").read_text()
+        start = pas_source.index("static const struct qcom_pas_data sm8250_adsp_resource = {")
+        end = pas_source.index("\n};", start)
+        block = pas_source[start:end]
+        require(block.count(".auto_boot = false,") == 1 and ".auto_boot = true," not in block,
+                "SM8250 ADSP auto-boot override missing")
     dts = repo / "projects/ROCKNIX/devices/SM8250/linux/dts"
     shutil.copytree(dts, source / "arch/arm64/boot/dts", dirs_exist_ok=True)
     custom_names = {
@@ -150,7 +164,7 @@ def apply_patches(repo, source, fix, profile):
             reference = Path(__file__).resolve().parent / "sm8250-retroidpocket-rp5-minsleep4.dts"
             require(reference.is_file(), "Missing minsleep4 reference DTS")
             shutil.copyfile(reference, source / "arch/arm64/boot/dts/qcom" / reference.name)
-    elif profile in ("reenable-matrix", "sleepstate-handshake"):
+    elif profile in ("reenable-matrix", "sleepstate-handshake", "adsp-no-auto-ab"):
         root = Path(__file__).resolve().parent
         for filename in (
             "sm8250-retroidpocket-rp5-minsleep4.dts",
@@ -196,6 +210,8 @@ def apply_patches(repo, source, fix, profile):
         ])
     elif profile == "sleepstate-handshake":
         names.append("sm8250-retroidpocket-rp5-adsp-sleepstate")
+    elif profile == "adsp-no-auto-ab":
+        names.append("sm8250-retroidpocket-rp5-reenable-display-gpu-gamepad-active-only-ufs-wireless-usb-typec-dp-adsp")
     for name in names:
         require((source / f"arch/arm64/boot/dts/qcom/{name}.dts").is_file(), f"Missing {name} DTS")
         if f"{name}.dtb" not in contents:
@@ -213,7 +229,7 @@ def main():
     require(profile in (
         "diagnostic", "minimal-sleep", "cpu-icc-off", "stock-pruned",
         "reenable-matrix", "gmu-clock-reset", "gpu-rpmh-fix",
-        "sleepstate-handshake",
+        "sleepstate-handshake", "adsp-no-auto-ab",
     ),
             f"Unsupported ROCKNIX_PROFILE: {profile}")
     records = apply_patches(
@@ -228,11 +244,15 @@ def main():
         "fix_commit": "f07317a8d57f382ec505597816271dd72ffa20c7",
         "gpu_rpmh_fix_commit": (
             "d9108bfdb746"
-            if profile in ("gpu-rpmh-fix", "sleepstate-handshake") else None
+            if profile in ("gpu-rpmh-fix", "sleepstate-handshake", "adsp-no-auto-ab") else None
         ),
         "sleepstate_handshake": (
             "Qualcomm downstream SMP2P awake bit 12 over the RP5 DSPS/SLPI channel"
             if profile == "sleepstate-handshake" else None
+        ),
+        "adsp_no_auto_boot": (
+            "SM8250 ADSP remoteproc registered offline until explicit sysfs start"
+            if profile == "adsp-no-auto-ab" else None
         ),
         "display_fix": "Initialize DPU CRTC state before ROCKNIX resource-cleanup writes num_mixers",
         "baseline": "ROCKNIX 20260901 / Linux 7.2.0",

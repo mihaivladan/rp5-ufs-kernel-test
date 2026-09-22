@@ -31,6 +31,21 @@ Run **ROCKNIX RP5 GPU stale RPMh vote fix**. The output release is
 working diagnostic kernel. Device deployment remains a one-shot test with the
 matching module image and preserved stock recovery.
 
+## ADSP no-auto-boot A/B diagnostic
+
+The `adsp-no-auto-ab` profile retains the byte-identical Phase 6D ADSP-only
+Device Tree and changes only `sm8250_adsp_resource.auto_boot` from true to
+false. The ADSP remoteproc therefore registers in `offline` state without
+loading or executing firmware. A guarded device harness can suspend once in
+that state, explicitly start the exact `qcom/sm8250/adsp.mbn` through the
+remoteproc sysfs interface, and suspend again in the same boot.
+
+Run **ROCKNIX RP5 ADSP no-auto-boot A/B**. The output release is
+`7.2.0-consoleos-adspab1`; it includes the upstream A6xx stale-RPMh fix,
+matching modules, PM diagnostics and BTF. The workflow rejects any Phase 6D
+DTB checksum change and any SM8250 ADSP resource block that does not contain
+exactly one `auto_boot = false` assignment. No device deployment is automatic.
+
 # RP5 subsystem re-enable matrix
 
 The `reenable-matrix` profile builds eleven independent Device Tree candidates
