@@ -1,5 +1,5 @@
 {
-  "schema": 1,
+  "schema": 2,
   "baseline": "sm8250-retroidpocket-rp5-stock-pruned",
   "candidate_prefix": "sm8250-retroidpocket-rp5-reenable-",
   "fixed_invariants": [
@@ -82,6 +82,26 @@
         "uart16",
         "vreg_mcu_3v3"
       ]
+    },
+    {
+      "id": "display-gpu-gamepad-active-only",
+      "description": "Product-fix candidate retaining the complete integrated display, GPU and Retroid gamepad stack while restricting both UART16 ICC paths to active and wake buckets",
+      "nodes": [
+        "framebuffer",
+        "mdss",
+        "mdss_dsi0",
+        "mdss_dsi0_phy",
+        "dispcc",
+        "vdda_panel",
+        "gpu",
+        "gmu",
+        "gpucc",
+        "adreno_smmu",
+        "qupv3_id_2",
+        "uart16",
+        "vreg_mcu_3v3"
+      ],
+      "uart16_icc_tags": "active-only"
     },
     {
       "id": "gamepad",

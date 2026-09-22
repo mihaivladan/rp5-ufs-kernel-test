@@ -93,7 +93,7 @@ def main() -> int:
     baseline_path = Path(sys.argv[1])
     manifest = json.loads(Path(sys.argv[2]).read_text())
     candidate_dir = Path(sys.argv[3])
-    if manifest.get("schema") != 1 or len(manifest.get("candidates", [])) != 14:
+    if manifest.get("schema") != 2 or len(manifest.get("candidates", [])) != 15:
         raise SystemExit("Unexpected matrix manifest")
     baseline_nodes, baseline = parse_fdt(baseline_path)
     verify_cpu_invariants(baseline_nodes, baseline, "baseline")
@@ -122,6 +122,29 @@ def main() -> int:
                 raise SystemExit(f"Candidate target is not disabled in baseline: {ident}: {node}")
             if new.get((node, "status")) != b"okay\0":
                 raise SystemExit(f"Candidate target is not okay: {ident}: {node}")
+        icc_tags = candidate.get("uart16_icc_tags")
+        if icc_tags is not None:
+            if ident != "display-gpu-gamepad-active-only" or icc_tags != "active-only":
+                raise SystemExit(f"Unexpected UART16 ICC override: {ident}: {icc_tags!r}")
+            uart = resolve("uart16", baseline)
+            key = (uart, "interconnects")
+            old_icc = baseline.get(key)
+            new_icc = new.get(key)
+            if old_icc is None or len(old_icc) != 48:
+                raise SystemExit(f"Unexpected baseline UART16 ICC encoding: {old_icc!r}")
+            cells = list(struct.unpack(">12I", old_icc))
+            tag_cells = (2, 5, 8, 11)
+            if any(cells[index] != 0 for index in tag_cells):
+                raise SystemExit(f"Baseline UART16 ICC tags are not all zero: {cells}")
+            for index in tag_cells:
+                cells[index] = 3
+            expected_icc = struct.pack(">12I", *cells)
+            if new_icc != expected_icc:
+                raise SystemExit(
+                    f"UART16 ICC tags are not exactly active-only: "
+                    f"expected={expected_icc.hex()} actual={None if new_icc is None else new_icc.hex()}"
+                )
+            expected.add(key)
         added = set(new) - set(baseline)
         removed = set(baseline) - set(new)
         changed = {
@@ -135,13 +158,14 @@ def main() -> int:
                 f"expected={sorted(expected)}"
             )
         verify_cpu_invariants(new_nodes, new, ident)
-        verified.append((ident, len(expected)))
+        verified.append((ident, len(expected_paths), icc_tags is not None))
 
     print(f"Verified baseline node set: {len(baseline_nodes)} nodes")
     print("Verified fixed CPU invariant: 8 ICC paths absent; 56 OPP bandwidth values absent")
-    for ident, count in verified:
-        print(f"Verified {ident}: exactly {count} disabled-to-okay status changes")
-    print("Verified 11 independent subsystem candidates plus 3 cumulative integration candidates")
+    for ident, count, has_icc_override in verified:
+        suffix = "; UART16 ICC tags exactly active-only" if has_icc_override else ""
+        print(f"Verified {ident}: exactly {count} disabled-to-okay status changes{suffix}")
+    print("Verified 11 independent subsystem candidates plus 4 cumulative integration candidates")
     return 0
 
 

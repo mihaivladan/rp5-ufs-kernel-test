@@ -13,15 +13,15 @@ LABEL = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\Z")
 
 def load_manifest(path: Path) -> dict:
     data = json.loads(path.read_text())
-    if data.get("schema") != 1:
+    if data.get("schema") != 2:
         raise SystemExit("Unsupported re-enable matrix schema")
     if data.get("baseline") != "sm8250-retroidpocket-rp5-stock-pruned":
         raise SystemExit("Unexpected matrix baseline")
     if data.get("candidate_prefix") != "sm8250-retroidpocket-rp5-reenable-":
         raise SystemExit("Unexpected matrix candidate prefix")
     candidates = data.get("candidates")
-    if not isinstance(candidates, list) or len(candidates) != 14:
-        raise SystemExit("Expected eleven independent candidates and three cumulative integration candidates")
+    if not isinstance(candidates, list) or len(candidates) != 15:
+        raise SystemExit("Expected eleven independent candidates and four cumulative integration candidates")
     ids = []
     for candidate in candidates:
         ident = candidate.get("id")
@@ -40,9 +40,16 @@ def load_manifest(path: Path) -> dict:
                     raise SystemExit(f"Unsafe path selector: {node!r}")
             elif not LABEL.fullmatch(node):
                 raise SystemExit(f"Unsafe label selector: {node!r}")
+        icc_tags = candidate.get("uart16_icc_tags")
+        if icc_tags not in (None, "active-only"):
+            raise SystemExit(f"Invalid UART16 ICC tag mode: {ident}: {icc_tags!r}")
+        if icc_tags and (ident != "display-gpu-gamepad-active-only" or "uart16" not in nodes):
+            raise SystemExit(f"UART16 ICC override is outside its exact candidate: {ident}")
         ids.append(ident)
     if len(ids) != len(set(ids)):
         raise SystemExit("Duplicate candidate id")
+    if sum(candidate.get("uart16_icc_tags") == "active-only" for candidate in candidates) != 1:
+        raise SystemExit("Expected exactly one UART16 active-only ICC candidate")
     deferred = data.get("deferred")
     if not isinstance(deferred, list) or len(deferred) != 3:
         raise SystemExit("Expected three explicitly deferred targets")
@@ -70,10 +77,34 @@ def main() -> int:
             f" * {candidate['description']}",
             " */",
             "",
+        ]
+        if candidate.get("uart16_icc_tags") == "active-only":
+            lines.extend([
+                "#include <dt-bindings/interconnect/qcom,icc.h>",
+                "",
+            ])
+        lines.extend([
             '#include "sm8250-retroidpocket-rp5-stock-pruned.dts"',
             "",
-        ]
-        lines.extend(f'{target(node)} {{ status = "okay"; }};' for node in candidate["nodes"])
+        ])
+        special_uart = candidate.get("uart16_icc_tags") == "active-only"
+        lines.extend(
+            f'{target(node)} {{ status = "okay"; }};'
+            for node in candidate["nodes"]
+            if not (special_uart and node == "uart16")
+        )
+        if special_uart:
+            lines.extend([
+                "",
+                "&uart16 {",
+                '    status = "okay";',
+                "    interconnects =",
+                "        <&qup_virt MASTER_QUP_CORE_2 QCOM_ICC_TAG_ACTIVE_ONLY",
+                "         &qup_virt SLAVE_QUP_CORE_2 QCOM_ICC_TAG_ACTIVE_ONLY>,",
+                "        <&gem_noc MASTER_AMPSS_M0 QCOM_ICC_TAG_ACTIVE_ONLY",
+                "         &config_noc SLAVE_QUP_2 QCOM_ICC_TAG_ACTIVE_ONLY>;",
+                "};",
+            ])
         path = output / f"{basename}.dts"
         path.write_text("\n".join(lines) + "\n")
         generated.append(path.name)
