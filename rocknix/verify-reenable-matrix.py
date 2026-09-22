@@ -7,6 +7,12 @@ import sys
 from pathlib import Path
 
 
+ACTIVE_ONLY_CANDIDATES = {
+    "display-gpu-gamepad-active-only",
+    "display-gpu-gamepad-active-only-ufs",
+}
+
+
 def parse_fdt(path: Path):
     blob = path.read_bytes()
     if len(blob) < 40:
@@ -93,7 +99,7 @@ def main() -> int:
     baseline_path = Path(sys.argv[1])
     manifest = json.loads(Path(sys.argv[2]).read_text())
     candidate_dir = Path(sys.argv[3])
-    if manifest.get("schema") != 2 or len(manifest.get("candidates", [])) != 15:
+    if manifest.get("schema") != 2 or len(manifest.get("candidates", [])) != 16:
         raise SystemExit("Unexpected matrix manifest")
     baseline_nodes, baseline = parse_fdt(baseline_path)
     verify_cpu_invariants(baseline_nodes, baseline, "baseline")
@@ -104,6 +110,7 @@ def main() -> int:
             raise SystemExit(f"Deferred target is not disabled in baseline: {path}")
 
     verified = []
+    candidate_properties = {}
     for candidate in manifest["candidates"]:
         ident = candidate["id"]
         name = manifest["candidate_prefix"] + ident
@@ -124,7 +131,7 @@ def main() -> int:
                 raise SystemExit(f"Candidate target is not okay: {ident}: {node}")
         icc_tags = candidate.get("uart16_icc_tags")
         if icc_tags is not None:
-            if ident != "display-gpu-gamepad-active-only" or icc_tags != "active-only":
+            if ident not in ACTIVE_ONLY_CANDIDATES or icc_tags != "active-only":
                 raise SystemExit(f"Unexpected UART16 ICC override: {ident}: {icc_tags!r}")
             uart = resolve("uart16", baseline)
             key = (uart, "interconnects")
@@ -158,14 +165,32 @@ def main() -> int:
                 f"expected={sorted(expected)}"
             )
         verify_cpu_invariants(new_nodes, new, ident)
+        candidate_properties[ident] = new
         verified.append((ident, len(expected_paths), icc_tags is not None))
+
+    phase2 = candidate_properties["display-gpu-gamepad-active-only"]
+    phase3 = candidate_properties["display-gpu-gamepad-active-only-ufs"]
+    phase3_delta = {
+        key for key in phase2.keys() | phase3.keys()
+        if phase2.get(key) != phase3.get(key)
+    }
+    expected_phase3_delta = {
+        (resolve(selector, baseline), "status")
+        for selector in ("ufs_mem_hc", "ufs_mem_phy", "vreg_s4a_1p8")
+    }
+    if phase3_delta != expected_phase3_delta:
+        raise SystemExit(
+            f"Phase 3 is not an exact three-status delta from Phase 2B: "
+            f"actual={sorted(phase3_delta)} expected={sorted(expected_phase3_delta)}"
+        )
 
     print(f"Verified baseline node set: {len(baseline_nodes)} nodes")
     print("Verified fixed CPU invariant: 8 ICC paths absent; 56 OPP bandwidth values absent")
     for ident, count, has_icc_override in verified:
         suffix = "; UART16 ICC tags exactly active-only" if has_icc_override else ""
         print(f"Verified {ident}: exactly {count} disabled-to-okay status changes{suffix}")
-    print("Verified 11 independent subsystem candidates plus 4 cumulative integration candidates")
+    print("Verified Phase 3 relative delta: exactly UFS controller, PHY and shared 1.8 V rail disabled-to-okay")
+    print("Verified 11 independent subsystem candidates plus 5 cumulative integration candidates")
     return 0
 
 

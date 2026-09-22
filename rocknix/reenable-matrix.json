@@ -104,6 +104,29 @@
       "uart16_icc_tags": "active-only"
     },
     {
+      "id": "display-gpu-gamepad-active-only-ufs",
+      "description": "Phase 3 cumulative product candidate adding the internal UFS controller, PHY and shared 1.8 V rail to the passing active-only gamepad configuration",
+      "nodes": [
+        "framebuffer",
+        "mdss",
+        "mdss_dsi0",
+        "mdss_dsi0_phy",
+        "dispcc",
+        "vdda_panel",
+        "gpu",
+        "gmu",
+        "gpucc",
+        "adreno_smmu",
+        "qupv3_id_2",
+        "uart16",
+        "vreg_mcu_3v3",
+        "ufs_mem_hc",
+        "ufs_mem_phy",
+        "vreg_s4a_1p8"
+      ],
+      "uart16_icc_tags": "active-only"
+    },
+    {
       "id": "gamepad",
       "description": "Retroid gamepad UART, its QUP provider and MCU rail",
       "nodes": [

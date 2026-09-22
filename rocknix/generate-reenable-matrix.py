@@ -9,6 +9,10 @@ from pathlib import Path
 
 ID = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*\Z")
 LABEL = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\Z")
+ACTIVE_ONLY_CANDIDATES = {
+    "display-gpu-gamepad-active-only",
+    "display-gpu-gamepad-active-only-ufs",
+}
 
 
 def load_manifest(path: Path) -> dict:
@@ -20,8 +24,8 @@ def load_manifest(path: Path) -> dict:
     if data.get("candidate_prefix") != "sm8250-retroidpocket-rp5-reenable-":
         raise SystemExit("Unexpected matrix candidate prefix")
     candidates = data.get("candidates")
-    if not isinstance(candidates, list) or len(candidates) != 15:
-        raise SystemExit("Expected eleven independent candidates and four cumulative integration candidates")
+    if not isinstance(candidates, list) or len(candidates) != 16:
+        raise SystemExit("Expected eleven independent candidates and five cumulative integration candidates")
     ids = []
     for candidate in candidates:
         ident = candidate.get("id")
@@ -43,13 +47,25 @@ def load_manifest(path: Path) -> dict:
         icc_tags = candidate.get("uart16_icc_tags")
         if icc_tags not in (None, "active-only"):
             raise SystemExit(f"Invalid UART16 ICC tag mode: {ident}: {icc_tags!r}")
-        if icc_tags and (ident != "display-gpu-gamepad-active-only" or "uart16" not in nodes):
+        if icc_tags and (ident not in ACTIVE_ONLY_CANDIDATES or "uart16" not in nodes):
             raise SystemExit(f"UART16 ICC override is outside its exact candidate: {ident}")
         ids.append(ident)
     if len(ids) != len(set(ids)):
         raise SystemExit("Duplicate candidate id")
-    if sum(candidate.get("uart16_icc_tags") == "active-only" for candidate in candidates) != 1:
-        raise SystemExit("Expected exactly one UART16 active-only ICC candidate")
+    actual_active_only = {
+        candidate["id"]
+        for candidate in candidates
+        if candidate.get("uart16_icc_tags") == "active-only"
+    }
+    if actual_active_only != ACTIVE_ONLY_CANDIDATES:
+        raise SystemExit(
+            f"Unexpected UART16 active-only candidate set: {sorted(actual_active_only)}"
+        )
+    by_id = {candidate["id"]: candidate for candidate in candidates}
+    phase2_nodes = set(by_id["display-gpu-gamepad-active-only"]["nodes"])
+    phase3_nodes = set(by_id["display-gpu-gamepad-active-only-ufs"]["nodes"])
+    if phase3_nodes != phase2_nodes | {"ufs_mem_hc", "ufs_mem_phy", "vreg_s4a_1p8"}:
+        raise SystemExit("Phase 3 must add exactly the three-node UFS slice to Phase 2B")
     deferred = data.get("deferred")
     if not isinstance(deferred, list) or len(deferred) != 3:
         raise SystemExit("Expected three explicitly deferred targets")
