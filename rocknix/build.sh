@@ -155,8 +155,8 @@ elif sys.argv[2] == 'sleepstate-handshake':
     driver = Path('drivers/soc/qcom/smp2p_sleepstate.c').read_text()
     required_driver = {
         '#define PROC_AWAKE_ID\t12',
-        'case PM_SUSPEND_PREPARE:',
-        'case PM_POST_SUSPEND:',
+        '\tcase PM_SUSPEND_PREPARE:',
+        '\tcase PM_POST_SUSPEND:',
         '\tsleepstate->pm_nb.priority = INT_MAX;',
         '\t{ .compatible = "qcom,smp2p-sleepstate" },',
     }
