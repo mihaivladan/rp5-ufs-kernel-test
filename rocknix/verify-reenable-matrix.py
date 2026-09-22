@@ -93,7 +93,7 @@ def main() -> int:
     baseline_path = Path(sys.argv[1])
     manifest = json.loads(Path(sys.argv[2]).read_text())
     candidate_dir = Path(sys.argv[3])
-    if manifest.get("schema") != 1 or len(manifest.get("candidates", [])) != 13:
+    if manifest.get("schema") != 1 or len(manifest.get("candidates", [])) != 14:
         raise SystemExit("Unexpected matrix manifest")
     baseline_nodes, baseline = parse_fdt(baseline_path)
     verify_cpu_invariants(baseline_nodes, baseline, "baseline")
