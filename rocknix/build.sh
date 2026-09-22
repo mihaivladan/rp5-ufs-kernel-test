@@ -227,7 +227,7 @@ elif [[ "${profile}" == reenable-matrix ]]; then
         sm8250-retroidpocket-rp5-reenable-*.dtb \
         reenable-matrix.json generated-dts/*.dts > REENABLE-MATRIX-SHA256SUMS
     printf '%s\n' \
-        'RP5 stock-kernel re-enable matrix passed: proven baseline plus eleven exact subsystem candidates and one display-GPU integration candidate; CPU ICC removal fixed.' \
+        'RP5 stock-kernel re-enable matrix passed: proven baseline plus eleven exact subsystem candidates and two cumulative integration candidates; CPU ICC removal fixed.' \
         > BUILD-SUCCESS.txt
     cd "${source_dir}"
 fi

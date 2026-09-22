@@ -20,8 +20,8 @@ def load_manifest(path: Path) -> dict:
     if data.get("candidate_prefix") != "sm8250-retroidpocket-rp5-reenable-":
         raise SystemExit("Unexpected matrix candidate prefix")
     candidates = data.get("candidates")
-    if not isinstance(candidates, list) or len(candidates) != 12:
-        raise SystemExit("Expected eleven independent candidates and one integration candidate")
+    if not isinstance(candidates, list) or len(candidates) != 13:
+        raise SystemExit("Expected eleven independent candidates and two cumulative integration candidates")
     ids = []
     for candidate in candidates:
         ident = candidate.get("id")

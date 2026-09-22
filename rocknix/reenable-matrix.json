@@ -48,6 +48,25 @@
       ]
     },
     {
+      "id": "display-gpu-gamepad",
+      "description": "Phase 2 cumulative candidate adding the Retroid gamepad UART, QUP provider and MCU rail to the passing integrated display and GPU baseline",
+      "nodes": [
+        "framebuffer",
+        "mdss",
+        "mdss_dsi0",
+        "mdss_dsi0_phy",
+        "dispcc",
+        "vdda_panel",
+        "gpu",
+        "gmu",
+        "gpucc",
+        "adreno_smmu",
+        "qupv3_id_2",
+        "uart16",
+        "vreg_mcu_3v3"
+      ]
+    },
+    {
       "id": "gamepad",
       "description": "Retroid gamepad UART, its QUP provider and MCU rail",
       "nodes": [

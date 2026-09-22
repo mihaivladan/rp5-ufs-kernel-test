@@ -34,12 +34,12 @@ matching module image and preserved stock recovery.
 # RP5 subsystem re-enable matrix
 
 The `reenable-matrix` profile builds eleven independent Device Tree candidates
-and one display-plus-GPU integration candidate from the
-proven stock-kernel pruned baseline. `reenable-matrix.json` is the source of
-truth for each coherent subsystem group. `generate-reenable-matrix.py` creates
-the candidate DTS files, and `verify-reenable-matrix.py` rejects any compiled
-artifact whose semantic delta contains anything beyond the named
-`disabled`-to-`okay` status changes.
+plus cumulative display-plus-GPU and display-plus-GPU-plus-gamepad integration
+candidates from the proven stock-kernel pruned baseline.
+`reenable-matrix.json` is the source of truth for each coherent subsystem
+group. `generate-reenable-matrix.py` creates the candidate DTS files, and
+`verify-reenable-matrix.py` rejects any compiled artifact whose semantic delta
+contains anything beyond the named `disabled`-to-`okay` status changes.
 
 Every candidate retains the stock `7.2.0` kernel, removes all eight CPU ICC
 paths and all 56 CPU OPP peak-bandwidth values, and retains CPU frequency
@@ -47,6 +47,6 @@ control. The workflow also requires the compiled baseline to reproduce the
 SHA-256 of the DTB that recorded stock-kernel AOSD, CXSD and DDR residency.
 
 Run the public workflow **ROCKNIX RP5 subsystem re-enable matrix**. Its artifact
-contains the proven baseline, all twelve candidate DTBs, generated DTS files,
+contains the proven baseline, all thirteen candidate DTBs, generated DTS files,
 the manifest, semantic verification output, provenance and checksums. These
 artifacts are build candidates only; none is installed automatically.
