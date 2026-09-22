@@ -1,0 +1,31 @@
+// SPDX-License-Identifier: BSD-3-Clause
+/*
+ * Phase 6D ADSP-only candidate plus the stock Qualcomm SMP2P sleep-state
+ * handshake.  The stock RP5 Android DT routes this handshake to DSPS/SLPI
+ * (remote PID 3), not to ADSP (remote PID 2).
+ */
+
+#include "sm8250-retroidpocket-rp5-reenable-display-gpu-gamepad-active-only-ufs-wireless-usb-typec-dp-adsp.dts"
+
+&{/smp2p-slpi} {
+	sleepstate_smp2p_out: sleepstate-out {
+		qcom,entry-name = "sleepstate";
+		#qcom,smem-state-cells = <1>;
+	};
+
+	sleepstate_smp2p_in: sleepstate-in {
+		qcom,entry-name = "sleepstate_see";
+		interrupt-controller;
+		#interrupt-cells = <2>;
+	};
+};
+
+/ {
+	smp2p-sleepstate {
+		compatible = "qcom,smp2p-sleepstate";
+		interrupt-parent = <&sleepstate_smp2p_in>;
+		interrupts = <0 0>;
+		interrupt-names = "smp2p-sleepstate-in";
+		qcom,smem-states = <&sleepstate_smp2p_out 0>;
+	};
+};

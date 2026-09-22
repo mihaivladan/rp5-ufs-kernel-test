@@ -15,6 +15,12 @@ gpu-rpmh-fix)
     expected_release='7.2.0-consoleos-gpu-rpmh1'
     artifact_name="rocknix-${expected_release}.tar.zst"
     ;;
+sleepstate-handshake)
+    config_fragment="${kit}/rocknix/sleepstate-handshake.config"
+    expected_release='7.2.0-consoleos-sleepstate1'
+    artifact_name="rocknix-${expected_release}.tar.zst"
+    dtb_name='sm8250-retroidpocket-rp5-adsp-sleepstate'
+    ;;
 minimal-sleep)
     config_fragment="${kit}/rocknix/minimal-sleep.config"
     expected_release='7.2.0-consoleos-minsleep4'
@@ -138,6 +144,25 @@ elif sys.argv[2] == 'gmu-clock-reset':
     power_put = gmu.index('pm_runtime_put_sync(gmu->dev);', reset)
     if not stop < disable < reset < power_put:
         raise SystemExit('GMU clock reset is outside the guarded suspend window')
+elif sys.argv[2] == 'sleepstate-handshake':
+    required = {
+        'CONFIG_QCOM_SMP2P=y', 'CONFIG_QCOM_SMP2P_SLEEPSTATE=y',
+        'CONFIG_PM_SLEEP=y', 'CONFIG_PM=y',
+    }
+    absent = sorted(required - actual)
+    if absent:
+        raise SystemExit('Sleep-state handshake requirements missing: ' + ', '.join(absent))
+    driver = Path('drivers/soc/qcom/smp2p_sleepstate.c').read_text()
+    required_driver = {
+        '#define PROC_AWAKE_ID\t12',
+        'case PM_SUSPEND_PREPARE:',
+        'case PM_POST_SUSPEND:',
+        '\tsleepstate->pm_nb.priority = INT_MAX;',
+        '\t{ .compatible = "qcom,smp2p-sleepstate" },',
+    }
+    absent_driver = sorted(required_driver - set(driver.splitlines()))
+    if absent_driver:
+        raise SystemExit('Sleep-state driver markers missing: ' + ', '.join(absent_driver))
 print(f'All {sys.argv[2]} settings verified.')
 PY
 cp .config "${out}/kernel.config"
@@ -230,6 +255,20 @@ elif [[ "${profile}" == reenable-matrix ]]; then
         'RP5 stock-kernel re-enable matrix passed: proven baseline plus eleven exact subsystem candidates and twelve cumulative integration candidates, including Phase 6A DisplayPort-only, Phase 6B ADSP/LPASS, Phase 6C LPASS-only and Phase 6D ADSP-only discriminators plus the Phase 6 audio candidate with active-only UART6 plus UART16; CPU ICC removal fixed.' \
         > BUILD-SUCCESS.txt
     cd "${source_dir}"
+elif [[ "${profile}" == sleepstate-handshake ]]; then
+    phase6d_name='sm8250-retroidpocket-rp5-reenable-display-gpu-gamepad-active-only-ufs-wireless-usb-typec-dp-adsp'
+    make "${make_args[@]}" -j"$(nproc)" DTC_FLAGS=-@ "qcom/${phase6d_name}.dtb"
+    python3 "${kit}/rocknix/verify-sleepstate-dtb.py" \
+        "arch/arm64/boot/dts/qcom/${phase6d_name}.dtb" \
+        "arch/arm64/boot/dts/qcom/${dtb_name}.dtb" \
+        | tee "${out}/sleepstate-dtb-verification.txt"
+    cp "arch/arm64/boot/dts/qcom/${dtb_name}.dtb" "${out}/"
+    cd "${out}"
+    sha256sum "${dtb_name}.dtb" > SLEEPSTATE-DTB-SHA256SUMS
+    printf '%s\n' \
+        'RP5 SMP2P sleep-state candidate passed: Phase 6D plus the exact three-node SLPI handshake delta. Not installed or boot-tested.' \
+        > BUILD-SUCCESS.txt
+    cd "${source_dir}"
 fi
 if [[ "${1:-all}" == prepare ]]; then
     printf 'RK_WORK_DIR=%s\n' "${work}" >> "${GITHUB_ENV:?}"
@@ -243,7 +282,7 @@ source_dir="${work}/linux-7.2"
 cd "${source_dir}"
 release=$(make "${make_args[@]}" -s kernelrelease)
 test "${release}" = "${expected_release}"
-if [[ "${profile}" == diagnostic || "${profile}" == gpu-rpmh-fix ]]; then
+if [[ "${profile}" == diagnostic || "${profile}" == gpu-rpmh-fix || "${profile}" == sleepstate-handshake ]]; then
     # The previous build exposed an uninitialized cstate pointer in this file.
     printf '\nCFLAGS_dpu_crtc.o += -Werror=uninitialized -Werror=maybe-uninitialized\n' >> drivers/gpu/drm/msm/disp/dpu1/Makefile
 fi
@@ -257,10 +296,14 @@ rm -f "${stage}/lib/modules/${release}/build" "${stage}/lib/modules/${release}/s
 depmod -b "${stage}" "${release}"
 cp System.map Module.symvers "${out}/"
 cp drivers/ufs/host/ufs-qcom.c drivers/ufs/host/ufs-qcom.h "${out}/"
-if [[ "${profile}" == gpu-rpmh-fix ]]; then
+if [[ "${profile}" == gpu-rpmh-fix || "${profile}" == sleepstate-handshake ]]; then
     cp drivers/gpu/drm/msm/adreno/a6xx_gmu.c "${out}/"
 fi
-if [[ "${profile}" == diagnostic || "${profile}" == gpu-rpmh-fix ]]; then
+if [[ "${profile}" == sleepstate-handshake ]]; then
+    cp drivers/soc/qcom/smp2p_sleepstate.c "${out}/"
+    cp "arch/arm64/boot/dts/qcom/${dtb_name}.dts" "${out}/"
+fi
+if [[ "${profile}" == diagnostic || "${profile}" == gpu-rpmh-fix || "${profile}" == sleepstate-handshake ]]; then
     objcopy --dump-section .BTF="${out}/vmlinux.btf" vmlinux
     cp drivers/gpu/drm/msm/disp/dpu1/dpu_crtc.c drivers/gpu/drm/msm/disp/dpu1/dpu_crtc.o "${out}/"
     objdump -drS drivers/gpu/drm/msm/disp/dpu1/dpu_crtc.o > "${out}/dpu_crtc-disassembly.txt"
@@ -269,7 +312,7 @@ elif [[ "${profile}" == gmu-clock-reset ]]; then
 fi
 test -s "${stage}/boot/KERNEL"
 test -s "${stage}/lib/modules/${release}/modules.dep"
-if [[ "${profile}" == diagnostic || "${profile}" == gpu-rpmh-fix ]]; then
+if [[ "${profile}" == diagnostic || "${profile}" == gpu-rpmh-fix || "${profile}" == sleepstate-handshake ]]; then
     test -s "${out}/vmlinux.btf"
 fi
 tar -C "${stage}" -cf - boot lib | zstd -T0 -10 -o "${out}/${artifact_name}"

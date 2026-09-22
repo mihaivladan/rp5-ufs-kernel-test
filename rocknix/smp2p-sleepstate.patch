@@ -1,0 +1,194 @@
+diff --git a/drivers/soc/qcom/Kconfig b/drivers/soc/qcom/Kconfig
+index 2c9b0d82f64a..066edddf3f22 100644
+--- a/drivers/soc/qcom/Kconfig
++++ b/drivers/soc/qcom/Kconfig
+@@ -208,6 +208,17 @@ config QCOM_SMP2P
+ 	  Say yes here to support the Qualcomm Shared Memory Point to Point
+ 	  protocol.
+ 
++config QCOM_SMP2P_SLEEPSTATE
++	bool "Qualcomm SMP2P sleep-state handshake"
++	depends on QCOM_SMP2P
++	depends on PM_SLEEP
++	help
++	  Say yes here to publish the application processor awake state to a
++	  remote processor over SMP2P.  The state is cleared before system
++	  suspend and restored after resume.  Some Qualcomm platforms require
++	  this handshake before the remote sensor subsystem will permit the SoC
++	  to enter its deepest low-power states.
++
+ config QCOM_SMSM
+ 	tristate "Qualcomm Shared Memory State Machine"
+ 	depends on MAILBOX
+diff --git a/drivers/soc/qcom/Makefile b/drivers/soc/qcom/Makefile
+index 363b2c6f13c7..beefa9774f5f 100644
+--- a/drivers/soc/qcom/Makefile
++++ b/drivers/soc/qcom/Makefile
+@@ -27,6 +27,7 @@ obj-$(CONFIG_QCOM_SMEM) +=	smem.o
+ obj-$(CONFIG_QCOM_SMEM_STATE) += smem_state.o
+ CFLAGS_smp2p.o := -I$(src)
+ obj-$(CONFIG_QCOM_SMP2P)	+= smp2p.o
++obj-$(CONFIG_QCOM_SMP2P_SLEEPSTATE) += smp2p_sleepstate.o
+ obj-$(CONFIG_QCOM_SMSM)	+= smsm.o
+ obj-$(CONFIG_QCOM_SOCINFO)	+= socinfo.o
+ obj-$(CONFIG_QCOM_SPM)		+= spm.o
+diff --git a/drivers/soc/qcom/smp2p_sleepstate.c b/drivers/soc/qcom/smp2p_sleepstate.c
+new file mode 100644
+index 000000000000..d5714a4b98a6
+--- /dev/null
++++ b/drivers/soc/qcom/smp2p_sleepstate.c
+@@ -0,0 +1,140 @@
++// SPDX-License-Identifier: GPL-2.0-only
++/*
++ * Qualcomm SMP2P sleep-state handshake
++ *
++ * Derived from the downstream Qualcomm implementation used by SM8250
++ * devices.  The remote sensor subsystem consumes bit 12 as the application
++ * processor awake indication.
++ */
++
++#include <linux/bitops.h>
++#include <linux/interrupt.h>
++#include <linux/limits.h>
++#include <linux/module.h>
++#include <linux/of.h>
++#include <linux/of_irq.h>
++#include <linux/platform_device.h>
++#include <linux/pm_wakeup.h>
++#include <linux/slab.h>
++#include <linux/soc/qcom/smem_state.h>
++#include <linux/suspend.h>
++
++#define PROC_AWAKE_ID	12
++#define AWAKE_BIT	BIT(PROC_AWAKE_ID)
++
++struct smp2p_sleepstate {
++	struct device *dev;
++	struct qcom_smem_state *state;
++	struct notifier_block pm_nb;
++	struct wakeup_source wakeup_source;
++};
++
++static int smp2p_sleepstate_set_awake(struct smp2p_sleepstate *sleepstate,
++				      bool awake)
++{
++	return qcom_smem_state_update_bits(sleepstate->state, AWAKE_BIT,
++					    awake ? AWAKE_BIT : 0);
++}
++
++static int smp2p_sleepstate_pm_notifier(struct notifier_block *nb,
++					unsigned long event, void *unused)
++{
++	struct smp2p_sleepstate *sleepstate =
++		container_of(nb, struct smp2p_sleepstate, pm_nb);
++	int ret = 0;
++
++	switch (event) {
++	case PM_SUSPEND_PREPARE:
++		ret = smp2p_sleepstate_set_awake(sleepstate, false);
++		break;
++	case PM_POST_SUSPEND:
++		ret = smp2p_sleepstate_set_awake(sleepstate, true);
++		break;
++	default:
++		return NOTIFY_DONE;
++	}
++
++	if (ret)
++		dev_err(sleepstate->dev,
++			"failed to update sleep-state handshake: %d\n", ret);
++
++	return notifier_from_errno(ret);
++}
++
++static irqreturn_t smp2p_sleepstate_irq(int irq, void *data)
++{
++	struct smp2p_sleepstate *sleepstate = data;
++
++	__pm_wakeup_event(&sleepstate->wakeup_source, 200);
++
++	return IRQ_HANDLED;
++}
++
++static int smp2p_sleepstate_probe(struct platform_device *pdev)
++{
++	struct device *dev = &pdev->dev;
++	struct smp2p_sleepstate *sleepstate;
++	unsigned int bit;
++	int irq;
++	int ret;
++
++	sleepstate = devm_kzalloc(dev, sizeof(*sleepstate), GFP_KERNEL);
++	if (!sleepstate)
++		return -ENOMEM;
++
++	sleepstate->dev = dev;
++	sleepstate->state = devm_qcom_smem_state_get(dev, NULL, &bit);
++	if (IS_ERR(sleepstate->state))
++		return dev_err_probe(dev, PTR_ERR(sleepstate->state),
++				     "failed to get outbound sleep state\n");
++
++	if (bit)
++		return dev_err_probe(dev, -EINVAL,
++				     "sleep-state selector must be zero\n");
++
++	ret = smp2p_sleepstate_set_awake(sleepstate, true);
++	if (ret)
++		return dev_err_probe(dev, ret,
++				     "failed to publish initial awake state\n");
++
++	sleepstate->pm_nb.notifier_call = smp2p_sleepstate_pm_notifier;
++	sleepstate->pm_nb.priority = INT_MAX;
++	ret = register_pm_notifier(&sleepstate->pm_nb);
++	if (ret)
++		return dev_err_probe(dev, ret,
++				     "failed to register PM notifier\n");
++
++	wakeup_source_init(&sleepstate->wakeup_source, "smp2p-sleepstate");
++
++	irq = of_irq_get_byname(dev->of_node, "smp2p-sleepstate-in");
++	if (irq <= 0) {
++		ret = irq ? irq : -EPROBE_DEFER;
++		dev_err_probe(dev, ret, "failed to get inbound sleep-state IRQ\n");
++		goto err_unregister_notifier;
++	}
++
++	ret = devm_request_threaded_irq(dev, irq, NULL, smp2p_sleepstate_irq,
++					IRQF_ONESHOT | IRQF_TRIGGER_RISING,
++					"smp2p_sleepstate", sleepstate);
++	if (ret) {
++		dev_err_probe(dev, ret,
++			      "failed to request inbound sleep-state IRQ\n");
++		goto err_unregister_notifier;
++	}
++
++	platform_set_drvdata(pdev, sleepstate);
++	dev_info(dev, "awake handshake active on SMP2P bit %u\n", PROC_AWAKE_ID);
++
++	return 0;
++
++err_unregister_notifier:
++	wakeup_source_trash(&sleepstate->wakeup_source);
++	unregister_pm_notifier(&sleepstate->pm_nb);
++	smp2p_sleepstate_set_awake(sleepstate, false);
++
++	return ret;
++}
++
++static const struct of_device_id smp2p_sleepstate_of_match[] = {
++	{ .compatible = "qcom,smp2p-sleepstate" },
++	{}
++};
++MODULE_DEVICE_TABLE(of, smp2p_sleepstate_of_match);
++
++static struct platform_driver smp2p_sleepstate_driver = {
++	.probe = smp2p_sleepstate_probe,
++	.driver = {
++		.name = "smp2p_sleepstate",
++		.of_match_table = smp2p_sleepstate_of_match,
++	},
++};
++module_platform_driver(smp2p_sleepstate_driver);
++
++MODULE_DESCRIPTION("Qualcomm SMP2P sleep-state handshake");
++MODULE_LICENSE("GPL");

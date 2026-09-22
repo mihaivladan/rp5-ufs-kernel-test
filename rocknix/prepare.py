@@ -97,13 +97,20 @@ def apply_patches(repo, source, fix, profile):
                 "91e28ba23946dae574a2fc86e534f143c598a4ac044540e7bdfd38ab20f0d588",
                 "GMU clock-reset patch checksum mismatch")
         extra_patches.append(gmu_reset)
-    elif profile == "gpu-rpmh-fix":
+    elif profile in ("gpu-rpmh-fix", "sleepstate-handshake"):
         rpmh_fix = Path(__file__).resolve().parent / "a6xx-stale-rpmh-votes.patch"
         require(rpmh_fix.is_file(), "Missing upstream stale RPMh vote fix")
         require(hashlib.sha256(rpmh_fix.read_bytes()).hexdigest() ==
                 "6fa32840101b0b03554173ffb0a70b059f5acfbb81147f884d9cf12219c9d5ca",
                 "GPU stale RPMh vote fix checksum mismatch")
         extra_patches.append(rpmh_fix)
+    if profile == "sleepstate-handshake":
+        sleepstate_fix = Path(__file__).resolve().parent / "smp2p-sleepstate.patch"
+        require(sleepstate_fix.is_file(), "Missing SMP2P sleep-state patch")
+        require(hashlib.sha256(sleepstate_fix.read_bytes()).hexdigest() ==
+                "c4efec6292bf6f9afb596d21bb6b383e8a0ec52380c69aaa8c7c42becf4ddd6d",
+                "SMP2P sleep-state patch checksum mismatch")
+        extra_patches.append(sleepstate_fix)
     for patch in patches + [fix, display_fix, *extra_patches]:
         print(f"Applying {patch.name}", flush=True)
         payload = patch.read_text().replace("@TARGET_CPU@", "cortex-a76.cortex-a55").replace("@DEVICE@", "SM8250")
@@ -114,12 +121,18 @@ def apply_patches(repo, source, fix, profile):
         subprocess.run(args, input=payload, text=True, cwd=source, check=True)
         records.append({"path": str(patch.relative_to(repo)) if patch in patches else patch.name,
                         "sha256": hashlib.sha256(patch.read_bytes()).hexdigest()})
-    if profile == "gpu-rpmh-fix":
+    if profile in ("gpu-rpmh-fix", "sleepstate-handshake"):
         gmu_source = (source / "drivers/gpu/drm/msm/adreno/a6xx_gmu.c").read_text()
         require("if (!test_and_clear_bit(GMU_STATUS_FW_START, &gmu->status))" in gmu_source,
                 "Corrected GMU firmware-start condition missing")
         require("gmu_write(gmu, REG_A6XX_GMU_CM3_SYSRESET, 1);" in gmu_source,
                 "GMU CM3 reset before RPMh stop missing")
+    if profile == "sleepstate-handshake":
+        sleepstate_source = (source / "drivers/soc/qcom/smp2p_sleepstate.c").read_text()
+        require("case PM_SUSPEND_PREPARE:" in sleepstate_source and
+                "case PM_POST_SUSPEND:" in sleepstate_source and
+                "PROC_AWAKE_ID\t12" in sleepstate_source,
+                "SMP2P sleep-state handshake implementation missing")
     dts = repo / "projects/ROCKNIX/devices/SM8250/linux/dts"
     shutil.copytree(dts, source / "arch/arm64/boot/dts", dirs_exist_ok=True)
     custom_names = {
@@ -137,7 +150,7 @@ def apply_patches(repo, source, fix, profile):
             reference = Path(__file__).resolve().parent / "sm8250-retroidpocket-rp5-minsleep4.dts"
             require(reference.is_file(), "Missing minsleep4 reference DTS")
             shutil.copyfile(reference, source / "arch/arm64/boot/dts/qcom" / reference.name)
-    elif profile == "reenable-matrix":
+    elif profile in ("reenable-matrix", "sleepstate-handshake"):
         root = Path(__file__).resolve().parent
         for filename in (
             "sm8250-retroidpocket-rp5-minsleep4.dts",
@@ -159,6 +172,13 @@ def apply_patches(repo, source, fix, profile):
              str(source / "arch/arm64/boot/dts/qcom")],
             check=True,
         )
+        if profile == "sleepstate-handshake":
+            sleepstate_dts = root / "sm8250-retroidpocket-rp5-adsp-sleepstate.dts"
+            require(sleepstate_dts.is_file(), "Missing RP5 sleep-state DTS")
+            shutil.copyfile(
+                sleepstate_dts,
+                source / "arch/arm64/boot/dts/qcom" / sleepstate_dts.name,
+            )
     # Match the board used by the saved device baseline. This release predates
     # the separate Visionox DTS found in newer ROCKNIX revisions.
     makefile = source / "arch/arm64/boot/dts/qcom/Makefile"
@@ -174,6 +194,8 @@ def apply_patches(repo, source, fix, profile):
             "sm8250-retroidpocket-rp5-stock-pruned",
             *matrix_names,
         ])
+    elif profile == "sleepstate-handshake":
+        names.append("sm8250-retroidpocket-rp5-adsp-sleepstate")
     for name in names:
         require((source / f"arch/arm64/boot/dts/qcom/{name}.dts").is_file(), f"Missing {name} DTS")
         if f"{name}.dtb" not in contents:
@@ -191,6 +213,7 @@ def main():
     require(profile in (
         "diagnostic", "minimal-sleep", "cpu-icc-off", "stock-pruned",
         "reenable-matrix", "gmu-clock-reset", "gpu-rpmh-fix",
+        "sleepstate-handshake",
     ),
             f"Unsupported ROCKNIX_PROFILE: {profile}")
     records = apply_patches(
@@ -204,7 +227,12 @@ def main():
         "initramfs_sha256": initramfs_sha, "patches": records,
         "fix_commit": "f07317a8d57f382ec505597816271dd72ffa20c7",
         "gpu_rpmh_fix_commit": (
-            "d9108bfdb746" if profile == "gpu-rpmh-fix" else None
+            "d9108bfdb746"
+            if profile in ("gpu-rpmh-fix", "sleepstate-handshake") else None
+        ),
+        "sleepstate_handshake": (
+            "Qualcomm downstream SMP2P awake bit 12 over the RP5 DSPS/SLPI channel"
+            if profile == "sleepstate-handshake" else None
         ),
         "display_fix": "Initialize DPU CRTC state before ROCKNIX resource-cleanup writes num_mixers",
         "baseline": "ROCKNIX 20260901 / Linux 7.2.0",
