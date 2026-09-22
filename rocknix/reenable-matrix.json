@@ -48,6 +48,23 @@
       ]
     },
     {
+      "id": "display-gpu-qup2",
+      "description": "Phase 2A discriminator adding only the QUP2 provider to the passing integrated display and GPU baseline; UART16 and the MCU rail remain disabled",
+      "nodes": [
+        "framebuffer",
+        "mdss",
+        "mdss_dsi0",
+        "mdss_dsi0_phy",
+        "dispcc",
+        "vdda_panel",
+        "gpu",
+        "gmu",
+        "gpucc",
+        "adreno_smmu",
+        "qupv3_id_2"
+      ]
+    },
+    {
       "id": "display-gpu-gamepad",
       "description": "Phase 2 cumulative candidate adding the Retroid gamepad UART, QUP provider and MCU rail to the passing integrated display and GPU baseline",
       "nodes": [

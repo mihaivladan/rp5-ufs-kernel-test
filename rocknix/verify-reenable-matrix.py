@@ -141,7 +141,7 @@ def main() -> int:
     print("Verified fixed CPU invariant: 8 ICC paths absent; 56 OPP bandwidth values absent")
     for ident, count in verified:
         print(f"Verified {ident}: exactly {count} disabled-to-okay status changes")
-    print("Verified 11 independent subsystem candidates plus 2 cumulative integration candidates")
+    print("Verified 11 independent subsystem candidates plus 3 cumulative integration candidates")
     return 0
 
 
