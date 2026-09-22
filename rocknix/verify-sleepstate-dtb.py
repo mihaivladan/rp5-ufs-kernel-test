@@ -76,12 +76,14 @@ def main() -> int:
             f"removed={sorted(baseline_nodes - candidate_nodes)}"
         )
 
+    metadata = {"phandle", "linux,phandle"}
     baseline_existing = {
-        key: value for key, value in baseline.items() if key[0] != "/__symbols__"
+        key: value for key, value in baseline.items()
+        if key[0] != "/__symbols__" and key[1] not in metadata
     }
     candidate_existing = {
         key: value for key, value in candidate.items()
-        if key[0] != "/__symbols__" and key[0] not in new_nodes
+        if key[0] != "/__symbols__" and key[0] not in new_nodes and key[1] not in metadata
     }
     if baseline_existing != candidate_existing:
         changed = sorted(
