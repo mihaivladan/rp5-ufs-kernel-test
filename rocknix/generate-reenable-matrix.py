@@ -83,13 +83,13 @@ def load_manifest(path: Path) -> dict:
     phase6_nodes = set(by_id["display-gpu-gamepad-active-only-ufs-wireless-usb-typec-audio"]["nodes"])
     phase6_added = {
         "adsp", "lpass_tlmm", "sound", "wcd938x", "rxmacro", "txmacro",
-        "vamacro", "wsamacro", "swr0", "swr1", "swr2", "vdc_5v",
+        "vamacro", "wsamacro", "swr0", "swr1", "swr2", "vdc_5v", "mdss_dp",
     }
     if phase6_nodes != phase5_nodes | phase6_added:
-        raise SystemExit("Phase 6 must add exactly the twelve new audio nodes to Phase 5")
+        raise SystemExit("Phase 6 must add exactly the thirteen audio and required DP-codec nodes to Phase 5")
     deferred = data.get("deferred")
-    if not isinstance(deferred, list) or len(deferred) != 3:
-        raise SystemExit("Expected three explicitly deferred targets")
+    if not isinstance(deferred, list) or len(deferred) != 2:
+        raise SystemExit("Expected two explicitly deferred targets")
     return data
 
 

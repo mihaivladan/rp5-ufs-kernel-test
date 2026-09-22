@@ -229,12 +229,12 @@ def main() -> int:
         (resolve(selector, baseline), "status")
         for selector in (
             "adsp", "lpass_tlmm", "sound", "wcd938x", "rxmacro", "txmacro",
-            "vamacro", "wsamacro", "swr0", "swr1", "swr2", "vdc_5v",
+            "vamacro", "wsamacro", "swr0", "swr1", "swr2", "vdc_5v", "mdss_dp",
         )
     }
     if phase6_delta != expected_phase6_delta:
         raise SystemExit(
-            f"Phase 6 is not an exact twelve-status delta from Phase 5: "
+            f"Phase 6 is not an exact thirteen-status delta from Phase 5: "
             f"actual={sorted(phase6_delta)} expected={sorted(expected_phase6_delta)}"
         )
 
@@ -246,7 +246,7 @@ def main() -> int:
     print("Verified Phase 3 relative delta: exactly UFS controller, PHY and shared 1.8 V rail disabled-to-okay")
     print("Verified Phase 4 relative delta: exactly PCIe controller, PCIe PHY, Bluetooth UART, QCA6390 PMU and QUP0 disabled-to-okay")
     print("Verified Phase 5 relative delta: exactly USB controller, DWC3 child, HS PHY, SuperSpeed PHY, PMIC Type-C, PMIC VBUS and I2C15 disabled-to-okay")
-    print("Verified Phase 6 relative delta: exactly ADSP, LPASS pinctrl, sound card, external codec, four codec macros, three SoundWire controllers and 5 V rail disabled-to-okay")
+    print("Verified Phase 6 relative delta: exactly ADSP, LPASS pinctrl, sound card, external codec, four codec macros, three SoundWire controllers, required DisplayPort codec provider and 5 V rail disabled-to-okay")
     print("Verified 11 independent subsystem candidates plus 8 cumulative integration candidates")
     return 0
 

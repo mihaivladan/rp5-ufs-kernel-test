@@ -191,13 +191,14 @@
     },
     {
       "id": "display-gpu-gamepad-active-only-ufs-wireless-usb-typec-audio",
-      "description": "Phase 6 cumulative product candidate adding ADSP, LPASS pinctrl, codec macros, SoundWire, sound card and the 5 V audio rail to Phase 5 while reusing the proven shared 1.8 V rail",
+      "description": "Phase 6 cumulative product candidate adding ADSP, LPASS pinctrl, codec macros, SoundWire, sound card, its required DisplayPort codec provider and the 5 V audio rail to Phase 5 while reusing the proven shared 1.8 V rail",
       "nodes": [
         "framebuffer",
         "mdss",
         "mdss_dsi0",
         "mdss_dsi0_phy",
         "dispcc",
+        "mdss_dp",
         "vdda_panel",
         "gpu",
         "gmu",
@@ -357,10 +358,6 @@
     }
   ],
   "deferred": [
-    {
-      "node": "mdss_dp",
-      "reason": "External DisplayPort will be tested only after internal display and USB/Type-C pass independently"
-    },
     {
       "node": "uart12",
       "reason": "Debug UART is not required by the product path and chosen stdout remains removed"
