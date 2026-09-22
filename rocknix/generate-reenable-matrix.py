@@ -13,6 +13,7 @@ ACTIVE_ONLY_CANDIDATES = {
     "display-gpu-gamepad-active-only",
     "display-gpu-gamepad-active-only-ufs",
     "display-gpu-gamepad-active-only-ufs-wireless",
+    "display-gpu-gamepad-active-only-ufs-wireless-usb-typec",
 }
 
 
@@ -25,8 +26,8 @@ def load_manifest(path: Path) -> dict:
     if data.get("candidate_prefix") != "sm8250-retroidpocket-rp5-reenable-":
         raise SystemExit("Unexpected matrix candidate prefix")
     candidates = data.get("candidates")
-    if not isinstance(candidates, list) or len(candidates) != 17:
-        raise SystemExit("Expected eleven independent candidates and six cumulative integration candidates")
+    if not isinstance(candidates, list) or len(candidates) != 18:
+        raise SystemExit("Expected eleven independent candidates and seven cumulative integration candidates")
     ids = []
     for candidate in candidates:
         ident = candidate.get("id")
@@ -71,6 +72,13 @@ def load_manifest(path: Path) -> dict:
     phase4_added = {"pcie0", "pcie0_phy", "uart6", "/qca6390-pmu", "qupv3_id_0"}
     if phase4_nodes != phase3_nodes | phase4_added:
         raise SystemExit("Phase 4 must add exactly the five new wireless nodes to Phase 3")
+    phase5_nodes = set(by_id["display-gpu-gamepad-active-only-ufs-wireless-usb-typec"]["nodes"])
+    phase5_added = {
+        "usb_1", "usb_1_dwc3", "usb_1_hsphy", "usb_1_qmpphy",
+        "pm8150b_typec", "pm8150b_vbus", "i2c15",
+    }
+    if phase5_nodes != phase4_nodes | phase5_added:
+        raise SystemExit("Phase 5 must add exactly the seven new USB/Type-C nodes to Phase 4")
     deferred = data.get("deferred")
     if not isinstance(deferred, list) or len(deferred) != 3:
         raise SystemExit("Expected three explicitly deferred targets")

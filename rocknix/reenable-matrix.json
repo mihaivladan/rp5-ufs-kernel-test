@@ -155,6 +155,41 @@
       "uart16_icc_tags": "active-only"
     },
     {
+      "id": "display-gpu-gamepad-active-only-ufs-wireless-usb-typec",
+      "description": "Phase 5 cumulative product candidate adding the USB controller, DWC3 child, HS and SuperSpeed PHYs, PMIC Type-C and VBUS, and retimer I2C15 to Phase 4 while reusing the proven QUP2 provider and shared 1.8 V rail",
+      "nodes": [
+        "framebuffer",
+        "mdss",
+        "mdss_dsi0",
+        "mdss_dsi0_phy",
+        "dispcc",
+        "vdda_panel",
+        "gpu",
+        "gmu",
+        "gpucc",
+        "adreno_smmu",
+        "qupv3_id_2",
+        "uart16",
+        "vreg_mcu_3v3",
+        "ufs_mem_hc",
+        "ufs_mem_phy",
+        "vreg_s4a_1p8",
+        "pcie0",
+        "pcie0_phy",
+        "uart6",
+        "/qca6390-pmu",
+        "qupv3_id_0",
+        "usb_1",
+        "usb_1_dwc3",
+        "usb_1_hsphy",
+        "usb_1_qmpphy",
+        "pm8150b_typec",
+        "pm8150b_vbus",
+        "i2c15"
+      ],
+      "uart16_icc_tags": "active-only"
+    },
+    {
       "id": "gamepad",
       "description": "Retroid gamepad UART, its QUP provider and MCU rail",
       "nodes": [
