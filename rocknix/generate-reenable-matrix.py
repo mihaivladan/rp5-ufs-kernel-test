@@ -14,6 +14,7 @@ ACTIVE_ONLY_CANDIDATES = {
     "display-gpu-gamepad-active-only-ufs",
     "display-gpu-gamepad-active-only-ufs-wireless",
     "display-gpu-gamepad-active-only-ufs-wireless-usb-typec",
+    "display-gpu-gamepad-active-only-ufs-wireless-usb-typec-audio",
 }
 
 
@@ -26,8 +27,8 @@ def load_manifest(path: Path) -> dict:
     if data.get("candidate_prefix") != "sm8250-retroidpocket-rp5-reenable-":
         raise SystemExit("Unexpected matrix candidate prefix")
     candidates = data.get("candidates")
-    if not isinstance(candidates, list) or len(candidates) != 18:
-        raise SystemExit("Expected eleven independent candidates and seven cumulative integration candidates")
+    if not isinstance(candidates, list) or len(candidates) != 19:
+        raise SystemExit("Expected eleven independent candidates and eight cumulative integration candidates")
     ids = []
     for candidate in candidates:
         ident = candidate.get("id")
@@ -79,6 +80,13 @@ def load_manifest(path: Path) -> dict:
     }
     if phase5_nodes != phase4_nodes | phase5_added:
         raise SystemExit("Phase 5 must add exactly the seven new USB/Type-C nodes to Phase 4")
+    phase6_nodes = set(by_id["display-gpu-gamepad-active-only-ufs-wireless-usb-typec-audio"]["nodes"])
+    phase6_added = {
+        "adsp", "lpass_tlmm", "sound", "wcd938x", "rxmacro", "txmacro",
+        "vamacro", "wsamacro", "swr0", "swr1", "swr2", "vdc_5v",
+    }
+    if phase6_nodes != phase5_nodes | phase6_added:
+        raise SystemExit("Phase 6 must add exactly the twelve new audio nodes to Phase 5")
     deferred = data.get("deferred")
     if not isinstance(deferred, list) or len(deferred) != 3:
         raise SystemExit("Expected three explicitly deferred targets")

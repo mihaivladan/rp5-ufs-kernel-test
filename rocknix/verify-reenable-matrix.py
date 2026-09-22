@@ -12,6 +12,7 @@ ACTIVE_ONLY_CANDIDATES = {
     "display-gpu-gamepad-active-only-ufs",
     "display-gpu-gamepad-active-only-ufs-wireless",
     "display-gpu-gamepad-active-only-ufs-wireless-usb-typec",
+    "display-gpu-gamepad-active-only-ufs-wireless-usb-typec-audio",
 }
 
 
@@ -101,7 +102,7 @@ def main() -> int:
     baseline_path = Path(sys.argv[1])
     manifest = json.loads(Path(sys.argv[2]).read_text())
     candidate_dir = Path(sys.argv[3])
-    if manifest.get("schema") != 2 or len(manifest.get("candidates", [])) != 18:
+    if manifest.get("schema") != 2 or len(manifest.get("candidates", [])) != 19:
         raise SystemExit("Unexpected matrix manifest")
     baseline_nodes, baseline = parse_fdt(baseline_path)
     verify_cpu_invariants(baseline_nodes, baseline, "baseline")
@@ -219,6 +220,24 @@ def main() -> int:
             f"actual={sorted(phase5_delta)} expected={sorted(expected_phase5_delta)}"
         )
 
+    phase6 = candidate_properties["display-gpu-gamepad-active-only-ufs-wireless-usb-typec-audio"]
+    phase6_delta = {
+        key for key in phase5.keys() | phase6.keys()
+        if phase5.get(key) != phase6.get(key)
+    }
+    expected_phase6_delta = {
+        (resolve(selector, baseline), "status")
+        for selector in (
+            "adsp", "lpass_tlmm", "sound", "wcd938x", "rxmacro", "txmacro",
+            "vamacro", "wsamacro", "swr0", "swr1", "swr2", "vdc_5v",
+        )
+    }
+    if phase6_delta != expected_phase6_delta:
+        raise SystemExit(
+            f"Phase 6 is not an exact twelve-status delta from Phase 5: "
+            f"actual={sorted(phase6_delta)} expected={sorted(expected_phase6_delta)}"
+        )
+
     print(f"Verified baseline node set: {len(baseline_nodes)} nodes")
     print("Verified fixed CPU invariant: 8 ICC paths absent; 56 OPP bandwidth values absent")
     for ident, count, has_icc_override in verified:
@@ -227,7 +246,8 @@ def main() -> int:
     print("Verified Phase 3 relative delta: exactly UFS controller, PHY and shared 1.8 V rail disabled-to-okay")
     print("Verified Phase 4 relative delta: exactly PCIe controller, PCIe PHY, Bluetooth UART, QCA6390 PMU and QUP0 disabled-to-okay")
     print("Verified Phase 5 relative delta: exactly USB controller, DWC3 child, HS PHY, SuperSpeed PHY, PMIC Type-C, PMIC VBUS and I2C15 disabled-to-okay")
-    print("Verified 11 independent subsystem candidates plus 7 cumulative integration candidates")
+    print("Verified Phase 6 relative delta: exactly ADSP, LPASS pinctrl, sound card, external codec, four codec macros, three SoundWire controllers and 5 V rail disabled-to-okay")
+    print("Verified 11 independent subsystem candidates plus 8 cumulative integration candidates")
     return 0
 
 
