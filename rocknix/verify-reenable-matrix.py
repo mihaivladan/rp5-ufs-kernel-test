@@ -14,6 +14,7 @@ ACTIVE_ONLY_CANDIDATES = {
     "display-gpu-gamepad-active-only-ufs-wireless-usb-typec",
     "display-gpu-gamepad-active-only-ufs-wireless-usb-typec-dp",
     "display-gpu-gamepad-active-only-ufs-wireless-usb-typec-dp-adsp-lpass",
+    "display-gpu-gamepad-active-only-ufs-wireless-usb-typec-dp-lpass",
     "display-gpu-gamepad-active-only-ufs-wireless-usb-typec-audio",
 }
 UART6_ACTIVE_ONLY_CANDIDATES = {
@@ -107,7 +108,7 @@ def main() -> int:
     baseline_path = Path(sys.argv[1])
     manifest = json.loads(Path(sys.argv[2]).read_text())
     candidate_dir = Path(sys.argv[3])
-    if manifest.get("schema") != 2 or len(manifest.get("candidates", [])) != 21:
+    if manifest.get("schema") != 2 or len(manifest.get("candidates", [])) != 22:
         raise SystemExit("Unexpected matrix manifest")
     baseline_nodes, baseline = parse_fdt(baseline_path)
     verify_cpu_invariants(baseline_nodes, baseline, "baseline")
@@ -284,6 +285,28 @@ def main() -> int:
             f"actual={sorted(phase6b_delta)} expected={sorted(expected_phase6b_delta)}"
         )
 
+    phase6c = candidate_properties["display-gpu-gamepad-active-only-ufs-wireless-usb-typec-dp-lpass"]
+    phase6c_delta = {
+        key for key in phase6a.keys() | phase6c.keys()
+        if phase6a.get(key) != phase6c.get(key)
+    }
+    expected_phase6c_delta = {(resolve("lpass_tlmm", baseline), "status")}
+    if phase6c_delta != expected_phase6c_delta:
+        raise SystemExit(
+            f"Phase 6C is not an exact LPASS-status delta from Phase 6A: "
+            f"actual={sorted(phase6c_delta)} expected={sorted(expected_phase6c_delta)}"
+        )
+    phase6b_from_6c_delta = {
+        key for key in phase6c.keys() | phase6b.keys()
+        if phase6c.get(key) != phase6b.get(key)
+    }
+    expected_phase6b_from_6c_delta = {(resolve("adsp", baseline), "status")}
+    if phase6b_from_6c_delta != expected_phase6b_from_6c_delta:
+        raise SystemExit(
+            f"Phase 6B is not an exact ADSP-status delta from Phase 6C: "
+            f"actual={sorted(phase6b_from_6c_delta)} expected={sorted(expected_phase6b_from_6c_delta)}"
+        )
+
     phase6 = candidate_properties["display-gpu-gamepad-active-only-ufs-wireless-usb-typec-audio"]
     phase6_delta = {
         key for key in phase6a.keys() | phase6.keys()
@@ -315,8 +338,9 @@ def main() -> int:
     print("Verified Phase 5 relative delta: exactly USB controller, DWC3 child, HS PHY, SuperSpeed PHY, PMIC Type-C, PMIC VBUS and I2C15 disabled-to-okay")
     print("Verified Phase 6A relative delta: exactly the required DisplayPort codec provider disabled-to-okay")
     print("Verified Phase 6B relative delta: exactly ADSP and LPASS pinctrl disabled-to-okay")
+    print("Verified Phase 6C relative delta: exactly LPASS pinctrl disabled-to-okay; Phase 6B then adds exactly ADSP")
     print("Verified Phase 6 relative delta from Phase 6A: exactly ADSP, LPASS pinctrl, sound card, external codec, four codec macros, three SoundWire controllers and 5 V rail disabled-to-okay; exactly four UART6 ICC tag cells active-only")
-    print("Verified 11 independent subsystem candidates plus 10 cumulative integration candidates")
+    print("Verified 11 independent subsystem candidates plus 11 cumulative integration candidates")
     return 0
 
 
