@@ -15,6 +15,7 @@ ACTIVE_ONLY_CANDIDATES = {
     "display-gpu-gamepad-active-only-ufs-wireless",
     "display-gpu-gamepad-active-only-ufs-wireless-usb-typec",
     "display-gpu-gamepad-active-only-ufs-wireless-usb-typec-dp",
+    "display-gpu-gamepad-active-only-ufs-wireless-usb-typec-dp-adsp-lpass",
     "display-gpu-gamepad-active-only-ufs-wireless-usb-typec-audio",
 }
 UART6_ACTIVE_ONLY_CANDIDATES = {
@@ -31,8 +32,8 @@ def load_manifest(path: Path) -> dict:
     if data.get("candidate_prefix") != "sm8250-retroidpocket-rp5-reenable-":
         raise SystemExit("Unexpected matrix candidate prefix")
     candidates = data.get("candidates")
-    if not isinstance(candidates, list) or len(candidates) != 20:
-        raise SystemExit("Expected eleven independent candidates and nine cumulative integration candidates")
+    if not isinstance(candidates, list) or len(candidates) != 21:
+        raise SystemExit("Expected eleven independent candidates and ten cumulative integration candidates")
     ids = []
     for candidate in candidates:
         ident = candidate.get("id")
@@ -103,6 +104,9 @@ def load_manifest(path: Path) -> dict:
     phase6a_nodes = set(by_id["display-gpu-gamepad-active-only-ufs-wireless-usb-typec-dp"]["nodes"])
     if phase6a_nodes != phase5_nodes | {"mdss_dp"}:
         raise SystemExit("Phase 6A must add exactly the DisplayPort codec provider to Phase 5")
+    phase6b_nodes = set(by_id["display-gpu-gamepad-active-only-ufs-wireless-usb-typec-dp-adsp-lpass"]["nodes"])
+    if phase6b_nodes != phase6a_nodes | {"adsp", "lpass_tlmm"}:
+        raise SystemExit("Phase 6B must add exactly ADSP and LPASS pinctrl to Phase 6A")
     phase6_nodes = set(by_id["display-gpu-gamepad-active-only-ufs-wireless-usb-typec-audio"]["nodes"])
     phase6_added = {
         "adsp", "lpass_tlmm", "sound", "wcd938x", "rxmacro", "txmacro",

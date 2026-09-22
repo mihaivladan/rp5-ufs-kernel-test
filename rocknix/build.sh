@@ -227,7 +227,7 @@ elif [[ "${profile}" == reenable-matrix ]]; then
         sm8250-retroidpocket-rp5-reenable-*.dtb \
         reenable-matrix.json generated-dts/*.dts > REENABLE-MATRIX-SHA256SUMS
     printf '%s\n' \
-        'RP5 stock-kernel re-enable matrix passed: proven baseline plus eleven exact subsystem candidates and nine cumulative integration candidates, including the Phase 6A DisplayPort-only discriminator and Phase 6 audio candidate with active-only UART6 plus UART16; CPU ICC removal fixed.' \
+        'RP5 stock-kernel re-enable matrix passed: proven baseline plus eleven exact subsystem candidates and ten cumulative integration candidates, including the Phase 6A DisplayPort-only and Phase 6B ADSP/LPASS discriminators plus the Phase 6 audio candidate with active-only UART6 plus UART16; CPU ICC removal fixed.' \
         > BUILD-SUCCESS.txt
     cd "${source_dir}"
 fi
