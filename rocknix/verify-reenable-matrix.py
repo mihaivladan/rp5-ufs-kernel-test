@@ -10,6 +10,7 @@ from pathlib import Path
 ACTIVE_ONLY_CANDIDATES = {
     "display-gpu-gamepad-active-only",
     "display-gpu-gamepad-active-only-ufs",
+    "display-gpu-gamepad-active-only-ufs-wireless",
 }
 
 
@@ -99,7 +100,7 @@ def main() -> int:
     baseline_path = Path(sys.argv[1])
     manifest = json.loads(Path(sys.argv[2]).read_text())
     candidate_dir = Path(sys.argv[3])
-    if manifest.get("schema") != 2 or len(manifest.get("candidates", [])) != 16:
+    if manifest.get("schema") != 2 or len(manifest.get("candidates", [])) != 17:
         raise SystemExit("Unexpected matrix manifest")
     baseline_nodes, baseline = parse_fdt(baseline_path)
     verify_cpu_invariants(baseline_nodes, baseline, "baseline")
@@ -184,13 +185,29 @@ def main() -> int:
             f"actual={sorted(phase3_delta)} expected={sorted(expected_phase3_delta)}"
         )
 
+    phase4 = candidate_properties["display-gpu-gamepad-active-only-ufs-wireless"]
+    phase4_delta = {
+        key for key in phase3.keys() | phase4.keys()
+        if phase3.get(key) != phase4.get(key)
+    }
+    expected_phase4_delta = {
+        (resolve(selector, baseline), "status")
+        for selector in ("pcie0", "pcie0_phy", "uart6", "/qca6390-pmu", "qupv3_id_0")
+    }
+    if phase4_delta != expected_phase4_delta:
+        raise SystemExit(
+            f"Phase 4 is not an exact five-status delta from Phase 3: "
+            f"actual={sorted(phase4_delta)} expected={sorted(expected_phase4_delta)}"
+        )
+
     print(f"Verified baseline node set: {len(baseline_nodes)} nodes")
     print("Verified fixed CPU invariant: 8 ICC paths absent; 56 OPP bandwidth values absent")
     for ident, count, has_icc_override in verified:
         suffix = "; UART16 ICC tags exactly active-only" if has_icc_override else ""
         print(f"Verified {ident}: exactly {count} disabled-to-okay status changes{suffix}")
     print("Verified Phase 3 relative delta: exactly UFS controller, PHY and shared 1.8 V rail disabled-to-okay")
-    print("Verified 11 independent subsystem candidates plus 5 cumulative integration candidates")
+    print("Verified Phase 4 relative delta: exactly PCIe controller, PCIe PHY, Bluetooth UART, QCA6390 PMU and QUP0 disabled-to-okay")
+    print("Verified 11 independent subsystem candidates plus 6 cumulative integration candidates")
     return 0
 
 

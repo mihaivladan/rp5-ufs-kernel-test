@@ -12,6 +12,7 @@ LABEL = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\Z")
 ACTIVE_ONLY_CANDIDATES = {
     "display-gpu-gamepad-active-only",
     "display-gpu-gamepad-active-only-ufs",
+    "display-gpu-gamepad-active-only-ufs-wireless",
 }
 
 
@@ -24,8 +25,8 @@ def load_manifest(path: Path) -> dict:
     if data.get("candidate_prefix") != "sm8250-retroidpocket-rp5-reenable-":
         raise SystemExit("Unexpected matrix candidate prefix")
     candidates = data.get("candidates")
-    if not isinstance(candidates, list) or len(candidates) != 16:
-        raise SystemExit("Expected eleven independent candidates and five cumulative integration candidates")
+    if not isinstance(candidates, list) or len(candidates) != 17:
+        raise SystemExit("Expected eleven independent candidates and six cumulative integration candidates")
     ids = []
     for candidate in candidates:
         ident = candidate.get("id")
@@ -66,6 +67,10 @@ def load_manifest(path: Path) -> dict:
     phase3_nodes = set(by_id["display-gpu-gamepad-active-only-ufs"]["nodes"])
     if phase3_nodes != phase2_nodes | {"ufs_mem_hc", "ufs_mem_phy", "vreg_s4a_1p8"}:
         raise SystemExit("Phase 3 must add exactly the three-node UFS slice to Phase 2B")
+    phase4_nodes = set(by_id["display-gpu-gamepad-active-only-ufs-wireless"]["nodes"])
+    phase4_added = {"pcie0", "pcie0_phy", "uart6", "/qca6390-pmu", "qupv3_id_0"}
+    if phase4_nodes != phase3_nodes | phase4_added:
+        raise SystemExit("Phase 4 must add exactly the five new wireless nodes to Phase 3")
     deferred = data.get("deferred")
     if not isinstance(deferred, list) or len(deferred) != 3:
         raise SystemExit("Expected three explicitly deferred targets")
