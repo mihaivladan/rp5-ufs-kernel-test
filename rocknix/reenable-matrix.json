@@ -190,6 +190,42 @@
       "uart16_icc_tags": "active-only"
     },
     {
+      "id": "display-gpu-gamepad-active-only-ufs-wireless-usb-typec-dp",
+      "description": "Phase 6A discriminator adding only the required DisplayPort codec provider to the passing Phase 5 cumulative product baseline",
+      "nodes": [
+        "framebuffer",
+        "mdss",
+        "mdss_dsi0",
+        "mdss_dsi0_phy",
+        "dispcc",
+        "mdss_dp",
+        "vdda_panel",
+        "gpu",
+        "gmu",
+        "gpucc",
+        "adreno_smmu",
+        "qupv3_id_2",
+        "uart16",
+        "vreg_mcu_3v3",
+        "ufs_mem_hc",
+        "ufs_mem_phy",
+        "vreg_s4a_1p8",
+        "pcie0",
+        "pcie0_phy",
+        "uart6",
+        "/qca6390-pmu",
+        "qupv3_id_0",
+        "usb_1",
+        "usb_1_dwc3",
+        "usb_1_hsphy",
+        "usb_1_qmpphy",
+        "pm8150b_typec",
+        "pm8150b_vbus",
+        "i2c15"
+      ],
+      "uart16_icc_tags": "active-only"
+    },
+    {
       "id": "display-gpu-gamepad-active-only-ufs-wireless-usb-typec-audio",
       "description": "Phase 6 fix candidate adding the complete audio and required DisplayPort codec slice to Phase 5 while making the observed persistent Bluetooth UART6 ICC paths active-only",
       "nodes": [
