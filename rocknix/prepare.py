@@ -108,7 +108,7 @@ def apply_patches(repo, source, fix, profile):
         sleepstate_fix = Path(__file__).resolve().parent / "smp2p-sleepstate.patch"
         require(sleepstate_fix.is_file(), "Missing SMP2P sleep-state patch")
         require(hashlib.sha256(sleepstate_fix.read_bytes()).hexdigest() ==
-                "c4efec6292bf6f9afb596d21bb6b383e8a0ec52380c69aaa8c7c42becf4ddd6d",
+                "f8d91b9aa78409f838dc4b38a1b25ce46ed0979e7daf9484d30c43e5ef8dd112",
                 "SMP2P sleep-state patch checksum mismatch")
         extra_patches.append(sleepstate_fix)
     for patch in patches + [fix, display_fix, *extra_patches]:

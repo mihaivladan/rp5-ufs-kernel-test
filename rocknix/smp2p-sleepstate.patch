@@ -37,7 +37,7 @@ new file mode 100644
 index 000000000000..d5714a4b98a6
 --- /dev/null
 +++ b/drivers/soc/qcom/smp2p_sleepstate.c
-@@ -0,0 +1,140 @@
+@@ -0,0 +1,171 @@
 +// SPDX-License-Identifier: GPL-2.0-only
 +/*
 + * Qualcomm SMP2P sleep-state handshake
@@ -66,7 +66,8 @@ index 000000000000..d5714a4b98a6
 +	struct device *dev;
 +	struct qcom_smem_state *state;
 +	struct notifier_block pm_nb;
-+	struct wakeup_source wakeup_source;
++	struct wakeup_source *wakeup_source;
++	int irq;
 +};
 +
 +static int smp2p_sleepstate_set_awake(struct smp2p_sleepstate *sleepstate,
@@ -105,7 +106,7 @@ index 000000000000..d5714a4b98a6
 +{
 +	struct smp2p_sleepstate *sleepstate = data;
 +
-+	__pm_wakeup_event(&sleepstate->wakeup_source, 200);
++	__pm_wakeup_event(sleepstate->wakeup_source, 200);
 +
 +	return IRQ_HANDLED;
 +}
@@ -144,7 +145,11 @@ index 000000000000..d5714a4b98a6
 +		return dev_err_probe(dev, ret,
 +				     "failed to register PM notifier\n");
 +
-+	wakeup_source_init(&sleepstate->wakeup_source, "smp2p-sleepstate");
++	sleepstate->wakeup_source = wakeup_source_register(dev, "smp2p-sleepstate");
++	if (!sleepstate->wakeup_source) {
++		ret = -ENOMEM;
++		goto err_unregister_notifier;
++	}
 +
 +	irq = of_irq_get_byname(dev->of_node, "smp2p-sleepstate-in");
 +	if (irq <= 0) {
@@ -161,6 +166,7 @@ index 000000000000..d5714a4b98a6
 +			      "failed to request inbound sleep-state IRQ\n");
 +		goto err_unregister_notifier;
 +	}
++	sleepstate->irq = irq;
 +
 +	platform_set_drvdata(pdev, sleepstate);
 +	dev_info(dev, "awake handshake active on SMP2P bit %u\n", PROC_AWAKE_ID);
@@ -168,11 +174,21 @@ index 000000000000..d5714a4b98a6
 +	return 0;
 +
 +err_unregister_notifier:
-+	wakeup_source_trash(&sleepstate->wakeup_source);
++	wakeup_source_unregister(sleepstate->wakeup_source);
 +	unregister_pm_notifier(&sleepstate->pm_nb);
 +	smp2p_sleepstate_set_awake(sleepstate, false);
 +
 +	return ret;
++}
++
++static void smp2p_sleepstate_remove(struct platform_device *pdev)
++{
++	struct smp2p_sleepstate *sleepstate = platform_get_drvdata(pdev);
++
++	disable_irq(sleepstate->irq);
++	unregister_pm_notifier(&sleepstate->pm_nb);
++	wakeup_source_unregister(sleepstate->wakeup_source);
++	smp2p_sleepstate_set_awake(sleepstate, true);
 +}
 +
 +static const struct of_device_id smp2p_sleepstate_of_match[] = {
@@ -183,6 +199,7 @@ index 000000000000..d5714a4b98a6
 +
 +static struct platform_driver smp2p_sleepstate_driver = {
 +	.probe = smp2p_sleepstate_probe,
++	.remove = smp2p_sleepstate_remove,
 +	.driver = {
 +		.name = "smp2p_sleepstate",
 +		.of_match_table = smp2p_sleepstate_of_match,
