@@ -81,9 +81,12 @@ cp "${reference}/kernel.config" "${out}/"
 cp "${reference}/Module.symvers" "${out}/"
 modinfo "${module}" > "${out}/modinfo.txt"
 nm -u "${module}" > "${out}/undefined-symbols.txt"
-sha256sum "${out}/consoleos_smem_reader.ko" \
-    "${out}/consoleos_smem_reader.c" "${out}/module.Makefile" \
-    "${out}/kernel.config" "${out}/Module.symvers" > "${out}/SHA256SUMS"
+(
+    cd "${out}"
+    sha256sum consoleos_smem_reader.ko consoleos_smem_reader.c \
+        module.Makefile kernel.config Module.symvers > SHA256SUMS
+    sha256sum -c SHA256SUMS
+)
 
 python3 - "${out}" <<'PY'
 from pathlib import Path
