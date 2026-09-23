@@ -1,0 +1,14 @@
+// SPDX-License-Identifier: BSD-3-Clause
+/*
+ * Phase 6K: Phase 6J's running SLPI and exact sleep-state handshake plus a
+ * memory-only platform suspend entry for the Android kona composite state.
+ */
+
+#include "sm8250-retroidpocket-rp5-adsp-slpi-sleepstate.dts"
+
+/ {
+	consoleos-lpm-suspend {
+		compatible = "qcom,consoleos-lpm-suspend";
+		qcom,psci-suspend-state = <0x4100c244>;
+	};
+};

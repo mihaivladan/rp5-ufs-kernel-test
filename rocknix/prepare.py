@@ -97,27 +97,34 @@ def apply_patches(repo, source, fix, profile):
                 "91e28ba23946dae574a2fc86e534f143c598a4ac044540e7bdfd38ab20f0d588",
                 "GMU clock-reset patch checksum mismatch")
         extra_patches.append(gmu_reset)
-    elif profile in ("gpu-rpmh-fix", "sleepstate-handshake", "adsp-no-auto-ab", "slpi-integrated"):
+    elif profile in ("gpu-rpmh-fix", "sleepstate-handshake", "adsp-no-auto-ab", "slpi-integrated", "lpm-platform"):
         rpmh_fix = Path(__file__).resolve().parent / "a6xx-stale-rpmh-votes.patch"
         require(rpmh_fix.is_file(), "Missing upstream stale RPMh vote fix")
         require(hashlib.sha256(rpmh_fix.read_bytes()).hexdigest() ==
                 "6fa32840101b0b03554173ffb0a70b059f5acfbb81147f884d9cf12219c9d5ca",
                 "GPU stale RPMh vote fix checksum mismatch")
         extra_patches.append(rpmh_fix)
-    if profile in ("sleepstate-handshake", "slpi-integrated"):
+    if profile in ("sleepstate-handshake", "slpi-integrated", "lpm-platform"):
         sleepstate_fix = Path(__file__).resolve().parent / "smp2p-sleepstate.patch"
         require(sleepstate_fix.is_file(), "Missing SMP2P sleep-state patch")
         require(hashlib.sha256(sleepstate_fix.read_bytes()).hexdigest() ==
                 "f8d91b9aa78409f838dc4b38a1b25ce46ed0979e7daf9484d30c43e5ef8dd112",
                 "SMP2P sleep-state patch checksum mismatch")
         extra_patches.append(sleepstate_fix)
-    if profile in ("adsp-no-auto-ab", "slpi-integrated"):
+    if profile in ("adsp-no-auto-ab", "slpi-integrated", "lpm-platform"):
         no_auto = Path(__file__).resolve().parent / "sm8250-adsp-no-auto-boot.patch"
         require(no_auto.is_file(), "Missing SM8250 ADSP no-auto-boot patch")
         require(hashlib.sha256(no_auto.read_bytes()).hexdigest() ==
                 "27a92a7e9bc3a37e1954efa97e518cb7808505cc04dc4eb246803ca07da61805",
                 "SM8250 ADSP no-auto-boot patch checksum mismatch")
         extra_patches.append(no_auto)
+    if profile == "lpm-platform":
+        lpm_fix = Path(__file__).resolve().parent / "qcom-lpm-platform-suspend.patch"
+        require(lpm_fix.is_file(), "Missing exact-state platform suspend patch")
+        require(hashlib.sha256(lpm_fix.read_bytes()).hexdigest() ==
+                "74e062e6a4fba0ac780dd11bc462e9bf04abf2d9f0e300677a95bfee18dbdb8c",
+                "Exact-state platform suspend patch checksum mismatch")
+        extra_patches.append(lpm_fix)
     for patch in patches + [fix, display_fix, *extra_patches]:
         print(f"Applying {patch.name}", flush=True)
         payload = patch.read_text().replace("@TARGET_CPU@", "cortex-a76.cortex-a55").replace("@DEVICE@", "SM8250")
@@ -128,25 +135,32 @@ def apply_patches(repo, source, fix, profile):
         subprocess.run(args, input=payload, text=True, cwd=source, check=True)
         records.append({"path": str(patch.relative_to(repo)) if patch in patches else patch.name,
                         "sha256": hashlib.sha256(patch.read_bytes()).hexdigest()})
-    if profile in ("gpu-rpmh-fix", "sleepstate-handshake", "adsp-no-auto-ab", "slpi-integrated"):
+    if profile in ("gpu-rpmh-fix", "sleepstate-handshake", "adsp-no-auto-ab", "slpi-integrated", "lpm-platform"):
         gmu_source = (source / "drivers/gpu/drm/msm/adreno/a6xx_gmu.c").read_text()
         require("if (!test_and_clear_bit(GMU_STATUS_FW_START, &gmu->status))" in gmu_source,
                 "Corrected GMU firmware-start condition missing")
         require("gmu_write(gmu, REG_A6XX_GMU_CM3_SYSRESET, 1);" in gmu_source,
                 "GMU CM3 reset before RPMh stop missing")
-    if profile in ("sleepstate-handshake", "slpi-integrated"):
+    if profile in ("sleepstate-handshake", "slpi-integrated", "lpm-platform"):
         sleepstate_source = (source / "drivers/soc/qcom/smp2p_sleepstate.c").read_text()
         require("case PM_SUSPEND_PREPARE:" in sleepstate_source and
                 "case PM_POST_SUSPEND:" in sleepstate_source and
                 "PROC_AWAKE_ID\t12" in sleepstate_source,
                 "SMP2P sleep-state handshake implementation missing")
-    if profile in ("adsp-no-auto-ab", "slpi-integrated"):
+    if profile in ("adsp-no-auto-ab", "slpi-integrated", "lpm-platform"):
         pas_source = (source / "drivers/remoteproc/qcom_q6v5_pas.c").read_text()
         start = pas_source.index("static const struct qcom_pas_data sm8250_adsp_resource = {")
         end = pas_source.index("\n};", start)
         block = pas_source[start:end]
         require(block.count(".auto_boot = false,") == 1 and ".auto_boot = true," not in block,
                 "SM8250 ADSP auto-boot override missing")
+    if profile == "lpm-platform":
+        lpm_source = (source / "drivers/soc/qcom/qcom_lpm_platform_suspend.c").read_text()
+        require("#define CONSOLEOS_SM8250_SUSPEND_STATE\t0x4100c244" in lpm_source and
+                "ret = cpu_pm_enter();" in lpm_source and
+                "ret = psci_cpu_suspend_enter(consoleos_psci_state);" in lpm_source and
+                "suspend_set_ops(&consoleos_suspend_ops);" in lpm_source,
+                "Exact-state platform suspend implementation missing")
     dts = repo / "projects/ROCKNIX/devices/SM8250/linux/dts"
     shutil.copytree(dts, source / "arch/arm64/boot/dts", dirs_exist_ok=True)
     custom_names = {
@@ -164,7 +178,7 @@ def apply_patches(repo, source, fix, profile):
             reference = Path(__file__).resolve().parent / "sm8250-retroidpocket-rp5-minsleep4.dts"
             require(reference.is_file(), "Missing minsleep4 reference DTS")
             shutil.copyfile(reference, source / "arch/arm64/boot/dts/qcom" / reference.name)
-    elif profile in ("reenable-matrix", "sleepstate-handshake", "adsp-no-auto-ab", "slpi-integrated"):
+    elif profile in ("reenable-matrix", "sleepstate-handshake", "adsp-no-auto-ab", "slpi-integrated", "lpm-platform"):
         root = Path(__file__).resolve().parent
         for filename in (
             "sm8250-retroidpocket-rp5-minsleep4.dts",
@@ -193,13 +207,20 @@ def apply_patches(repo, source, fix, profile):
                 sleepstate_dts,
                 source / "arch/arm64/boot/dts/qcom" / sleepstate_dts.name,
             )
-        elif profile == "slpi-integrated":
+        elif profile in ("slpi-integrated", "lpm-platform"):
             integrated_dts = root / "sm8250-retroidpocket-rp5-adsp-slpi-sleepstate.dts"
             require(integrated_dts.is_file(), "Missing integrated RP5 ADSP/SLPI DTS")
             shutil.copyfile(
                 integrated_dts,
                 source / "arch/arm64/boot/dts/qcom" / integrated_dts.name,
             )
+            if profile == "lpm-platform":
+                lpm_dts = root / "sm8250-retroidpocket-rp5-lpm-platform.dts"
+                require(lpm_dts.is_file(), "Missing exact-state platform suspend DTS")
+                shutil.copyfile(
+                    lpm_dts,
+                    source / "arch/arm64/boot/dts/qcom" / lpm_dts.name,
+                )
     # Match the board used by the saved device baseline. This release predates
     # the separate Visionox DTS found in newer ROCKNIX revisions.
     makefile = source / "arch/arm64/boot/dts/qcom/Makefile"
@@ -221,6 +242,11 @@ def apply_patches(repo, source, fix, profile):
         names.append("sm8250-retroidpocket-rp5-reenable-display-gpu-gamepad-active-only-ufs-wireless-usb-typec-dp-adsp")
     elif profile == "slpi-integrated":
         names.append("sm8250-retroidpocket-rp5-adsp-slpi-sleepstate")
+    elif profile == "lpm-platform":
+        names.extend([
+            "sm8250-retroidpocket-rp5-adsp-slpi-sleepstate",
+            "sm8250-retroidpocket-rp5-lpm-platform",
+        ])
     for name in names:
         require((source / f"arch/arm64/boot/dts/qcom/{name}.dts").is_file(), f"Missing {name} DTS")
         if f"{name}.dtb" not in contents:
@@ -238,7 +264,7 @@ def main():
     require(profile in (
         "diagnostic", "minimal-sleep", "cpu-icc-off", "stock-pruned",
         "reenable-matrix", "gmu-clock-reset", "gpu-rpmh-fix",
-        "sleepstate-handshake", "adsp-no-auto-ab", "slpi-integrated",
+        "sleepstate-handshake", "adsp-no-auto-ab", "slpi-integrated", "lpm-platform",
     ),
             f"Unsupported ROCKNIX_PROFILE: {profile}")
     records = apply_patches(
@@ -253,15 +279,23 @@ def main():
         "fix_commit": "f07317a8d57f382ec505597816271dd72ffa20c7",
         "gpu_rpmh_fix_commit": (
             "d9108bfdb746"
-            if profile in ("gpu-rpmh-fix", "sleepstate-handshake", "adsp-no-auto-ab", "slpi-integrated") else None
+            if profile in ("gpu-rpmh-fix", "sleepstate-handshake", "adsp-no-auto-ab", "slpi-integrated", "lpm-platform") else None
         ),
         "sleepstate_handshake": (
             "Qualcomm downstream SMP2P awake bit 12 over the RP5 DSPS/SLPI channel"
-            if profile in ("sleepstate-handshake", "slpi-integrated") else None
+            if profile in ("sleepstate-handshake", "slpi-integrated", "lpm-platform") else None
         ),
         "adsp_no_auto_boot": (
             "SM8250 ADSP remoteproc registered offline until explicit sysfs start"
-            if profile in ("adsp-no-auto-ab", "slpi-integrated") else None
+            if profile in ("adsp-no-auto-ab", "slpi-integrated", "lpm-platform") else None
+        ),
+        "platform_suspend": (
+            "Memory-only suspend entry using exact Android SM8250 composite PSCI state 0x4100c244"
+            if profile == "lpm-platform" else None
+        ),
+        "lpm_reference": (
+            "LineageOS/android_kernel_oneplus_sm8250 ef098aedd975479e0aaf440bc14e8ba7c589c561"
+            if profile == "lpm-platform" else None
         ),
         "display_fix": "Initialize DPU CRTC state before ROCKNIX resource-cleanup writes num_mixers",
         "baseline": "ROCKNIX 20260901 / Linux 7.2.0",

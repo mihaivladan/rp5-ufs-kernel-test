@@ -33,6 +33,12 @@ slpi-integrated)
     artifact_name="rocknix-${expected_release}.tar.zst"
     dtb_name='sm8250-retroidpocket-rp5-adsp-slpi-sleepstate'
     ;;
+lpm-platform)
+    config_fragment="${kit}/rocknix/lpm-platform.config"
+    expected_release='7.2.0-consoleos-lpm1'
+    artifact_name="rocknix-${expected_release}.tar.zst"
+    dtb_name='sm8250-retroidpocket-rp5-lpm-platform'
+    ;;
 minimal-sleep)
     config_fragment="${kit}/rocknix/minimal-sleep.config"
     expected_release='7.2.0-consoleos-minsleep4'
@@ -182,7 +188,7 @@ elif sys.argv[2] == 'adsp-no-auto-ab':
     block = pas[start:end]
     if block.count('.auto_boot = false,') != 1 or '.auto_boot = true,' in block:
         raise SystemExit('SM8250 ADSP auto-boot was not disabled exactly once')
-elif sys.argv[2] == 'slpi-integrated':
+elif sys.argv[2] in ('slpi-integrated', 'lpm-platform'):
     required = {
         'CONFIG_QCOM_SMP2P=y', 'CONFIG_QCOM_SMP2P_SLEEPSTATE=y',
         'CONFIG_PM_SLEEP=y', 'CONFIG_PM=y',
@@ -207,6 +213,25 @@ elif sys.argv[2] == 'slpi-integrated':
     block = pas[start:end]
     if block.count('.auto_boot = false,') != 1 or '.auto_boot = true,' in block:
         raise SystemExit('Integrated SM8250 ADSP auto-boot override missing')
+    if sys.argv[2] == 'lpm-platform':
+        required_lpm = {
+            'CONFIG_ARM_PSCI_FW=y', 'CONFIG_CPU_IDLE=y', 'CONFIG_CPU_PM=y',
+            'CONFIG_SUSPEND=y', 'CONFIG_QCOM_LPM_PLATFORM_SUSPEND=y',
+        }
+        absent_lpm = sorted(required_lpm - actual)
+        if absent_lpm:
+            raise SystemExit('Platform suspend requirements missing: ' + ', '.join(absent_lpm))
+        lpm = Path('drivers/soc/qcom/qcom_lpm_platform_suspend.c').read_text()
+        required_lpm_driver = {
+            '#define CONSOLEOS_SM8250_SUSPEND_STATE\t0x4100c244',
+            '\tret = cpu_pm_enter();',
+            '\tret = psci_cpu_suspend_enter(consoleos_psci_state);',
+            '\tsuspend_set_ops(&consoleos_suspend_ops);',
+            '\t{ .compatible = "qcom,consoleos-lpm-suspend" },',
+        }
+        absent_lpm_driver = sorted(required_lpm_driver - set(lpm.splitlines()))
+        if absent_lpm_driver:
+            raise SystemExit('Platform suspend driver markers missing: ' + ', '.join(absent_lpm_driver))
 print(f'All {sys.argv[2]} settings verified.')
 PY
 cp .config "${out}/kernel.config"
@@ -339,6 +364,26 @@ elif [[ "${profile}" == slpi-integrated ]]; then
         'RP5 integrated candidate passed: Phase 6D plus running SLPI, exact DSPS SMP2P handshake and SM8250 ADSP held offline for same-boot A/B. Not installed or boot-tested.' \
         > BUILD-SUCCESS.txt
     cd "${source_dir}"
+elif [[ "${profile}" == lpm-platform ]]; then
+    phase6j_name='sm8250-retroidpocket-rp5-adsp-slpi-sleepstate'
+    make "${make_args[@]}" -j"$(nproc)" DTC_FLAGS=-@ "qcom/${phase6j_name}.dtb"
+    phase6d_name='sm8250-retroidpocket-rp5-reenable-display-gpu-gamepad-active-only-ufs-wireless-usb-typec-dp-adsp'
+    make "${make_args[@]}" -j"$(nproc)" DTC_FLAGS=-@ "qcom/${phase6d_name}.dtb"
+    python3 "${kit}/rocknix/verify-slpi-integrated-dtb.py" \
+        "arch/arm64/boot/dts/qcom/${phase6d_name}.dtb" \
+        "arch/arm64/boot/dts/qcom/${phase6j_name}.dtb" \
+        | tee "${out}/slpi-integrated-dtb-verification.txt"
+    python3 "${kit}/rocknix/verify-lpm-platform-dtb.py" \
+        "arch/arm64/boot/dts/qcom/${phase6j_name}.dtb" \
+        "arch/arm64/boot/dts/qcom/${dtb_name}.dtb" \
+        | tee "${out}/lpm-platform-dtb-verification.txt"
+    cp "arch/arm64/boot/dts/qcom/${dtb_name}.dtb" "${out}/"
+    cd "${out}"
+    sha256sum "${dtb_name}.dtb" > LPM-PLATFORM-DTB-SHA256SUMS
+    printf '%s\n' \
+        'RP5 Phase 6K candidate passed: exact Phase 6J tree plus one exact-state platform-suspend node for deep mem A/B. Not installed or boot-tested.' \
+        > BUILD-SUCCESS.txt
+    cd "${source_dir}"
 fi
 if [[ "${1:-all}" == prepare ]]; then
     printf 'RK_WORK_DIR=%s\n' "${work}" >> "${GITHUB_ENV:?}"
@@ -352,7 +397,7 @@ source_dir="${work}/linux-7.2"
 cd "${source_dir}"
 release=$(make "${make_args[@]}" -s kernelrelease)
 test "${release}" = "${expected_release}"
-if [[ "${profile}" == diagnostic || "${profile}" == gpu-rpmh-fix || "${profile}" == sleepstate-handshake || "${profile}" == adsp-no-auto-ab || "${profile}" == slpi-integrated ]]; then
+if [[ "${profile}" == diagnostic || "${profile}" == gpu-rpmh-fix || "${profile}" == sleepstate-handshake || "${profile}" == adsp-no-auto-ab || "${profile}" == slpi-integrated || "${profile}" == lpm-platform ]]; then
     # The previous build exposed an uninitialized cstate pointer in this file.
     printf '\nCFLAGS_dpu_crtc.o += -Werror=uninitialized -Werror=maybe-uninitialized\n' >> drivers/gpu/drm/msm/disp/dpu1/Makefile
 fi
@@ -366,17 +411,20 @@ rm -f "${stage}/lib/modules/${release}/build" "${stage}/lib/modules/${release}/s
 depmod -b "${stage}" "${release}"
 cp System.map Module.symvers "${out}/"
 cp drivers/ufs/host/ufs-qcom.c drivers/ufs/host/ufs-qcom.h "${out}/"
-if [[ "${profile}" == gpu-rpmh-fix || "${profile}" == sleepstate-handshake || "${profile}" == adsp-no-auto-ab || "${profile}" == slpi-integrated ]]; then
+if [[ "${profile}" == gpu-rpmh-fix || "${profile}" == sleepstate-handshake || "${profile}" == adsp-no-auto-ab || "${profile}" == slpi-integrated || "${profile}" == lpm-platform ]]; then
     cp drivers/gpu/drm/msm/adreno/a6xx_gmu.c "${out}/"
 fi
-if [[ "${profile}" == sleepstate-handshake || "${profile}" == slpi-integrated ]]; then
+if [[ "${profile}" == sleepstate-handshake || "${profile}" == slpi-integrated || "${profile}" == lpm-platform ]]; then
     cp drivers/soc/qcom/smp2p_sleepstate.c "${out}/"
     cp "arch/arm64/boot/dts/qcom/${dtb_name}.dts" "${out}/"
 fi
-if [[ "${profile}" == adsp-no-auto-ab || "${profile}" == slpi-integrated ]]; then
+if [[ "${profile}" == adsp-no-auto-ab || "${profile}" == slpi-integrated || "${profile}" == lpm-platform ]]; then
     cp drivers/remoteproc/qcom_q6v5_pas.c "${out}/"
 fi
-if [[ "${profile}" == diagnostic || "${profile}" == gpu-rpmh-fix || "${profile}" == sleepstate-handshake || "${profile}" == adsp-no-auto-ab || "${profile}" == slpi-integrated ]]; then
+if [[ "${profile}" == lpm-platform ]]; then
+    cp drivers/soc/qcom/qcom_lpm_platform_suspend.c "${out}/"
+fi
+if [[ "${profile}" == diagnostic || "${profile}" == gpu-rpmh-fix || "${profile}" == sleepstate-handshake || "${profile}" == adsp-no-auto-ab || "${profile}" == slpi-integrated || "${profile}" == lpm-platform ]]; then
     objcopy --dump-section .BTF="${out}/vmlinux.btf" vmlinux
     cp drivers/gpu/drm/msm/disp/dpu1/dpu_crtc.c drivers/gpu/drm/msm/disp/dpu1/dpu_crtc.o "${out}/"
     objdump -drS drivers/gpu/drm/msm/disp/dpu1/dpu_crtc.o > "${out}/dpu_crtc-disassembly.txt"
@@ -385,7 +433,7 @@ elif [[ "${profile}" == gmu-clock-reset ]]; then
 fi
 test -s "${stage}/boot/KERNEL"
 test -s "${stage}/lib/modules/${release}/modules.dep"
-if [[ "${profile}" == diagnostic || "${profile}" == gpu-rpmh-fix || "${profile}" == sleepstate-handshake || "${profile}" == adsp-no-auto-ab || "${profile}" == slpi-integrated ]]; then
+if [[ "${profile}" == diagnostic || "${profile}" == gpu-rpmh-fix || "${profile}" == sleepstate-handshake || "${profile}" == adsp-no-auto-ab || "${profile}" == slpi-integrated || "${profile}" == lpm-platform ]]; then
     test -s "${out}/vmlinux.btf"
 fi
 tar -C "${stage}" -cf - boot lib | zstd -T0 -10 -o "${out}/${artifact_name}"
