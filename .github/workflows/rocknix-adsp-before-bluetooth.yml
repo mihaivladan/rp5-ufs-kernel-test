@@ -1,6 +1,22 @@
 name: ROCKNIX RP5 ADSP before Bluetooth
 on:
   workflow_dispatch:
+  push:
+    branches: [codex/rp5-adsp-before-bluetooth]
+    paths:
+      - '.github/workflows/rocknix-adsp-before-bluetooth.yml'
+      - 'rocknix/ADSP-BEFORE-BLUETOOTH.md'
+      - 'rocknix/README.md'
+      - 'rocknix/adsp-before-bluetooth.config'
+      - 'rocknix/build.sh'
+      - 'rocknix/prepare.py'
+      - 'rocknix/qca-rproc-dependency.patch'
+      - 'rocknix/sm8250-adsp-no-auto-boot.patch'
+      - 'rocknix/sm8250-retroidpocket-rp5-adsp-before-bluetooth.dts'
+      - 'rocknix/verify-adsp-before-bluetooth-dtb.py'
+      - 'rocknix/a6xx-stale-rpmh-votes.patch'
+      - 'rocknix/dpu-cstate-init.patch'
+      - 'ufs-lane-clocks.patch'
 permissions:
   contents: read
 jobs:
