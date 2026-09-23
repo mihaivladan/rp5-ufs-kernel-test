@@ -1,0 +1,45 @@
+name: ROCKNIX RP5 read-only SMEM reader
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  module:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Fetch exact ROCKNIX release recipe
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: ROCKNIX/distribution
+          ref: 1ebff24f36501fb6493beb2bf83bf2604536d9aa
+          path: upstream-rocknix
+          persist-credentials: false
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            /projects/ROCKNIX/packages/linux/
+            /projects/ROCKNIX/devices/SM8250/linux/
+            /projects/ROCKNIX/devices/SM8250/patches/linux/
+            /projects/ROCKNIX/patches/linux/
+      - name: Install native module build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential gcc-14 g++-14 bc bison flex libssl-dev libelf-dev dwarves kmod xz-utils
+      - name: Prepare exact source and build only the reader module
+        run: |
+          set -euo pipefail
+          bash rocknix/build-smem-reader.sh 2>&1 | tee rocknix-smem-reader-build.log
+      - name: Upload module and proof
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: rocknix-rp5-smem-reader
+          retention-days: 7
+          compression-level: 0
+          if-no-files-found: error
+          path: |
+            rocknix-smem-reader-out/
+            rocknix-smem-reader-build.log
