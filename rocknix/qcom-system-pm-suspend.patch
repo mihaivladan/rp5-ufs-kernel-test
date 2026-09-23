@@ -1,0 +1,326 @@
+diff --git a/drivers/soc/qcom/Kconfig b/drivers/soc/qcom/Kconfig
+index 2c9b0d82f64a..b970ac770c9a 100644
+--- a/drivers/soc/qcom/Kconfig
++++ b/drivers/soc/qcom/Kconfig
+@@ -124,6 +124,20 @@ config QCOM_RMTFS_MEM
+ 
+ 	  Say y here if you intend to boot the modem remoteproc.
+ 
++config QCOM_SYSTEM_PM_SUSPEND
++	bool "Qualcomm SM8250 system-PM suspend experiment"
++	depends on ARCH_QCOM && ARM64 && ARM_PSCI_FW && CPU_IDLE && SUSPEND
++	depends on QCOM_RPMH=y
++	help
++	  Register a memory-only platform suspend operation for the ConsoleOS
++	  SM8250 experiment. Before entering the one accepted PSCI state, the
++	  driver performs the downstream system-PM admission and preparation
++	  operations directly against the referenced Apps RPMh RSC: active-TCS
++	  idle check, sleep/wake cache flush, and CONTROL_TCS wake programming.
++
++	  This is diagnostic-only. It rejects every PSCI state except
++	  0x4100c244 and records every admission and preparation result.
++
+ config QCOM_RPM_MASTER_STATS
+ 	tristate "Qualcomm RPM Master stats"
+ 	depends on ARCH_QCOM || COMPILE_TEST
+diff --git a/drivers/soc/qcom/Makefile b/drivers/soc/qcom/Makefile
+index 363b2c6f13c7..7a193b8a54fc 100644
+--- a/drivers/soc/qcom/Makefile
++++ b/drivers/soc/qcom/Makefile
+@@ -18,6 +18,7 @@ qmi_helpers-y	+= qmi_encdec.o qmi_interface.o
+ obj-$(CONFIG_QCOM_RAMP_CTRL)	+= ramp_controller.o
+ obj-$(CONFIG_QCOM_RMTFS_MEM)	+= rmtfs_mem.o
+ obj-$(CONFIG_QCOM_RPM_MASTER_STATS)	+= rpm_master_stats.o
++obj-$(CONFIG_QCOM_SYSTEM_PM_SUSPEND) += qcom_system_pm_suspend.o
+ obj-$(CONFIG_QCOM_RPMH)		+= qcom_rpmh.o
+ qcom_rpmh-y			+= rpmh-rsc.o
+ qcom_rpmh-y			+= rpmh.o
+diff --git a/drivers/soc/qcom/qcom_system_pm_suspend.c b/drivers/soc/qcom/qcom_system_pm_suspend.c
+new file mode 100644
+index 000000000000..2235dc42a020
+--- /dev/null
++++ b/drivers/soc/qcom/qcom_system_pm_suspend.c
+@@ -0,0 +1,283 @@
++// SPDX-License-Identifier: GPL-2.0-only
++/*
++ * Bounded SM8250 downstream system-PM lifecycle experiment.
++ *
++ * Phase 6K proved that selecting deep and submitting 0x4100c244 after only
++ * cpu_pm_enter() is insufficient. This driver adds the concrete admission and
++ * preparation operations performed by Qualcomm system_pm: verify the Apps RSC
++ * has no active transfer, flush its cached sleep/wake requests, program its
++ * CONTROL_TCS wake value, and only then enter the exact PSCI state.
++ */
++
++#include <linux/atomic.h>
++#include <linux/device.h>
++#include <linux/errno.h>
++#include <linux/io.h>
++#include <linux/irqflags.h>
++#include <linux/module.h>
++#include <linux/of.h>
++#include <linux/of_platform.h>
++#include <linux/platform_device.h>
++#include <linux/psci.h>
++#include <linux/slab.h>
++#include <linux/string.h>
++#include <linux/suspend.h>
++
++#include <dt-bindings/soc/qcom,rpmh-rsc.h>
++
++#include "rpmh-internal.h"
++
++#define CONSOLEOS_SM8250_SUSPEND_STATE	0x4100c244
++#define CONSOLEOS_SM8250_APPS_DRV_ID	2
++
++/* Mainline rpmh_rsc_write_next_wakeup() writes these DRV registers. */
++#define CONSOLEOS_RSC_CTL_TCS_DATA_HI	0x38
++#define CONSOLEOS_RSC_CTL_TCS_DATA_LO	0x40
++
++struct consoleos_system_pm {
++	struct device *dev;
++	struct device *rsc_dev;
++	struct rsc_drv *rsc;
++	u32 psci_state;
++	atomic_t sequence;
++};
++
++static struct consoleos_system_pm *consoleos_pm;
++
++static bool consoleos_rsc_active_busy(struct rsc_drv *drv)
++{
++	const struct tcs_group *tcs = &drv->tcs[ACTIVE_TCS];
++	unsigned long max;
++	unsigned long set;
++
++	/* Match rpmh_rsc_ctrlr_is_busy(), including borrowed wake TCSes. */
++	if (!tcs->num_tcs)
++		tcs = &drv->tcs[WAKE_TCS];
++
++	max = tcs->offset + tcs->num_tcs;
++	set = find_next_bit(drv->tcs_in_use, max, tcs->offset);
++
++	return set < max;
++}
++
++static int consoleos_system_pm_prepare(struct consoleos_system_pm *pm,
++				       int sequence)
++{
++	struct rsc_drv *drv = pm->rsc;
++	bool dirty_before;
++	bool dirty_after;
++	bool active_busy;
++	bool lock_busy = false;
++	u32 control_hi = 0;
++	u32 control_lo = 0;
++	int ret;
++
++	/* rpmh_flush() is only valid after the suspend core disables IRQs. */
++	if (!irqs_disabled()) {
++		dev_err(pm->dev,
++			"sequence=%d admission refused: IRQs are enabled\n",
++			sequence);
++		return -EPERM;
++	}
++
++	if (!spin_trylock(&drv->lock)) {
++		lock_busy = true;
++		ret = -EBUSY;
++		goto report;
++	}
++
++	dirty_before = READ_ONCE(drv->client.dirty);
++	active_busy = consoleos_rsc_active_busy(drv);
++	if (active_busy)
++		ret = -EBUSY;
++	else
++		ret = rpmh_flush(&drv->client);
++	dirty_after = READ_ONCE(drv->client.dirty);
++
++	if (drv->tcs[CONTROL_TCS].num_tcs) {
++		control_hi = readl_relaxed(drv->base +
++					   CONSOLEOS_RSC_CTL_TCS_DATA_HI);
++		control_lo = readl_relaxed(drv->base +
++					   CONSOLEOS_RSC_CTL_TCS_DATA_LO);
++	}
++	spin_unlock(&drv->lock);
++
++	dev_info(pm->dev,
++		 "sequence=%d admission lock-busy=0 active-busy=%d dirty=%d->%d flush-ret=%d control-hi=%#x control-lo=%#x\n",
++		 sequence, active_busy, dirty_before, dirty_after, ret,
++		 control_hi, control_lo);
++	return ret;
++
++report:
++	dev_info(pm->dev,
++		 "sequence=%d admission lock-busy=%d active-busy=-1 dirty=-1->-1 flush-ret=%d control-hi=0 control-lo=0\n",
++		 sequence, lock_busy, ret);
++	return ret;
++}
++
++static int consoleos_suspend_begin(suspend_state_t state)
++{
++	int sequence = atomic_read(&consoleos_pm->sequence) + 1;
++
++	dev_info(consoleos_pm->dev,
++		 "sequence=%d begin target=%d psci-state=%#x\n",
++		 sequence, (__force int)state, consoleos_pm->psci_state);
++
++	return state == PM_SUSPEND_MEM ? 0 : -EINVAL;
++}
++
++static int consoleos_suspend_prepare_late(void)
++{
++	dev_info(consoleos_pm->dev, "prepare-late\n");
++	return 0;
++}
++
++static int consoleos_suspend_enter(suspend_state_t state)
++{
++	int sequence = atomic_inc_return(&consoleos_pm->sequence);
++	int psci_ret;
++	int ret;
++
++	if (state != PM_SUSPEND_MEM)
++		return -EINVAL;
++
++	ret = consoleos_system_pm_prepare(consoleos_pm, sequence);
++	if (ret) {
++		dev_err(consoleos_pm->dev,
++			"sequence=%d system-pm preparation failed ret=%d\n",
++			sequence, ret);
++		return ret;
++	}
++
++	/*
++	 * The suspend core's syscore path has already issued CPU_PM_ENTER and
++	 * CPU_CLUSTER_PM_ENTER before platform .enter().  Phase 6K incorrectly
++	 * issued CPU_PM_ENTER a second time here.  Apps-RSC is attached to
++	 * cluster_pd, so that duplicate notification did not invoke its genpd
++	 * flush callback; the explicit preparation above is the missing path.
++	 */
++
++	dev_info(consoleos_pm->dev,
++		 "sequence=%d enter exact-psci=%#x\n",
++		 sequence, consoleos_pm->psci_state);
++	psci_ret = psci_cpu_suspend_enter(consoleos_pm->psci_state);
++
++	dev_info(consoleos_pm->dev,
++		 "sequence=%d return psci-ret=%d\n",
++		 sequence, psci_ret);
++
++	return psci_ret;
++}
++
++static void consoleos_suspend_wake(void)
++{
++	dev_info(consoleos_pm->dev, "wake sequence=%d\n",
++		 atomic_read(&consoleos_pm->sequence));
++}
++
++static void consoleos_suspend_end(void)
++{
++	dev_info(consoleos_pm->dev, "complete sequence=%d\n",
++		 atomic_read(&consoleos_pm->sequence));
++}
++
++static const struct platform_suspend_ops consoleos_suspend_ops = {
++	.valid = suspend_valid_only_mem,
++	.begin = consoleos_suspend_begin,
++	.prepare_late = consoleos_suspend_prepare_late,
++	.enter = consoleos_suspend_enter,
++	.wake = consoleos_suspend_wake,
++	.end = consoleos_suspend_end,
++};
++
++static void consoleos_put_rsc_device(void *data)
++{
++	put_device(data);
++}
++
++static int consoleos_suspend_probe(struct platform_device *pdev)
++{
++	struct platform_device *rsc_pdev;
++	struct device_node *rsc_node;
++	struct consoleos_system_pm *pm;
++	struct rsc_drv *rsc;
++	u32 state;
++	int ret;
++
++	if (consoleos_pm)
++		return dev_err_probe(&pdev->dev, -EBUSY,
++				     "platform suspend operation already registered\n");
++
++	ret = of_property_read_u32(pdev->dev.of_node,
++				   "qcom,psci-suspend-state", &state);
++	if (ret)
++		return dev_err_probe(&pdev->dev, ret,
++				     "missing qcom,psci-suspend-state\n");
++	if (state != CONSOLEOS_SM8250_SUSPEND_STATE ||
++	    !psci_power_state_is_valid(state))
++		return dev_err_probe(&pdev->dev, -EINVAL,
++				     "refusing PSCI state %#x\n", state);
++
++	rsc_node = of_parse_phandle(pdev->dev.of_node,
++				    "qcom,rpmh-controller", 0);
++	if (!rsc_node)
++		return dev_err_probe(&pdev->dev, -EINVAL,
++				     "missing qcom,rpmh-controller\n");
++	rsc_pdev = of_find_device_by_node(rsc_node);
++	of_node_put(rsc_node);
++	if (!rsc_pdev)
++		return -EPROBE_DEFER;
++
++	ret = devm_add_action_or_reset(&pdev->dev, consoleos_put_rsc_device,
++				       &rsc_pdev->dev);
++	if (ret)
++		return ret;
++
++	rsc = platform_get_drvdata(rsc_pdev);
++	if (!rsc)
++		return -EPROBE_DEFER;
++	if (!rsc->name || strcmp(rsc->name, "apps_rsc") ||
++	    rsc->id != CONSOLEOS_SM8250_APPS_DRV_ID)
++		return dev_err_probe(&pdev->dev, -EINVAL,
++				     "refusing RSC name=%s drv-id=%d\n",
++				     rsc->name ?: "<null>", rsc->id);
++	if (!rsc->tcs[CONTROL_TCS].num_tcs)
++		return dev_err_probe(&pdev->dev, -EINVAL,
++				     "Apps RSC has no CONTROL_TCS\n");
++
++	pm = devm_kzalloc(&pdev->dev, sizeof(*pm), GFP_KERNEL);
++	if (!pm)
++		return -ENOMEM;
++	pm->dev = &pdev->dev;
++	pm->rsc_dev = &rsc_pdev->dev;
++	pm->rsc = rsc;
++	pm->psci_state = state;
++	atomic_set(&pm->sequence, 0);
++	consoleos_pm = pm;
++	platform_set_drvdata(pdev, pm);
++	suspend_set_ops(&consoleos_suspend_ops);
++
++	dev_info(&pdev->dev,
++		 "registered downstream-lifecycle deep suspend state=%#x rsc=%s drv-id=%d control-tcs=%d\n",
++		 state, rsc->name, rsc->id, rsc->tcs[CONTROL_TCS].num_tcs);
++	return 0;
++}
++
++static const struct of_device_id consoleos_suspend_of_match[] = {
++	{ .compatible = "qcom,consoleos-system-pm-suspend" },
++	{}
++};
++MODULE_DEVICE_TABLE(of, consoleos_suspend_of_match);
++
++static struct platform_driver consoleos_suspend_driver = {
++	.probe = consoleos_suspend_probe,
++	.driver = {
++		.name = "consoleos-system-pm-suspend",
++		.of_match_table = consoleos_suspend_of_match,
++		.suppress_bind_attrs = true,
++	},
++};
++module_platform_driver(consoleos_suspend_driver);
++
++MODULE_DESCRIPTION("ConsoleOS SM8250 downstream system-PM lifecycle experiment");
++MODULE_LICENSE("GPL");

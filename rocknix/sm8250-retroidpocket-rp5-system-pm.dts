@@ -1,0 +1,16 @@
+// SPDX-License-Identifier: BSD-3-Clause
+/*
+ * Phase 6M: the passing Phase 6H pre-ADSP baseline plus an explicit
+ * Apps-RSC admission/flush/control-TCS platform-suspend lifecycle.
+ * SLPI remains disabled and SM8250 ADSP auto-boot is disabled in source.
+ */
+
+#include "sm8250-retroidpocket-rp5-reenable-display-gpu-gamepad-active-only-ufs-wireless-usb-typec-dp-adsp.dts"
+
+/ {
+	consoleos-system-pm-suspend {
+		compatible = "qcom,consoleos-system-pm-suspend";
+		qcom,psci-suspend-state = <0x4100c244>;
+		qcom,rpmh-controller = <&apps_rsc>;
+	};
+};
