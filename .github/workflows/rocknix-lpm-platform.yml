@@ -1,4 +1,4 @@
-name: ROCKNIX RP5 exact-state platform suspend
+name: ROCKNIX RP5 Phase 6M branch build
 on:
   workflow_dispatch:
   push:
@@ -29,7 +29,7 @@ jobs:
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 90
     env:
-      ROCKNIX_PROFILE: lpm-platform
+      ROCKNIX_PROFILE: system-pm
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -51,23 +51,23 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential gcc-14 g++-14 bc bison flex libssl-dev libelf-dev dwarves zstd xz-utils cpio kmod rsync squashfs-tools device-tree-compiler
-      - name: Prepare platform-suspend source and Device Tree
+      - name: Prepare system-PM source and Device Tree
         run: |
           set -euo pipefail
-          bash rocknix/build.sh prepare 2>&1 | tee rocknix-lpm-platform-prepare.log
-      - name: Build platform-suspend kernel, modules and Device Tree
+          bash rocknix/build.sh prepare 2>&1 | tee rocknix-system-pm-prepare.log
+      - name: Build system-PM kernel, modules and Device Tree
         run: |
           set -euo pipefail
-          bash rocknix/build.sh compile 2>&1 | tee rocknix-lpm-platform-compile.log
+          bash rocknix/build.sh compile 2>&1 | tee rocknix-system-pm-compile.log
       - name: Upload build and evidence
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
-          name: rocknix-rp5-lpm-platform
+          name: rocknix-rp5-system-pm
           retention-days: 14
           compression-level: 0
           if-no-files-found: error
           path: |
             rocknix-out/
-            rocknix-lpm-platform-prepare.log
-            rocknix-lpm-platform-compile.log
+            rocknix-system-pm-prepare.log
+            rocknix-system-pm-compile.log
