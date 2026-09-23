@@ -1,0 +1,17 @@
+// SPDX-License-Identifier: BSD-3-Clause
+/*
+ * Full RP5 audio/product tree with an explicit QCA Bluetooth dependency on
+ * the ADSP remote processor.  The matching kernel keeps SM8250 ADSP auto-boot
+ * disabled; hci_qca synchronously boots this exact firmware before touching
+ * the Bluetooth controller.
+ */
+
+#include "sm8250-retroidpocket-rp5-reenable-display-gpu-gamepad-active-only-ufs-wireless-usb-typec-audio.dts"
+
+&adsp {
+	firmware-name = "adsp.mdt";
+};
+
+&{/soc@0/geniqup@9c0000/serial@998000/bluetooth} {
+	qcom,rproc = <&adsp>;
+};

@@ -46,6 +46,21 @@ matching modules, PM diagnostics and BTF. The workflow rejects any Phase 6D
 DTB checksum change and any SM8250 ADSP resource block that does not contain
 exactly one `auto_boot = false` assignment. No device deployment is automatic.
 
+## RP5 Android ADSP before QCA Bluetooth
+
+The `adsp-before-bluetooth` profile extends the no-auto-boot kernel with an
+RP5-only `qcom,rproc` dependency on the QCA6390 Bluetooth child. The QCA serdev
+probe synchronously boots and holds ADSP before registering Bluetooth, while
+the full-product Device Tree selects `adsp.mdt`. The proprietary, hash-pinned
+RP5 Android firmware is supplied only by the device test package and is not
+stored in this public repository.
+
+This is a discriminator, not a claimed fix: an older full-audio run already
+booted the ROCKNIX ADSP before Bluetooth and failed. See
+[`ADSP-BEFORE-BLUETOOTH.md`](ADSP-BEFORE-BLUETOOTH.md) for the exact unresolved
+boundary. Run **ROCKNIX RP5 ADSP before Bluetooth** to build release
+`7.2.0-consoleos-adspbt1`; no device deployment is automatic.
+
 # RP5 subsystem re-enable matrix
 
 The `reenable-matrix` profile builds eleven independent Device Tree candidates

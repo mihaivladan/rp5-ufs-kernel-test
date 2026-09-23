@@ -1,0 +1,97 @@
+diff --git a/drivers/bluetooth/hci_qca.c b/drivers/bluetooth/hci_qca.c
+index 1222f97..0a55606 100644
+--- a/drivers/bluetooth/hci_qca.c
++++ b/drivers/bluetooth/hci_qca.c
+@@ -27,6 +27,7 @@
+ #include <linux/of.h>
+ #include <linux/acpi.h>
+ #include <linux/platform_device.h>
++#include <linux/remoteproc.h>
+ #include <linux/pwrseq/consumer.h>
+ #include <linux/regulator/consumer.h>
+ #include <linux/serdev.h>
+@@ -230,6 +231,7 @@ struct qca_serdev {
+ 	bool bdaddr_property_broken;
+ 	bool support_hfp_hw_offload;
+ 	const char *firmware_name[2];
++	struct rproc *rproc;
+ };
+ 
+ static int qca_regulator_enable(struct qca_serdev *qcadev);
+@@ -2389,6 +2391,65 @@ static int qca_init_regulators(struct qca_power *qca,
+ 	return 0;
+ }
+ 
++#if IS_REACHABLE(CONFIG_REMOTEPROC)
++static void qca_release_rproc(void *data)
++{
++	struct qca_serdev *qcadev = data;
++	struct device *dev = &qcadev->serdev_hu.serdev->dev;
++	int err;
++
++	err = rproc_shutdown(qcadev->rproc);
++	if (err)
++		dev_warn(dev, "failed to release remote processor dependency: %d\n",
++			 err);
++
++	rproc_put(qcadev->rproc);
++	qcadev->rproc = NULL;
++}
++
++static int qca_boot_rproc_dependency(struct qca_serdev *qcadev)
++{
++	struct device *dev = &qcadev->serdev_hu.serdev->dev;
++	phandle rproc_phandle;
++	int err;
++
++	if (of_property_read_u32(dev_of_node(dev), "qcom,rproc",
++				 &rproc_phandle))
++		return 0;
++
++	qcadev->rproc = rproc_get_by_phandle(rproc_phandle);
++	if (!qcadev->rproc)
++		return dev_err_probe(dev, -EPROBE_DEFER,
++				     "remote processor dependency is not ready\n");
++
++	err = rproc_boot(qcadev->rproc);
++	if (err) {
++		rproc_put(qcadev->rproc);
++		qcadev->rproc = NULL;
++		return dev_err_probe(dev, err,
++				     "failed to boot remote processor dependency\n");
++	}
++
++	err = devm_add_action_or_reset(dev, qca_release_rproc, qcadev);
++	if (err)
++		return err;
++
++	dev_info(dev, "remote processor dependency is running before Bluetooth setup\n");
++	return 0;
++}
++#else
++static int qca_boot_rproc_dependency(struct qca_serdev *qcadev)
++{
++	struct device *dev = &qcadev->serdev_hu.serdev->dev;
++
++	if (of_property_present(dev_of_node(dev), "qcom,rproc"))
++		return dev_err_probe(dev, -EOPNOTSUPP,
++				     "remote processor dependency is configured but unavailable\n");
++
++	return 0;
++}
++#endif
++
+ static int qca_serdev_probe(struct serdev_device *serdev)
+ {
+ 	struct qca_serdev *qcadev;
+@@ -2404,6 +2465,10 @@ static int qca_serdev_probe(struct serdev_device *serdev)
+ 	qcadev->serdev_hu.serdev = serdev;
+ 	data = device_get_match_data(&serdev->dev);
+ 	serdev_device_set_drvdata(serdev, qcadev);
++	err = qca_boot_rproc_dependency(qcadev);
++	if (err)
++		return err;
++
+ 	device_property_read_string_array(&serdev->dev, "firmware-name",
+ 					 qcadev->firmware_name, ARRAY_SIZE(qcadev->firmware_name));
+ 	device_property_read_u32(&serdev->dev, "max-speed",
