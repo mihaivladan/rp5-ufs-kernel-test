@@ -17,4 +17,8 @@ else:
     lines = path.read_text(errors="replace").splitlines()
     tail = "\n".join(lines[-line_count:])
 
+# GitHub truncates annotation messages to 4096 characters from the end we
+# need most.  Bound the unescaped input so percent-encoded newlines still fit.
+tail = tail[-1800:]
+
 print(f"::error title=Build failure tail::{escape(tail)}")
