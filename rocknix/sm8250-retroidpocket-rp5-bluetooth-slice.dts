@@ -1,0 +1,10 @@
+// SPDX-License-Identifier: BSD-3-Clause
+/*
+ * Phase 6W/6Y Bluetooth-only slice: QUP0, UART6 and the QCA6390 PMU stay
+ * enabled while PCIe/Wi-Fi and the audio hardware stay disabled.
+ */
+
+#include "sm8250-retroidpocket-rp5-reenable-display-gpu-gamepad-active-only-ufs-wireless-usb-typec-dp-adsp.dts"
+
+&pcie0 { status = "disabled"; };
+&pcie0_phy { status = "disabled"; };

@@ -21,6 +21,12 @@ The profile:
 - makes `hci_qca` synchronously call `rproc_boot()` and retain the corresponding
   power/reference counts before `hci_uart_register_device()`.
 
+The build emits two candidate Device Trees.  The Bluetooth-only slice is
+byte-checked against the exact Phase 6W/6Y baseline before adding only the
+Android firmware name and remoteproc dependency; it is the controlled first
+test.  The full-audio/product candidate is retained as the reusable foundation
+for later integration tests after that narrow discriminator is answered.
+
 Boards without `qcom,rproc` retain the existing QCA behavior.  Removal or a
 failed probe releases both the remoteproc power reference and object reference.
 

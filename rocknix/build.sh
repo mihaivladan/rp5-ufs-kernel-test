@@ -385,16 +385,29 @@ elif [[ "${profile}" == adsp-no-auto-ab ]]; then
     cd "${source_dir}"
 elif [[ "${profile}" == adsp-before-bluetooth ]]; then
     full_audio_name='sm8250-retroidpocket-rp5-reenable-display-gpu-gamepad-active-only-ufs-wireless-usb-typec-audio'
+    slice_reference_name='sm8250-retroidpocket-rp5-bluetooth-slice'
+    slice_name='sm8250-retroidpocket-rp5-adsp-before-bluetooth-slice'
     make "${make_args[@]}" -j"$(nproc)" DTC_FLAGS=-@ "qcom/${full_audio_name}.dtb"
+    make "${make_args[@]}" -j"$(nproc)" DTC_FLAGS=-@ \
+        "qcom/${slice_reference_name}.dtb" "qcom/${slice_name}.dtb"
     python3 "${kit}/rocknix/verify-adsp-before-bluetooth-dtb.py" \
         "arch/arm64/boot/dts/qcom/${full_audio_name}.dtb" \
         "arch/arm64/boot/dts/qcom/${dtb_name}.dtb" \
         | tee "${out}/adsp-before-bluetooth-dtb-verification.txt"
-    cp "arch/arm64/boot/dts/qcom/${dtb_name}.dtb" "${out}/"
+    echo '2c24a59dcb57f40a991583859c1450698ff3bde112bd7eaba92aec8799b20130  arch/arm64/boot/dts/qcom/sm8250-retroidpocket-rp5-bluetooth-slice.dtb' \
+        | sha256sum -c -
+    python3 "${kit}/rocknix/verify-adsp-before-bluetooth-dtb.py" \
+        "arch/arm64/boot/dts/qcom/${slice_reference_name}.dtb" \
+        "arch/arm64/boot/dts/qcom/${slice_name}.dtb" disabled \
+        | tee "${out}/adsp-before-bluetooth-slice-dtb-verification.txt"
+    cp "arch/arm64/boot/dts/qcom/${dtb_name}.dtb" \
+        "arch/arm64/boot/dts/qcom/${slice_reference_name}.dtb" \
+        "arch/arm64/boot/dts/qcom/${slice_name}.dtb" "${out}/"
     cd "${out}"
-    sha256sum "${dtb_name}.dtb" > ADSP-BEFORE-BLUETOOTH-DTB-SHA256SUMS
+    sha256sum "${dtb_name}.dtb" "${slice_reference_name}.dtb" \
+        "${slice_name}.dtb" > ADSP-BEFORE-BLUETOOTH-DTB-SHA256SUMS
     printf '%s\n' \
-        'RP5 ADSP-before-Bluetooth candidate passed: exact full-audio product tree, Android ADSP firmware name, explicit QCA remoteproc dependency and SM8250-only auto_boot=false. Not installed or boot-tested.' \
+        'RP5 ADSP-before-Bluetooth candidates passed: exact Phase 6W/6Y Bluetooth-only slice and full-audio product tree, Android ADSP firmware name, explicit QCA remoteproc dependency and SM8250-only auto_boot=false. Not installed or boot-tested.' \
         > BUILD-SUCCESS.txt
     cd "${source_dir}"
 elif [[ "${profile}" == slpi-integrated ]]; then
@@ -453,6 +466,10 @@ stage="${work}/stage"
 mkdir -p "${stage}/boot" "${stage}/lib/modules"
 cp arch/arm64/boot/Image "${stage}/boot/KERNEL"
 cp "arch/arm64/boot/dts/qcom/${dtb_name}.dtb" "${stage}/boot/"
+if [[ "${profile}" == adsp-before-bluetooth ]]; then
+    cp arch/arm64/boot/dts/qcom/sm8250-retroidpocket-rp5-adsp-before-bluetooth-slice.dtb \
+        "${stage}/boot/"
+fi
 make "${make_args[@]}" INSTALL_MOD_PATH="${stage}" INSTALL_MOD_STRIP=1 modules_install
 rm -f "${stage}/lib/modules/${release}/build" "${stage}/lib/modules/${release}/source"
 depmod -b "${stage}" "${release}"
@@ -470,7 +487,10 @@ if [[ "${profile}" == adsp-no-auto-ab || "${profile}" == adsp-before-bluetooth |
 fi
 if [[ "${profile}" == adsp-before-bluetooth ]]; then
     cp drivers/bluetooth/hci_qca.c "${out}/"
-    cp "arch/arm64/boot/dts/qcom/${dtb_name}.dts" "${out}/"
+    cp "arch/arm64/boot/dts/qcom/${dtb_name}.dts" \
+        arch/arm64/boot/dts/qcom/sm8250-retroidpocket-rp5-bluetooth-slice.dts \
+        arch/arm64/boot/dts/qcom/sm8250-retroidpocket-rp5-adsp-before-bluetooth-slice.dts \
+        "${out}/"
 fi
 if [[ "${profile}" == lpm-platform ]]; then
     cp drivers/soc/qcom/qcom_lpm_platform_suspend.c "${out}/"

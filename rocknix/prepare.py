@@ -216,12 +216,17 @@ def apply_patches(repo, source, fix, profile):
             check=True,
         )
         if profile == "adsp-before-bluetooth":
-            dependency_dts = root / "sm8250-retroidpocket-rp5-adsp-before-bluetooth.dts"
-            require(dependency_dts.is_file(), "Missing RP5 ADSP-before-Bluetooth DTS")
-            shutil.copyfile(
-                dependency_dts,
-                source / "arch/arm64/boot/dts/qcom" / dependency_dts.name,
-            )
+            for filename in (
+                "sm8250-retroidpocket-rp5-bluetooth-slice.dts",
+                "sm8250-retroidpocket-rp5-adsp-before-bluetooth-slice.dts",
+                "sm8250-retroidpocket-rp5-adsp-before-bluetooth.dts",
+            ):
+                dependency_dts = root / filename
+                require(dependency_dts.is_file(), f"Missing RP5 dependency DTS: {filename}")
+                shutil.copyfile(
+                    dependency_dts,
+                    source / "arch/arm64/boot/dts/qcom" / dependency_dts.name,
+                )
         elif profile == "sleepstate-handshake":
             sleepstate_dts = root / "sm8250-retroidpocket-rp5-adsp-sleepstate.dts"
             require(sleepstate_dts.is_file(), "Missing RP5 sleep-state DTS")
@@ -263,7 +268,11 @@ def apply_patches(repo, source, fix, profile):
     elif profile == "adsp-no-auto-ab":
         names.append("sm8250-retroidpocket-rp5-reenable-display-gpu-gamepad-active-only-ufs-wireless-usb-typec-dp-adsp")
     elif profile == "adsp-before-bluetooth":
-        names.append("sm8250-retroidpocket-rp5-adsp-before-bluetooth")
+        names.extend([
+            "sm8250-retroidpocket-rp5-bluetooth-slice",
+            "sm8250-retroidpocket-rp5-adsp-before-bluetooth-slice",
+            "sm8250-retroidpocket-rp5-adsp-before-bluetooth",
+        ])
     elif profile == "slpi-integrated":
         names.append("sm8250-retroidpocket-rp5-adsp-slpi-sleepstate")
     elif profile == "lpm-platform":

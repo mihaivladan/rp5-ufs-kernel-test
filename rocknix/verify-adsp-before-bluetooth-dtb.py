@@ -90,10 +90,14 @@ def equal_after_phandle_renumbering(
 
 
 def main() -> int:
-    if len(sys.argv) != 3:
+    if len(sys.argv) not in (3, 4):
         raise SystemExit(
-            "usage: verify-adsp-before-bluetooth-dtb.py FULL_AUDIO_DTB CANDIDATE_DTB"
+            "usage: verify-adsp-before-bluetooth-dtb.py "
+            "BASELINE_DTB CANDIDATE_DTB [EXPECTED_SOUND_STATUS]"
         )
+    expected_sound_status = sys.argv[3] if len(sys.argv) == 4 else "okay"
+    if expected_sound_status not in {"okay", "disabled"}:
+        raise SystemExit(f"Unexpected sound status: {expected_sound_status}")
 
     baseline_nodes, baseline = parse_fdt(Path(sys.argv[1]))
     candidate_nodes, candidate = parse_fdt(Path(sys.argv[2]))
@@ -150,13 +154,22 @@ def main() -> int:
         failures.append("Bluetooth qcom,rproc ADSP phandle")
     if (bluetooth_path, "qcom,rproc") in baseline:
         failures.append("baseline unexpectedly has qcom,rproc")
-    for path in (adsp_path, bluetooth_path, symbol(candidate, "sound")):
-        if candidate.get((path, "status")) != one_string("okay"):
+    for path in (adsp_path, symbol(candidate, "sound")):
+        expected = "okay" if path == adsp_path else expected_sound_status
+        if candidate.get((path, "status")) != one_string(expected):
             failures.append(f"{path}/status")
+    # A missing status property means enabled in Device Tree.  The RP5 QCA
+    # Bluetooth child uses that implicit form in the exact release tree.
+    bluetooth_status = candidate.get((bluetooth_path, "status"), one_string("okay"))
+    if bluetooth_status != one_string("okay"):
+        failures.append(f"{bluetooth_path}/status")
+    baseline_sound = symbol(baseline, "sound")
+    if baseline.get((baseline_sound, "status")) != one_string(expected_sound_status):
+        failures.append(f"{baseline_sound}/status")
     if failures:
         raise SystemExit("ADSP-before-Bluetooth DT verification failed: " + ", ".join(failures))
 
-    print("Verified exact full-audio product DT with no node additions or removals")
+    print("Verified baseline semantics with no node additions or removals")
     print("Verified only ADSP firmware-name and Bluetooth qcom,rproc semantics changed")
     print("Verified QCA Bluetooth dependency resolves to the enabled ADSP remoteproc")
     return 0
