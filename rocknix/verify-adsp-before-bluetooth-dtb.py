@@ -49,6 +49,14 @@ def one_string(value: str) -> bytes:
     return value.encode() + b"\0"
 
 
+def status_value(properties: dict, path: str) -> str:
+    """Return the effective status, accepting the proven padded test DTBs."""
+    raw = properties.get((path, "status"))
+    if raw is None:
+        return "okay"
+    return raw.rstrip(b"\0").decode()
+
+
 def symbol(properties: dict, name: str) -> str:
     value = properties[("/__symbols__", name)]
     if not value.endswith(b"\0"):
@@ -179,15 +187,14 @@ def main() -> int:
         failures.append("baseline unexpectedly has qcom,rproc")
     for path in (adsp_path, symbol(candidate, "sound")):
         expected = "okay" if path == adsp_path else expected_sound_status
-        if candidate.get((path, "status")) != one_string(expected):
+        if status_value(candidate, path) != expected:
             failures.append(f"{path}/status")
     # A missing status property means enabled in Device Tree.  The RP5 QCA
     # Bluetooth child uses that implicit form in the exact release tree.
-    bluetooth_status = candidate.get((bluetooth_path, "status"), one_string("okay"))
-    if bluetooth_status != one_string("okay"):
+    if status_value(candidate, bluetooth_path) != "okay":
         failures.append(f"{bluetooth_path}/status")
     baseline_sound = symbol(baseline, "sound")
-    if baseline.get((baseline_sound, "status")) != one_string(expected_sound_status):
+    if status_value(baseline, baseline_sound) != expected_sound_status:
         failures.append(f"{baseline_sound}/status")
     if failures:
         raise SystemExit("ADSP-before-Bluetooth DT verification failed: " + ", ".join(failures))

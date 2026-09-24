@@ -13,8 +13,6 @@ on:
       - 'rocknix/qca-rproc-dependency.patch'
       - 'rocknix/sm8250-adsp-no-auto-boot.patch'
       - 'rocknix/sm8250-retroidpocket-rp5-adsp-before-bluetooth.dts'
-      - 'rocknix/sm8250-retroidpocket-rp5-adsp-before-bluetooth-slice.dts'
-      - 'rocknix/sm8250-retroidpocket-rp5-bluetooth-slice.dts'
       - 'rocknix/verify-adsp-before-bluetooth-dtb.py'
       - 'rocknix/a6xx-stale-rpmh-votes.patch'
       - 'rocknix/dpu-cstate-init.patch'
