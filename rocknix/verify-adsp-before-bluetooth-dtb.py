@@ -55,6 +55,40 @@ def symbol(properties: dict, name: str) -> str:
     return value[:-1].decode()
 
 
+def phandle_paths(properties: dict) -> dict[int, str]:
+    """Map compiled phandle numbers back to stable node paths."""
+    result = {}
+    for (path, name), value in properties.items():
+        if name not in {"phandle", "linux,phandle"} or len(value) != 4:
+            continue
+        number = struct.unpack(">I", value)[0]
+        previous = result.setdefault(number, path)
+        if previous != path:
+            raise SystemExit(f"Duplicate phandle {number}: {previous}, {path}")
+    return result
+
+
+def equal_after_phandle_renumbering(
+    baseline_value: bytes,
+    candidate_value: bytes,
+    baseline_phandles: dict[int, str],
+    candidate_phandles: dict[int, str],
+) -> bool:
+    """Accept changed cells only when both still name the same target node."""
+    if len(baseline_value) != len(candidate_value) or len(baseline_value) % 4:
+        return False
+    for offset in range(0, len(baseline_value), 4):
+        baseline_cell = struct.unpack_from(">I", baseline_value, offset)[0]
+        candidate_cell = struct.unpack_from(">I", candidate_value, offset)[0]
+        if baseline_cell == candidate_cell:
+            continue
+        baseline_path = baseline_phandles.get(baseline_cell)
+        candidate_path = candidate_phandles.get(candidate_cell)
+        if baseline_path is None or baseline_path != candidate_path:
+            return False
+    return True
+
+
 def main() -> int:
     if len(sys.argv) != 3:
         raise SystemExit(
@@ -86,11 +120,24 @@ def main() -> int:
         key: value for key, value in candidate.items()
         if key[0] != "/__symbols__" and key[1] not in metadata and key not in allowed
     }
-    if baseline_existing != candidate_existing:
-        changed = sorted(
-            key for key in baseline_existing.keys() | candidate_existing.keys()
-            if baseline_existing.get(key) != candidate_existing.get(key)
-        )
+    baseline_phandles = phandle_paths(baseline)
+    candidate_phandles = phandle_paths(candidate)
+    changed = []
+    for key in sorted(baseline_existing.keys() | candidate_existing.keys()):
+        baseline_value = baseline_existing.get(key)
+        candidate_value = candidate_existing.get(key)
+        if baseline_value == candidate_value:
+            continue
+        if baseline_value is not None and candidate_value is not None and \
+                equal_after_phandle_renumbering(
+                    baseline_value,
+                    candidate_value,
+                    baseline_phandles,
+                    candidate_phandles,
+                ):
+            continue
+        changed.append(key)
+    if changed:
         raise SystemExit(f"Unexpected existing-property delta: {changed}")
 
     failures = []
