@@ -16,6 +16,7 @@ on:
       - 'rocknix/verify-adsp-before-bluetooth-dtb.py'
       - 'rocknix/a6xx-stale-rpmh-votes.patch'
       - 'rocknix/dpu-cstate-init.patch'
+      - 'rocknix/emit-actions-log-tail.py'
       - 'ufs-lane-clocks.patch'
 permissions:
   contents: read
@@ -48,13 +49,21 @@ jobs:
           sudo apt-get install -y build-essential gcc-14 g++-14 bc bison flex libssl-dev libelf-dev dwarves zstd xz-utils cpio kmod rsync squashfs-tools device-tree-compiler
           df -h /
       - name: Validate exact dependency patch and full-product Device Tree
+        id: prepare
         run: |
           set -euo pipefail
           bash rocknix/build.sh prepare 2>&1 | tee rocknix-adsp-before-bluetooth-build.log
+      - name: Publish validation failure tail
+        if: failure() && steps.prepare.outcome == 'failure'
+        run: python3 rocknix/emit-actions-log-tail.py rocknix-adsp-before-bluetooth-build.log
       - name: Compile kernel and matching modules
+        id: compile
         run: |
           set -euo pipefail
           bash rocknix/build.sh compile 2>&1 | tee -a rocknix-adsp-before-bluetooth-build.log
+      - name: Publish compile failure tail
+        if: failure() && steps.compile.outcome == 'failure'
+        run: python3 rocknix/emit-actions-log-tail.py rocknix-adsp-before-bluetooth-build.log
       - name: Upload results and logs
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
