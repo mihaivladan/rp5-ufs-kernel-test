@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Verify the RP5 kernel-ordering DT changes only ADSP firmware and QCA dependency."""
 
+import hashlib
 import struct
 import sys
 from pathlib import Path
@@ -89,6 +90,28 @@ def equal_after_phandle_renumbering(
     return True
 
 
+def semantic_sha256(nodes: set[str], properties: dict) -> str:
+    """Hash DT semantics while replacing unstable phandle numbers by paths."""
+    phandles = phandle_paths(properties)
+    records = [f"node\0{path}" for path in sorted(nodes)]
+    for (path, name), value in sorted(properties.items()):
+        if name in {"phandle", "linux,phandle"}:
+            continue
+        if path == "/__symbols__":
+            canonical = "symbol:" + value.rstrip(b"\0").decode(errors="surrogateescape")
+        elif len(value) % 4:
+            canonical = "bytes:" + value.hex()
+        else:
+            cells = []
+            for offset in range(0, len(value), 4):
+                cell = struct.unpack_from(">I", value, offset)[0]
+                target = phandles.get(cell)
+                cells.append(f"phandle:{target}" if target else f"cell:{cell:08x}")
+            canonical = ",".join(cells)
+        records.append(f"property\0{path}\0{name}\0{canonical}")
+    return hashlib.sha256("\n".join(records).encode(errors="surrogateescape")).hexdigest()
+
+
 def main() -> int:
     if len(sys.argv) not in (3, 4):
         raise SystemExit(
@@ -172,6 +195,8 @@ def main() -> int:
     print("Verified baseline semantics with no node additions or removals")
     print("Verified only ADSP firmware-name and Bluetooth qcom,rproc semantics changed")
     print("Verified QCA Bluetooth dependency resolves to the enabled ADSP remoteproc")
+    print(f"Baseline semantic SHA256: {semantic_sha256(baseline_nodes, baseline)}")
+    print(f"Candidate semantic SHA256: {semantic_sha256(candidate_nodes, candidate)}")
     return 0
 
 

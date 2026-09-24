@@ -394,12 +394,13 @@ elif [[ "${profile}" == adsp-before-bluetooth ]]; then
         "arch/arm64/boot/dts/qcom/${full_audio_name}.dtb" \
         "arch/arm64/boot/dts/qcom/${dtb_name}.dtb" \
         | tee "${out}/adsp-before-bluetooth-dtb-verification.txt"
-    echo '2c24a59dcb57f40a991583859c1450698ff3bde112bd7eaba92aec8799b20130  arch/arm64/boot/dts/qcom/sm8250-retroidpocket-rp5-bluetooth-slice.dtb' \
-        | sha256sum -c -
     python3 "${kit}/rocknix/verify-adsp-before-bluetooth-dtb.py" \
         "arch/arm64/boot/dts/qcom/${slice_reference_name}.dtb" \
         "arch/arm64/boot/dts/qcom/${slice_name}.dtb" disabled \
         | tee "${out}/adsp-before-bluetooth-slice-dtb-verification.txt"
+    grep -Fx \
+        'Baseline semantic SHA256: 82bc34c668cf150e8be3a1ab3088ff9d8f9389b2dad0d02c4dcc7c173dd60615' \
+        "${out}/adsp-before-bluetooth-slice-dtb-verification.txt"
     cp "arch/arm64/boot/dts/qcom/${dtb_name}.dtb" \
         "arch/arm64/boot/dts/qcom/${slice_reference_name}.dtb" \
         "arch/arm64/boot/dts/qcom/${slice_name}.dtb" "${out}/"
