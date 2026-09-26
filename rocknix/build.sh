@@ -210,24 +210,24 @@ elif sys.argv[2] == 'pcie-drv-handoff':
         raise SystemExit('PCIe DRV build must hold SM8250 ADSP offline for firmware selection')
     pcie = Path('drivers/pci/controller/dwc/pcie-qcom.c').read_text()
     transport = Path('drivers/pci/controller/dwc/pcie-qcom-drv.c').read_text()
-    required_pcie = {
+    required_pcie = (
         'static int qcom_pcie_suspend_late(struct device *dev)',
         'return qcom_pcie_drv_suspend_resources(pcie);',
         'static int qcom_pcie_resume_early(struct device *dev)',
         'ret = qcom_pcie_drv_reclaim(pcie->drv_dev_id);',
         '\t.suspend_late = qcom_pcie_suspend_late,',
         '\t.resume_early = qcom_pcie_resume_early,',
-    }
-    required_transport = {
+    )
+    required_transport = (
         '#define QCOM_PCIE_DRV_CMD_ENABLE\t0xc0000000',
         '#define QCOM_PCIE_DRV_CMD_DISABLE\t0xc0000001',
         '#define QCOM_PCIE_DRV_MSG_ACK\t\t0x000a',
         '#define QCOM_PCIE_DRV_MSG_CMD\t\t0x000c',
         '\t{ .name = "pcie_drv" },',
-    }
-    if not required_pcie.issubset(set(pcie.splitlines())):
+    )
+    if not all(marker in pcie for marker in required_pcie):
         raise SystemExit('PCIe DRV PM ordering markers missing')
-    if not required_transport.issubset(set(transport.splitlines())):
+    if not all(marker in transport for marker in required_transport):
         raise SystemExit('PCIe DRV wire-protocol markers missing')
 elif sys.argv[2] in ('slpi-integrated', 'lpm-platform'):
     required = {
