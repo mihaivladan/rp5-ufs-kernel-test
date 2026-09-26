@@ -33,6 +33,12 @@ lpass-devote-fix)
     artifact_name="rocknix-${expected_release}.tar.zst"
     dtb_name='sm8250-retroidpocket-rp5-reenable-display-gpu-gamepad-active-only-ufs-wireless-usb-typec-dp-adsp'
     ;;
+lpass-system-suspend-fix)
+    config_fragment="${kit}/rocknix/lpass-system-suspend-fix.config"
+    expected_release='7.2.0-consoleos-lpasspm1'
+    artifact_name="rocknix-${expected_release}.tar.zst"
+    dtb_name='sm8250-retroidpocket-rp5-reenable-display-gpu-gamepad-active-only-ufs-wireless-usb-typec-dp-adsp'
+    ;;
 pcie-drv-handoff)
     config_fragment="${kit}/rocknix/pcie-drv-handoff.config"
     expected_release='7.2.0-consoleos-pciedrv1'
@@ -193,14 +199,14 @@ elif sys.argv[2] == 'sleepstate-handshake':
     absent_driver = sorted(required_driver - set(driver.splitlines()))
     if absent_driver:
         raise SystemExit('Sleep-state driver markers missing: ' + ', '.join(absent_driver))
-elif sys.argv[2] in ('adsp-no-auto-ab', 'lpass-devote-fix'):
+elif sys.argv[2] in ('adsp-no-auto-ab', 'lpass-devote-fix', 'lpass-system-suspend-fix'):
     pas = Path('drivers/remoteproc/qcom_q6v5_pas.c').read_text()
     start = pas.index('static const struct qcom_pas_data sm8250_adsp_resource = {')
     end = pas.index('\n};', start)
     block = pas[start:end]
     if block.count('.auto_boot = false,') != 1 or '.auto_boot = true,' in block:
         raise SystemExit('SM8250 ADSP auto-boot was not disabled exactly once')
-    if sys.argv[2] == 'lpass-devote-fix':
+    if sys.argv[2] in ('lpass-devote-fix', 'lpass-system-suspend-fix'):
         afe = Path('sound/soc/qcom/qdsp6/q6afe.c').read_text()
         required_afe = (
             'u32 lpass_hw_client_handle;',
@@ -212,6 +218,14 @@ elif sys.argv[2] in ('adsp-no-auto-ab', 'lpass-devote-fix'):
         )
         if not all(marker in afe for marker in required_afe):
             raise SystemExit('LPASS hardware vote-handle repair markers missing')
+    if sys.argv[2] == 'lpass-system-suspend-fix':
+        pinctrl = Path('drivers/pinctrl/qcom/pinctrl-sm8250-lpass-lpi.c').read_text()
+        required_pinctrl = (
+            'SYSTEM_SLEEP_PM_OPS(pm_runtime_force_suspend, pm_runtime_force_resume)',
+            'RUNTIME_PM_OPS(pm_clk_suspend, pm_clk_resume, NULL)',
+        )
+        if not all(marker in pinctrl for marker in required_pinctrl):
+            raise SystemExit('SM8250 LPASS system-suspend repair markers missing')
 elif sys.argv[2] == 'pcie-drv-handoff':
     required = {
         'CONFIG_PCIE_QCOM=y', 'CONFIG_PCIE_QCOM_DRV=y', 'CONFIG_RPMSG=y',
@@ -397,7 +411,7 @@ elif [[ "${profile}" == sleepstate-handshake ]]; then
         'RP5 SMP2P sleep-state candidate passed: Phase 6D plus the exact three-node SLPI handshake delta. Not installed or boot-tested.' \
         > BUILD-SUCCESS.txt
     cd "${source_dir}"
-elif [[ "${profile}" == adsp-no-auto-ab || "${profile}" == lpass-devote-fix ]]; then
+elif [[ "${profile}" == adsp-no-auto-ab || "${profile}" == lpass-devote-fix || "${profile}" == lpass-system-suspend-fix ]]; then
     phase6d_name='sm8250-retroidpocket-rp5-reenable-display-gpu-gamepad-active-only-ufs-wireless-usb-typec-dp-adsp'
     test "${dtb_name}" = "${phase6d_name}"
     echo '1d65057e6795edb4cd917421c20bd2ea037fc5ed0b6493ff10251c0907928946  arch/arm64/boot/dts/qcom/sm8250-retroidpocket-rp5-reenable-display-gpu-gamepad-active-only-ufs-wireless-usb-typec-dp-adsp.dtb' \
@@ -470,7 +484,7 @@ source_dir="${work}/linux-7.2"
 cd "${source_dir}"
 release=$(make "${make_args[@]}" -s kernelrelease)
 test "${release}" = "${expected_release}"
-if [[ "${profile}" == diagnostic || "${profile}" == gpu-rpmh-fix || "${profile}" == sleepstate-handshake || "${profile}" == adsp-no-auto-ab || "${profile}" == lpass-devote-fix || "${profile}" == pcie-drv-handoff || "${profile}" == slpi-integrated || "${profile}" == lpm-platform ]]; then
+if [[ "${profile}" == diagnostic || "${profile}" == gpu-rpmh-fix || "${profile}" == sleepstate-handshake || "${profile}" == adsp-no-auto-ab || "${profile}" == lpass-devote-fix || "${profile}" == lpass-system-suspend-fix || "${profile}" == pcie-drv-handoff || "${profile}" == slpi-integrated || "${profile}" == lpm-platform ]]; then
     # The previous build exposed an uninitialized cstate pointer in this file.
     printf '\nCFLAGS_dpu_crtc.o += -Werror=uninitialized -Werror=maybe-uninitialized\n' >> drivers/gpu/drm/msm/disp/dpu1/Makefile
 fi
@@ -484,19 +498,23 @@ rm -f "${stage}/lib/modules/${release}/build" "${stage}/lib/modules/${release}/s
 depmod -b "${stage}" "${release}"
 cp System.map Module.symvers "${out}/"
 cp drivers/ufs/host/ufs-qcom.c drivers/ufs/host/ufs-qcom.h "${out}/"
-if [[ "${profile}" == gpu-rpmh-fix || "${profile}" == sleepstate-handshake || "${profile}" == adsp-no-auto-ab || "${profile}" == lpass-devote-fix || "${profile}" == pcie-drv-handoff || "${profile}" == slpi-integrated || "${profile}" == lpm-platform ]]; then
+if [[ "${profile}" == gpu-rpmh-fix || "${profile}" == sleepstate-handshake || "${profile}" == adsp-no-auto-ab || "${profile}" == lpass-devote-fix || "${profile}" == lpass-system-suspend-fix || "${profile}" == pcie-drv-handoff || "${profile}" == slpi-integrated || "${profile}" == lpm-platform ]]; then
     cp drivers/gpu/drm/msm/adreno/a6xx_gmu.c "${out}/"
 fi
 if [[ "${profile}" == sleepstate-handshake || "${profile}" == slpi-integrated || "${profile}" == lpm-platform ]]; then
     cp drivers/soc/qcom/smp2p_sleepstate.c "${out}/"
     cp "arch/arm64/boot/dts/qcom/${dtb_name}.dts" "${out}/"
 fi
-if [[ "${profile}" == adsp-no-auto-ab || "${profile}" == lpass-devote-fix || "${profile}" == pcie-drv-handoff || "${profile}" == slpi-integrated || "${profile}" == lpm-platform ]]; then
+if [[ "${profile}" == adsp-no-auto-ab || "${profile}" == lpass-devote-fix || "${profile}" == lpass-system-suspend-fix || "${profile}" == pcie-drv-handoff || "${profile}" == slpi-integrated || "${profile}" == lpm-platform ]]; then
     cp drivers/remoteproc/qcom_q6v5_pas.c "${out}/"
 fi
-if [[ "${profile}" == lpass-devote-fix ]]; then
+if [[ "${profile}" == lpass-devote-fix || "${profile}" == lpass-system-suspend-fix ]]; then
     cp sound/soc/qcom/qdsp6/q6afe.c "${out}/"
     objdump -drS sound/soc/qcom/qdsp6/q6afe.o > "${out}/q6afe-disassembly.txt"
+fi
+if [[ "${profile}" == lpass-system-suspend-fix ]]; then
+    cp drivers/pinctrl/qcom/pinctrl-sm8250-lpass-lpi.c "${out}/"
+    objdump -drS drivers/pinctrl/qcom/pinctrl-sm8250-lpass-lpi.o > "${out}/pinctrl-sm8250-lpass-lpi-disassembly.txt"
 fi
 if [[ "${profile}" == lpm-platform ]]; then
     cp drivers/soc/qcom/qcom_lpm_platform_suspend.c "${out}/"
@@ -509,7 +527,7 @@ if [[ "${profile}" == pcie-drv-handoff ]]; then
     objdump -drS drivers/pci/controller/dwc/pcie-qcom.o > "${out}/pcie-qcom-disassembly.txt"
     objdump -drS drivers/pci/controller/dwc/pcie-qcom-drv.o > "${out}/pcie-qcom-drv-disassembly.txt"
 fi
-if [[ "${profile}" == diagnostic || "${profile}" == gpu-rpmh-fix || "${profile}" == sleepstate-handshake || "${profile}" == adsp-no-auto-ab || "${profile}" == lpass-devote-fix || "${profile}" == pcie-drv-handoff || "${profile}" == slpi-integrated || "${profile}" == lpm-platform ]]; then
+if [[ "${profile}" == diagnostic || "${profile}" == gpu-rpmh-fix || "${profile}" == sleepstate-handshake || "${profile}" == adsp-no-auto-ab || "${profile}" == lpass-devote-fix || "${profile}" == lpass-system-suspend-fix || "${profile}" == pcie-drv-handoff || "${profile}" == slpi-integrated || "${profile}" == lpm-platform ]]; then
     objcopy --dump-section .BTF="${out}/vmlinux.btf" vmlinux
     cp drivers/gpu/drm/msm/disp/dpu1/dpu_crtc.c drivers/gpu/drm/msm/disp/dpu1/dpu_crtc.o "${out}/"
     objdump -drS drivers/gpu/drm/msm/disp/dpu1/dpu_crtc.o > "${out}/dpu_crtc-disassembly.txt"
@@ -518,7 +536,7 @@ elif [[ "${profile}" == gmu-clock-reset ]]; then
 fi
 test -s "${stage}/boot/KERNEL"
 test -s "${stage}/lib/modules/${release}/modules.dep"
-if [[ "${profile}" == diagnostic || "${profile}" == gpu-rpmh-fix || "${profile}" == sleepstate-handshake || "${profile}" == adsp-no-auto-ab || "${profile}" == lpass-devote-fix || "${profile}" == pcie-drv-handoff || "${profile}" == slpi-integrated || "${profile}" == lpm-platform ]]; then
+if [[ "${profile}" == diagnostic || "${profile}" == gpu-rpmh-fix || "${profile}" == sleepstate-handshake || "${profile}" == adsp-no-auto-ab || "${profile}" == lpass-devote-fix || "${profile}" == lpass-system-suspend-fix || "${profile}" == pcie-drv-handoff || "${profile}" == slpi-integrated || "${profile}" == lpm-platform ]]; then
     test -s "${out}/vmlinux.btf"
 fi
 tar -C "${stage}" -cf - boot lib | zstd -T0 -10 -o "${out}/${artifact_name}"
