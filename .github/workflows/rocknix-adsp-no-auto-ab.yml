@@ -8,7 +8,7 @@ jobs:
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 150
     env:
-      ROCKNIX_PROFILE: pcie-drv-handoff
+      ROCKNIX_PROFILE: adsp-no-auto-ab
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -31,22 +31,22 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y build-essential gcc-14 g++-14 bc bison flex libssl-dev libelf-dev dwarves zstd xz-utils cpio kmod rsync squashfs-tools
           df -h /
-      - name: Validate exact PCIe DRV handoff diagnostic
+      - name: Validate exact no-auto-boot diagnostic
         run: |
           set -euo pipefail
-          bash rocknix/build.sh prepare 2>&1 | tee rocknix-pcie-drv-build.log
+          bash rocknix/build.sh prepare 2>&1 | tee rocknix-adsp-ab-build.log
       - name: Compile kernel and modules
         run: |
           set -euo pipefail
-          bash rocknix/build.sh compile 2>&1 | tee -a rocknix-pcie-drv-build.log
+          bash rocknix/build.sh compile 2>&1 | tee -a rocknix-adsp-ab-build.log
       - name: Upload results and logs
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
-          name: rocknix-rp5-pcie-drv-handoff
+          name: rocknix-rp5-adsp-no-auto-ab
           retention-days: 7
           compression-level: 0
           if-no-files-found: error
           path: |
             rocknix-out/
-            rocknix-pcie-drv-build.log
+            rocknix-adsp-ab-build.log
