@@ -129,7 +129,7 @@ def apply_patches(repo, source, fix, profile):
         suspend_fix = Path(__file__).resolve().parent / "sm8250-lpass-system-suspend.patch"
         require(suspend_fix.is_file(), "Missing SM8250 LPASS system-suspend patch")
         require(hashlib.sha256(suspend_fix.read_bytes()).hexdigest() ==
-                "27e74b5e9a0494044bf6c6d9ee269d2f725c9e0aef0ad37965e6708f99f2a10e",
+                "3ee4246a058057b6c7939c4ac8ba445d904983ff067bee19b2cc9deb31827c7b",
                 "SM8250 LPASS system-suspend patch checksum mismatch")
         extra_patches.append(suspend_fix)
     if profile == "pcie-drv-handoff":
