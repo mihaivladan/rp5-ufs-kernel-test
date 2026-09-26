@@ -1,0 +1,18 @@
+// SPDX-License-Identifier: BSD-3-Clause
+/*
+ * Exact Phase 4A wireless platform plus the Phase 4C running-ADSP delta and
+ * an opt-in Qualcomm PCIe DRV handoff.  Bluetooth remains a userspace/module
+ * policy decision; the device tree itself is otherwise the Phase 4 baseline.
+ */
+
+#include "sm8250-retroidpocket-rp5-reenable-display-gpu-gamepad-active-only-ufs-wireless.dts"
+
+&adsp {
+	status = "okay";
+};
+
+&pcie0 {
+	qcom,drv-supported;
+	qcom,drv-dev-id = <0>;
+	qcom,drv-l1ss-timeout-us = <10000>;
+};

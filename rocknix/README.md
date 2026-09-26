@@ -46,6 +46,31 @@ matching modules, PM diagnostics and BTF. The workflow rejects any Phase 6D
 DTB checksum change and any SM8250 ADSP resource block that does not contain
 exactly one `auto_boot = false` assignment. No device deployment is automatic.
 
+## SM8250 PCIe DRV handoff diagnostic
+
+The `pcie-drv-handoff` profile adds the missing Linux consumer for the ADSP
+`pcie_drv` RPMSG service. It uses Qualcomm's version 1 command layout, requires
+a matching zero-status ACK within 250 ms, and rejects wrong device IDs or reply
+sequences. The PCIe parent sends ENABLE from `suspend_late`, after ath11k's late
+WoW/MHI preparation while RPMSG interrupts still work. Only after that ACK does
+`suspend_noirq` release the six Apps-owned PCIe clocks, interconnect/OPP vote
+and controller supplies. Resume restores those resources in reverse dependency
+order before `resume_early` sends DISABLE and allows the PCI child to resume.
+
+The feature is opt-in and currently restricted to the validated SM8250 resource
+layout. Missing transport, bad ACK, down link, missing named clock or resource
+transition failure aborts suspend without intentionally destroying the link.
+The DTB is the exact Phase 4 wireless baseline plus enabled ADSP and the three
+RC0 handoff properties; the kernel holds ADSP offline so the pinned RP5 Android
+firmware can be selected before first boot. The public build does not bundle
+that extracted firmware and never deploys to a device.
+
+Run **ROCKNIX RP5 PCIe DRV handoff**. The output release is
+`7.2.0-consoleos-pciedrv1` with matching modules, BTF, patched sources,
+disassembly, DT semantic verification and provenance. A later one-shot device
+test must still prove the ACKed transition, one direct suspend/resume, strict
+AOSD/CXSD/DDR residency, preserved Wi-Fi association and stock rollback.
+
 # RP5 subsystem re-enable matrix
 
 The `reenable-matrix` profile builds eleven independent Device Tree candidates

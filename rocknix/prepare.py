@@ -97,7 +97,7 @@ def apply_patches(repo, source, fix, profile):
                 "91e28ba23946dae574a2fc86e534f143c598a4ac044540e7bdfd38ab20f0d588",
                 "GMU clock-reset patch checksum mismatch")
         extra_patches.append(gmu_reset)
-    elif profile in ("gpu-rpmh-fix", "sleepstate-handshake", "adsp-no-auto-ab", "slpi-integrated", "lpm-platform"):
+    elif profile in ("gpu-rpmh-fix", "sleepstate-handshake", "adsp-no-auto-ab", "pcie-drv-handoff", "slpi-integrated", "lpm-platform"):
         rpmh_fix = Path(__file__).resolve().parent / "a6xx-stale-rpmh-votes.patch"
         require(rpmh_fix.is_file(), "Missing upstream stale RPMh vote fix")
         require(hashlib.sha256(rpmh_fix.read_bytes()).hexdigest() ==
@@ -111,13 +111,20 @@ def apply_patches(repo, source, fix, profile):
                 "f8d91b9aa78409f838dc4b38a1b25ce46ed0979e7daf9484d30c43e5ef8dd112",
                 "SMP2P sleep-state patch checksum mismatch")
         extra_patches.append(sleepstate_fix)
-    if profile in ("adsp-no-auto-ab", "slpi-integrated", "lpm-platform"):
+    if profile in ("adsp-no-auto-ab", "pcie-drv-handoff", "slpi-integrated", "lpm-platform"):
         no_auto = Path(__file__).resolve().parent / "sm8250-adsp-no-auto-boot.patch"
         require(no_auto.is_file(), "Missing SM8250 ADSP no-auto-boot patch")
         require(hashlib.sha256(no_auto.read_bytes()).hexdigest() ==
                 "27a92a7e9bc3a37e1954efa97e518cb7808505cc04dc4eb246803ca07da61805",
                 "SM8250 ADSP no-auto-boot patch checksum mismatch")
         extra_patches.append(no_auto)
+    if profile == "pcie-drv-handoff":
+        drv_fix = Path(__file__).resolve().parent / "qcom-pcie-drv-handoff.patch"
+        require(drv_fix.is_file(), "Missing Qualcomm PCIe DRV handoff patch")
+        require(hashlib.sha256(drv_fix.read_bytes()).hexdigest() ==
+                "dd753274154ed05388a367087dce9c27cc3da0e01390c785640b1cd4af2ddfdd",
+                "Qualcomm PCIe DRV handoff patch checksum mismatch")
+        extra_patches.append(drv_fix)
     if profile == "lpm-platform":
         lpm_fix = Path(__file__).resolve().parent / "qcom-lpm-platform-suspend.patch"
         require(lpm_fix.is_file(), "Missing exact-state platform suspend patch")
@@ -135,7 +142,7 @@ def apply_patches(repo, source, fix, profile):
         subprocess.run(args, input=payload, text=True, cwd=source, check=True)
         records.append({"path": str(patch.relative_to(repo)) if patch in patches else patch.name,
                         "sha256": hashlib.sha256(patch.read_bytes()).hexdigest()})
-    if profile in ("gpu-rpmh-fix", "sleepstate-handshake", "adsp-no-auto-ab", "slpi-integrated", "lpm-platform"):
+    if profile in ("gpu-rpmh-fix", "sleepstate-handshake", "adsp-no-auto-ab", "pcie-drv-handoff", "slpi-integrated", "lpm-platform"):
         gmu_source = (source / "drivers/gpu/drm/msm/adreno/a6xx_gmu.c").read_text()
         require("if (!test_and_clear_bit(GMU_STATUS_FW_START, &gmu->status))" in gmu_source,
                 "Corrected GMU firmware-start condition missing")
@@ -147,7 +154,7 @@ def apply_patches(repo, source, fix, profile):
                 "case PM_POST_SUSPEND:" in sleepstate_source and
                 "PROC_AWAKE_ID\t12" in sleepstate_source,
                 "SMP2P sleep-state handshake implementation missing")
-    if profile in ("adsp-no-auto-ab", "slpi-integrated", "lpm-platform"):
+    if profile in ("adsp-no-auto-ab", "pcie-drv-handoff", "slpi-integrated", "lpm-platform"):
         pas_source = (source / "drivers/remoteproc/qcom_q6v5_pas.c").read_text()
         start = pas_source.index("static const struct qcom_pas_data sm8250_adsp_resource = {")
         end = pas_source.index("\n};", start)
@@ -178,7 +185,7 @@ def apply_patches(repo, source, fix, profile):
             reference = Path(__file__).resolve().parent / "sm8250-retroidpocket-rp5-minsleep4.dts"
             require(reference.is_file(), "Missing minsleep4 reference DTS")
             shutil.copyfile(reference, source / "arch/arm64/boot/dts/qcom" / reference.name)
-    elif profile in ("reenable-matrix", "sleepstate-handshake", "adsp-no-auto-ab", "slpi-integrated", "lpm-platform"):
+    elif profile in ("reenable-matrix", "sleepstate-handshake", "adsp-no-auto-ab", "pcie-drv-handoff", "slpi-integrated", "lpm-platform"):
         root = Path(__file__).resolve().parent
         for filename in (
             "sm8250-retroidpocket-rp5-minsleep4.dts",
@@ -206,6 +213,13 @@ def apply_patches(repo, source, fix, profile):
             shutil.copyfile(
                 sleepstate_dts,
                 source / "arch/arm64/boot/dts/qcom" / sleepstate_dts.name,
+            )
+        elif profile == "pcie-drv-handoff":
+            drv_dts = root / "sm8250-retroidpocket-rp5-phase4a-wireless-adsp-pcie-drv.dts"
+            require(drv_dts.is_file(), "Missing RP5 PCIe DRV handoff DTS")
+            shutil.copyfile(
+                drv_dts,
+                source / "arch/arm64/boot/dts/qcom" / drv_dts.name,
             )
         elif profile in ("slpi-integrated", "lpm-platform"):
             integrated_dts = root / "sm8250-retroidpocket-rp5-adsp-slpi-sleepstate.dts"
@@ -240,6 +254,11 @@ def apply_patches(repo, source, fix, profile):
         names.append("sm8250-retroidpocket-rp5-adsp-sleepstate")
     elif profile == "adsp-no-auto-ab":
         names.append("sm8250-retroidpocket-rp5-reenable-display-gpu-gamepad-active-only-ufs-wireless-usb-typec-dp-adsp")
+    elif profile == "pcie-drv-handoff":
+        names.extend([
+            "sm8250-retroidpocket-rp5-reenable-display-gpu-gamepad-active-only-ufs-wireless",
+            "sm8250-retroidpocket-rp5-phase4a-wireless-adsp-pcie-drv",
+        ])
     elif profile == "slpi-integrated":
         names.append("sm8250-retroidpocket-rp5-adsp-slpi-sleepstate")
     elif profile == "lpm-platform":
@@ -264,7 +283,7 @@ def main():
     require(profile in (
         "diagnostic", "minimal-sleep", "cpu-icc-off", "stock-pruned",
         "reenable-matrix", "gmu-clock-reset", "gpu-rpmh-fix",
-        "sleepstate-handshake", "adsp-no-auto-ab", "slpi-integrated", "lpm-platform",
+        "sleepstate-handshake", "adsp-no-auto-ab", "pcie-drv-handoff", "slpi-integrated", "lpm-platform",
     ),
             f"Unsupported ROCKNIX_PROFILE: {profile}")
     records = apply_patches(
@@ -279,7 +298,7 @@ def main():
         "fix_commit": "f07317a8d57f382ec505597816271dd72ffa20c7",
         "gpu_rpmh_fix_commit": (
             "d9108bfdb746"
-            if profile in ("gpu-rpmh-fix", "sleepstate-handshake", "adsp-no-auto-ab", "slpi-integrated", "lpm-platform") else None
+            if profile in ("gpu-rpmh-fix", "sleepstate-handshake", "adsp-no-auto-ab", "pcie-drv-handoff", "slpi-integrated", "lpm-platform") else None
         ),
         "sleepstate_handshake": (
             "Qualcomm downstream SMP2P awake bit 12 over the RP5 DSPS/SLPI channel"
@@ -287,7 +306,11 @@ def main():
         ),
         "adsp_no_auto_boot": (
             "SM8250 ADSP remoteproc registered offline until explicit sysfs start"
-            if profile in ("adsp-no-auto-ab", "slpi-integrated", "lpm-platform") else None
+            if profile in ("adsp-no-auto-ab", "pcie-drv-handoff", "slpi-integrated", "lpm-platform") else None
+        ),
+        "pcie_drv_handoff": (
+            "ACK-validated ADSP pcie_drv ownership transfer around SM8250 PCIe RC0 resource release"
+            if profile == "pcie-drv-handoff" else None
         ),
         "platform_suspend": (
             "Memory-only suspend entry using exact Android SM8250 composite PSCI state 0x4100c244"

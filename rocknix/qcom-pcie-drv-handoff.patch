@@ -1,0 +1,617 @@
+--- a/drivers/pci/controller/dwc/Kconfig
++++ b/drivers/pci/controller/dwc/Kconfig
+@@ -327,7 +327,19 @@
+ 	  Say Y here to enable PCIe controller support on Qualcomm SoCs. The
+ 	  PCIe controller uses the DesignWare core plus Qualcomm-specific
+ 	  hardware wrappers.
++
++config PCIE_QCOM_DRV
++	bool "Qualcomm PCIe remote power-manager handoff"
++	depends on PCIE_QCOM && RPMSG
++	help
++	  Enable the Qualcomm pcie_drv RPMSG protocol used to hand an active
++	  PCIe link to a remote power manager while Linux releases the root
++	  complex's local power resources during system suspend.
+ 
++	  This is only used by PCIe nodes that explicitly opt in through their
++	  firmware description.  A missing endpoint or rejected command aborts
++	  suspend without releasing resources.
++
+ config PCIE_QCOM_EP
+ 	tristate "Qualcomm PCIe controller (endpoint mode)"
+ 	depends on OF && (ARCH_QCOM || COMPILE_TEST)
+--- a/drivers/pci/controller/dwc/Makefile
++++ b/drivers/pci/controller/dwc/Makefile
+@@ -21,6 +21,7 @@
+ obj-$(CONFIG_PCI_LAYERSCAPE_EP) += pci-layerscape-ep.o
+ obj-$(CONFIG_PCIE_QCOM_COMMON) += pcie-qcom-common.o
+ obj-$(CONFIG_PCIE_QCOM) += pcie-qcom.o
++obj-$(CONFIG_PCIE_QCOM_DRV) += pcie-qcom-drv.o
+ obj-$(CONFIG_PCIE_QCOM_EP) += pcie-qcom-ep.o
+ obj-$(CONFIG_PCIE_ARMADA_8K) += pcie-armada8k.o
+ obj-$(CONFIG_PCIE_ARTPEC6) += pcie-artpec6.o
+--- a/drivers/pci/controller/dwc/pcie-qcom.c
++++ b/drivers/pci/controller/dwc/pcie-qcom.c
+@@ -40,6 +40,7 @@
+ #include "../pci-host-common.h"
+ #include "pcie-designware.h"
+ #include "pcie-qcom-common.h"
++#include "pcie-qcom-drv.h"
+ 
+ /* PARF registers */
+ #define PARF_SYS_CTRL				0x00
+@@ -292,6 +293,21 @@
+ 	struct list_head ports;
+ 	struct gpio_desc *reset;
+ 	bool use_pm_opp;
++	bool drv_supported;
++	bool drv_armed;
++	bool drv_resources_suspended;
++	bool drv_clocks_disabled;
++	bool drv_supplies_disabled;
++	bool drv_icc_mem_disabled;
++	bool drv_icc_cpu_disabled;
++	bool drv_opp_disabled;
++	u32 drv_dev_id;
++	u32 drv_l1ss_timeout_ms;
++	struct clk_bulk_data drv_clks[6];
++};
++
++static const char * const qcom_pcie_drv_clock_names[] = {
++	"pipe", "aux", "cfg", "bus_master", "bus_slave", "slave_q2a",
+ };
+ 
+ #define to_qcom_pcie(x)		dev_get_drvdata((x)->dev)
+@@ -2107,6 +2123,54 @@
+ 	if (ret)
+ 		goto err_pm_runtime_put;
+ 
++	pcie->drv_supported = of_property_read_bool(dev->of_node,
++						    "qcom,drv-supported");
++	if (pcie->drv_supported) {
++		struct qcom_pcie_resources_2_7_0 *drv_res = &pcie->res.v2_7_0;
++		u32 timeout_us;
++		int i, j;
++
++		if (!of_device_is_compatible(dev->of_node, "qcom,pcie-sm8250")) {
++			dev_err(dev, "pcie_drv handoff is only validated on SM8250\n");
++			ret = -EINVAL;
++			goto err_pm_runtime_put;
++		}
++
++		ret = of_property_read_u32(dev->of_node, "qcom,drv-dev-id",
++					   &pcie->drv_dev_id);
++		if (ret) {
++			dev_err(dev, "missing qcom,drv-dev-id\n");
++			goto err_pm_runtime_put;
++		}
++
++		ret = of_property_read_u32(dev->of_node,
++					   "qcom,drv-l1ss-timeout-us", &timeout_us);
++		if (ret || !timeout_us || timeout_us % 1000) {
++			dev_err(dev, "invalid qcom,drv-l1ss-timeout-us\n");
++			ret = -EINVAL;
++			goto err_pm_runtime_put;
++		}
++		pcie->drv_l1ss_timeout_ms = timeout_us / 1000;
++
++		for (i = 0; i < ARRAY_SIZE(qcom_pcie_drv_clock_names); i++) {
++			for (j = 0; j < drv_res->num_clks; j++) {
++				if (!strcmp(drv_res->clks[j].id,
++					    qcom_pcie_drv_clock_names[i])) {
++					pcie->drv_clks[i] = drv_res->clks[j];
++					break;
++				}
++			}
++			if (j == drv_res->num_clks) {
++				dev_err(dev, "missing pcie_drv clock %s\n",
++					qcom_pcie_drv_clock_names[i]);
++				ret = -ENOENT;
++				goto err_pm_runtime_put;
++			}
++		}
++		dev_info(dev, "PCIe DRV handoff enabled for RC%u\n",
++			 pcie->drv_dev_id);
++	}
++
+ 	pp->ops = &qcom_pcie_dw_ops;
+ 
+ 	ret = qcom_pcie_parse_ports(pcie);
+@@ -2156,6 +2220,130 @@
+ 	return ret;
+ }
+ 
++static int qcom_pcie_suspend_late(struct device *dev)
++{
++	struct qcom_pcie *pcie = dev_get_drvdata(dev);
++	int ret;
++
++	if (!pcie || !pcie->drv_supported ||
++	    (pm_suspend_target_state != PM_SUSPEND_TO_IDLE &&
++	     pm_suspend_target_state != PM_SUSPEND_MEM))
++		return 0;
++
++	if (pcie->drv_armed)
++		return -EBUSY;
++
++	if (!dw_pcie_link_up(pcie->pci)) {
++		dev_err(dev, "refusing pcie_drv handoff while link is down\n");
++		return -ENOLINK;
++	}
++
++	ret = qcom_pcie_drv_handoff(pcie->drv_dev_id,
++				    pcie->drv_l1ss_timeout_ms);
++	if (ret) {
++		dev_err(dev, "ADSP rejected PCIe handoff: %d\n", ret);
++		return ret;
++	}
++
++	pcie->drv_armed = true;
++	dev_info(dev, "PCIe RC%u handed to ADSP\n", pcie->drv_dev_id);
++	return 0;
++}
++
++static int qcom_pcie_drv_restore_resources(struct qcom_pcie *pcie)
++{
++	struct qcom_pcie_resources_2_7_0 *res = &pcie->res.v2_7_0;
++	struct device *dev = pcie->pci->dev;
++	int ret;
++
++	if (pcie->drv_supplies_disabled) {
++		ret = regulator_bulk_enable(ARRAY_SIZE(res->supplies), res->supplies);
++		if (ret)
++			goto err;
++		pcie->drv_supplies_disabled = false;
++	}
++
++	if (pcie->drv_opp_disabled) {
++		ret = qcom_pcie_set_max_opp(dev);
++		if (ret)
++			goto err;
++		pcie->drv_opp_disabled = false;
++	}
++
++	if (pcie->drv_icc_cpu_disabled) {
++		ret = icc_enable(pcie->icc_cpu);
++		if (ret)
++			goto err;
++		pcie->drv_icc_cpu_disabled = false;
++	}
++
++	if (pcie->drv_icc_mem_disabled) {
++		ret = icc_enable(pcie->icc_mem);
++		if (ret)
++			goto err;
++		pcie->drv_icc_mem_disabled = false;
++	}
++
++	if (pcie->drv_clocks_disabled) {
++		ret = clk_bulk_prepare_enable(ARRAY_SIZE(pcie->drv_clks),
++					      pcie->drv_clks);
++		if (ret)
++			goto err;
++		pcie->drv_clocks_disabled = false;
++	}
++
++	pcie->drv_resources_suspended = false;
++	return 0;
++
++err:
++	dev_err(dev, "failed to restore pcie_drv resources: %d\n", ret);
++	return ret;
++}
++
++static int qcom_pcie_drv_suspend_resources(struct qcom_pcie *pcie)
++{
++	struct qcom_pcie_resources_2_7_0 *res = &pcie->res.v2_7_0;
++	struct device *dev = pcie->pci->dev;
++	int ret;
++
++	clk_bulk_disable_unprepare(ARRAY_SIZE(pcie->drv_clks), pcie->drv_clks);
++	pcie->drv_clocks_disabled = true;
++
++	if (pcie->icc_mem) {
++		ret = icc_disable(pcie->icc_mem);
++		if (ret)
++			goto err_restore;
++		pcie->drv_icc_mem_disabled = true;
++	}
++
++	if (pcie->icc_cpu) {
++		ret = icc_disable(pcie->icc_cpu);
++		if (ret)
++			goto err_restore;
++		pcie->drv_icc_cpu_disabled = true;
++	}
++
++	if (pcie->use_pm_opp) {
++		ret = dev_pm_opp_set_opp(dev, NULL);
++		if (ret)
++			goto err_restore;
++		pcie->drv_opp_disabled = true;
++	}
++
++	ret = regulator_bulk_disable(ARRAY_SIZE(res->supplies), res->supplies);
++	if (ret)
++		goto err_restore;
++	pcie->drv_supplies_disabled = true;
++	pcie->drv_resources_suspended = true;
++
++	return 0;
++
++err_restore:
++	dev_err(dev, "failed to release pcie_drv resources: %d\n", ret);
++	qcom_pcie_drv_restore_resources(pcie);
++	return ret;
++}
++
+ static int qcom_pcie_suspend_noirq(struct device *dev)
+ {
+ 	struct qcom_pcie *pcie;
+@@ -2164,7 +2352,17 @@
+ 	pcie = dev_get_drvdata(dev);
+ 	if (!pcie)
+ 		return 0;
++	if (pcie->drv_supported &&
++	    (pm_suspend_target_state == PM_SUSPEND_TO_IDLE ||
++	     pm_suspend_target_state == PM_SUSPEND_MEM)) {
++		if (!pcie->drv_armed) {
++			dev_err(dev, "pcie_drv noirq reached without an ACKed handoff\n");
++			return -EIO;
++		}
+ 
++		return qcom_pcie_drv_suspend_resources(pcie);
++	}
++
+ 	ret = dw_pcie_suspend_noirq(pcie->pci);
+ 	if (ret)
+ 		return ret;
+@@ -2222,7 +2420,16 @@
+ 	pcie = dev_get_drvdata(dev);
+ 	if (!pcie)
+ 		return 0;
++	if (pcie->drv_armed) {
++		if (!pcie->drv_resources_suspended &&
++		    !pcie->drv_clocks_disabled && !pcie->drv_supplies_disabled &&
++		    !pcie->drv_icc_mem_disabled && !pcie->drv_icc_cpu_disabled &&
++		    !pcie->drv_opp_disabled)
++			return 0;
+ 
++		return qcom_pcie_drv_restore_resources(pcie);
++	}
++
+ 	if (pcie->pci->suspended) {
+ 		if (pcie->use_pm_opp) {
+ 			ret = qcom_pcie_set_max_opp(dev);
+@@ -2281,6 +2488,33 @@
+ 	return ret;
+ }
+ 
++static int qcom_pcie_resume_early(struct device *dev)
++{
++	struct qcom_pcie *pcie = dev_get_drvdata(dev);
++	int ret;
++
++	if (!pcie || !pcie->drv_armed)
++		return 0;
++
++	if (pcie->drv_resources_suspended || pcie->drv_clocks_disabled ||
++	    pcie->drv_supplies_disabled || pcie->drv_icc_mem_disabled ||
++	    pcie->drv_icc_cpu_disabled || pcie->drv_opp_disabled) {
++		dev_err(dev, "refusing ADSP reclaim before resources are restored\n");
++		return -EIO;
++	}
++
++	ret = qcom_pcie_drv_reclaim(pcie->drv_dev_id);
++	if (ret) {
++		dev_err(dev, "ADSP PCIe reclaim failed: %d\n", ret);
++		return ret;
++	}
++
++	pcie->drv_armed = false;
++	qcom_pcie_icc_opp_update(pcie);
++	dev_info(dev, "PCIe RC%u reclaimed from ADSP\n", pcie->drv_dev_id);
++	return 0;
++}
++
+ static const struct of_device_id qcom_pcie_match[] = {
+ 	{ .compatible = "qcom,pcie-apq8064", .data = &cfg_2_1_0 },
+ 	{ .compatible = "qcom,pcie-apq8084", .data = &cfg_1_0_0 },
+@@ -2325,6 +2559,8 @@
+ DECLARE_PCI_FIXUP_EARLY(PCI_VENDOR_ID_QCOM, 0x1001, qcom_fixup_class);
+ 
+ static const struct dev_pm_ops qcom_pcie_pm_ops = {
++	.suspend_late = qcom_pcie_suspend_late,
++	.resume_early = qcom_pcie_resume_early,
+ 	NOIRQ_SYSTEM_SLEEP_PM_OPS(qcom_pcie_suspend_noirq, qcom_pcie_resume_noirq)
+ };
+ 
+--- /dev/null
++++ b/drivers/pci/controller/dwc/pcie-qcom-drv.c
+@@ -0,0 +1,259 @@
++// SPDX-License-Identifier: GPL-2.0
++/*
++ * Qualcomm PCIe DRV handoff transport
++ *
++ * The ADSP exposes an RPMSG service named "pcie_drv".  Qualcomm downstream
++ * kernels use it to hand an active PCIe link to the remote power manager
++ * before Linux releases the root-complex clocks, rails and bandwidth votes.
++ */
++
++#include <linux/build_bug.h>
++#include <linux/completion.h>
++#include <linux/jiffies.h>
++#include <linux/module.h>
++#include <linux/mutex.h>
++#include <linux/rpmsg.h>
++#include <linux/spinlock.h>
++#include <linux/unaligned.h>
++
++#include "pcie-qcom-drv.h"
++
++#define QCOM_PCIE_DRV_MAJOR_VERSION	1
++#define QCOM_PCIE_DRV_MINOR_VERSION	0
++#define QCOM_PCIE_DRV_RESERVED_SEQ	0xffff
++#define QCOM_PCIE_DRV_TIMEOUT_MS		250
++
++#define QCOM_PCIE_DRV_MSG_ACK		0x000a
++#define QCOM_PCIE_DRV_MSG_CMD		0x000c
++
++#define QCOM_PCIE_DRV_CMD_ENABLE	0xc0000000
++#define QCOM_PCIE_DRV_CMD_DISABLE	0xc0000001
++
++struct qcom_pcie_drv_header {
++	__le16 major_ver;
++	__le16 minor_ver;
++	__le16 msg_id;
++	__le16 seq;
++	__le16 reply_seq;
++	__le16 payload_size;
++	__le32 dev_id;
++	u8 reserved[8];
++} __packed;
++
++struct qcom_pcie_drv_msg {
++	struct qcom_pcie_drv_header header;
++	__le32 dword[4];
++} __packed;
++
++static_assert(sizeof(struct qcom_pcie_drv_header) == 24);
++static_assert(sizeof(struct qcom_pcie_drv_msg) == 40);
++
++struct qcom_pcie_drv_client {
++	struct rpmsg_device *rpdev;
++	struct completion completion;
++	spinlock_t response_lock;
++	u16 sequence;
++	u16 expected_reply_seq;
++	u32 expected_dev_id;
++	int response;
++	bool waiting;
++};
++
++/* The SM8250 firmware exposes one pcie_drv endpoint for all root complexes. */
++static DEFINE_MUTEX(qcom_pcie_drv_lock);
++static struct qcom_pcie_drv_client *qcom_pcie_drv_active;
++
++static int qcom_pcie_drv_xfer(u32 dev_id, u32 command, u32 timeout_ms)
++{
++	struct qcom_pcie_drv_client *client;
++	struct qcom_pcie_drv_msg msg = {};
++	unsigned long flags;
++	unsigned long completed;
++	u16 sequence;
++	int ret;
++
++	mutex_lock(&qcom_pcie_drv_lock);
++	client = qcom_pcie_drv_active;
++	if (!client) {
++		ret = -ENOTCONN;
++		goto out_unlock;
++	}
++
++	sequence = client->sequence++;
++	if (client->sequence == QCOM_PCIE_DRV_RESERVED_SEQ)
++		client->sequence = 0;
++
++	reinit_completion(&client->completion);
++	spin_lock_irqsave(&client->response_lock, flags);
++	client->expected_reply_seq = sequence;
++	client->expected_dev_id = dev_id;
++	client->response = -EINPROGRESS;
++	client->waiting = true;
++	spin_unlock_irqrestore(&client->response_lock, flags);
++
++	msg.header.major_ver = cpu_to_le16(QCOM_PCIE_DRV_MAJOR_VERSION);
++	msg.header.minor_ver = cpu_to_le16(QCOM_PCIE_DRV_MINOR_VERSION);
++	msg.header.msg_id = cpu_to_le16(QCOM_PCIE_DRV_MSG_CMD);
++	msg.header.seq = cpu_to_le16(sequence);
++	msg.header.payload_size = cpu_to_le16(sizeof(msg.dword));
++	msg.header.dev_id = cpu_to_le32(dev_id);
++	msg.dword[0] = cpu_to_le32(command);
++	msg.dword[1] = cpu_to_le32(dev_id);
++	msg.dword[2] = cpu_to_le32(timeout_ms);
++
++	ret = rpmsg_trysend(client->rpdev->ept, &msg, sizeof(msg));
++	if (ret)
++		goto out_cancel;
++
++	completed = wait_for_completion_timeout(&client->completion,
++						msecs_to_jiffies(QCOM_PCIE_DRV_TIMEOUT_MS));
++
++	spin_lock_irqsave(&client->response_lock, flags);
++	if (!completed)
++		ret = -ETIMEDOUT;
++	else
++		ret = client->response;
++	client->waiting = false;
++	spin_unlock_irqrestore(&client->response_lock, flags);
++
++	if (ret)
++		dev_err(&client->rpdev->dev,
++			"command %#x for RC%u failed: %d\n", command, dev_id, ret);
++
++	mutex_unlock(&qcom_pcie_drv_lock);
++	return ret;
++
++out_cancel:
++	spin_lock_irqsave(&client->response_lock, flags);
++	client->waiting = false;
++	spin_unlock_irqrestore(&client->response_lock, flags);
++	dev_err(&client->rpdev->dev,
++		"failed to send command %#x for RC%u: %d\n", command, dev_id, ret);
++out_unlock:
++	mutex_unlock(&qcom_pcie_drv_lock);
++	return ret;
++}
++
++int qcom_pcie_drv_handoff(u32 dev_id, u32 l1ss_timeout_ms)
++{
++	return qcom_pcie_drv_xfer(dev_id, QCOM_PCIE_DRV_CMD_ENABLE,
++				  l1ss_timeout_ms);
++}
++
++int qcom_pcie_drv_reclaim(u32 dev_id)
++{
++	return qcom_pcie_drv_xfer(dev_id, QCOM_PCIE_DRV_CMD_DISABLE, 0);
++}
++
++static void qcom_pcie_drv_complete(struct qcom_pcie_drv_client *client,
++				   u16 reply_seq, u32 dev_id, int response)
++{
++	unsigned long flags;
++
++	spin_lock_irqsave(&client->response_lock, flags);
++	if (!client->waiting || client->expected_reply_seq != reply_seq ||
++	    client->expected_dev_id != dev_id) {
++		spin_unlock_irqrestore(&client->response_lock, flags);
++		dev_warn(&client->rpdev->dev,
++			 "unexpected ACK for RC%u sequence %u\n", dev_id, reply_seq);
++		return;
++	}
++
++	client->response = response;
++	complete(&client->completion);
++	spin_unlock_irqrestore(&client->response_lock, flags);
++}
++
++static int qcom_pcie_drv_callback(struct rpmsg_device *rpdev, void *data,
++				  int len, void *priv, u32 src)
++{
++	struct qcom_pcie_drv_client *client = dev_get_drvdata(&rpdev->dev);
++	const struct qcom_pcie_drv_header *header = data;
++	u16 payload_size;
++	u16 reply_seq;
++	u32 dev_id;
++	u32 status;
++	int response = 0;
++
++	if (len < sizeof(*header)) {
++		dev_err(&rpdev->dev, "short response: %d bytes\n", len);
++		return -EINVAL;
++	}
++
++	payload_size = le16_to_cpu(header->payload_size);
++	reply_seq = le16_to_cpu(header->reply_seq);
++	dev_id = le32_to_cpu(header->dev_id);
++
++	if (le16_to_cpu(header->msg_id) != QCOM_PCIE_DRV_MSG_ACK)
++		response = -EOPNOTSUPP;
++	else if (payload_size != sizeof(status) ||
++		 len != sizeof(*header) + sizeof(status))
++		response = -EMSGSIZE;
++	else {
++		status = get_unaligned_le32(data + sizeof(*header));
++		if (status) {
++			dev_err(&rpdev->dev, "ACK for RC%u returned status %#x\n",
++				dev_id, status);
++			response = -EREMOTEIO;
++		}
++	}
++
++	qcom_pcie_drv_complete(client, reply_seq, dev_id, response);
++	return response;
++}
++
++static int qcom_pcie_drv_probe(struct rpmsg_device *rpdev)
++{
++	struct qcom_pcie_drv_client *client;
++	int ret = 0;
++
++	client = devm_kzalloc(&rpdev->dev, sizeof(*client), GFP_KERNEL);
++	if (!client)
++		return -ENOMEM;
++
++	client->rpdev = rpdev;
++	init_completion(&client->completion);
++	spin_lock_init(&client->response_lock);
++	dev_set_drvdata(&rpdev->dev, client);
++
++	mutex_lock(&qcom_pcie_drv_lock);
++	if (qcom_pcie_drv_active)
++		ret = -EBUSY;
++	else
++		qcom_pcie_drv_active = client;
++	mutex_unlock(&qcom_pcie_drv_lock);
++
++	if (!ret)
++		dev_info(&rpdev->dev, "Qualcomm PCIe DRV handoff channel connected\n");
++
++	return ret;
++}
++
++static void qcom_pcie_drv_remove(struct rpmsg_device *rpdev)
++{
++	struct qcom_pcie_drv_client *client = dev_get_drvdata(&rpdev->dev);
++
++	/* Serialize against the bounded in-flight transaction. */
++	mutex_lock(&qcom_pcie_drv_lock);
++	if (qcom_pcie_drv_active == client)
++		qcom_pcie_drv_active = NULL;
++	mutex_unlock(&qcom_pcie_drv_lock);
++}
++
++static const struct rpmsg_device_id qcom_pcie_drv_id_table[] = {
++	{ .name = "pcie_drv" },
++	{ }
++};
++MODULE_DEVICE_TABLE(rpmsg, qcom_pcie_drv_id_table);
++
++static struct rpmsg_driver qcom_pcie_drv_driver = {
++	.drv.name = "qcom-pcie-drv",
++	.id_table = qcom_pcie_drv_id_table,
++	.probe = qcom_pcie_drv_probe,
++	.callback = qcom_pcie_drv_callback,
++	.remove = qcom_pcie_drv_remove,
++};
++module_rpmsg_driver(qcom_pcie_drv_driver);
++
++MODULE_DESCRIPTION("Qualcomm PCIe DRV handoff transport");
++MODULE_LICENSE("GPL");
+--- /dev/null
++++ b/drivers/pci/controller/dwc/pcie-qcom-drv.h
+@@ -0,0 +1,24 @@
++/* SPDX-License-Identifier: GPL-2.0 */
++#ifndef _PCIE_QCOM_DRV_H
++#define _PCIE_QCOM_DRV_H
++
++#include <linux/errno.h>
++#include <linux/kconfig.h>
++#include <linux/types.h>
++
++#if IS_ENABLED(CONFIG_PCIE_QCOM_DRV)
++int qcom_pcie_drv_handoff(u32 dev_id, u32 l1ss_timeout_ms);
++int qcom_pcie_drv_reclaim(u32 dev_id);
++#else
++static inline int qcom_pcie_drv_handoff(u32 dev_id, u32 l1ss_timeout_ms)
++{
++	return -EOPNOTSUPP;
++}
++
++static inline int qcom_pcie_drv_reclaim(u32 dev_id)
++{
++	return -EOPNOTSUPP;
++}
++#endif
++
++#endif
