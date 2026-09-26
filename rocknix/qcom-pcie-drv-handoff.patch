@@ -62,7 +62,7 @@
  };
  
  #define to_qcom_pcie(x)		dev_get_drvdata((x)->dev)
-@@ -2107,6 +2123,52 @@
+@@ -2107,6 +2123,54 @@
  	if (ret)
  		goto err_pm_runtime_put;
  
@@ -110,12 +110,14 @@
 +				goto err_pm_runtime_put;
 +			}
 +		}
++		dev_info(dev, "PCIe DRV handoff enabled for RC%u\n",
++			 pcie->drv_dev_id);
 +	}
 +
  	pp->ops = &qcom_pcie_dw_ops;
  
  	ret = qcom_pcie_parse_ports(pcie);
-@@ -2156,6 +2218,129 @@
+@@ -2156,6 +2220,130 @@
  	return ret;
  }
  
@@ -125,7 +127,8 @@
 +	int ret;
 +
 +	if (!pcie || !pcie->drv_supported ||
-+	    pm_suspend_target_state != PM_SUSPEND_MEM)
++	    (pm_suspend_target_state != PM_SUSPEND_TO_IDLE &&
++	     pm_suspend_target_state != PM_SUSPEND_MEM))
 +		return 0;
 +
 +	if (pcie->drv_armed)
@@ -245,11 +248,13 @@
  static int qcom_pcie_suspend_noirq(struct device *dev)
  {
  	struct qcom_pcie *pcie;
-@@ -2164,7 +2349,15 @@
+@@ -2164,7 +2352,17 @@
  	pcie = dev_get_drvdata(dev);
  	if (!pcie)
  		return 0;
-+	if (pcie->drv_supported && pm_suspend_target_state == PM_SUSPEND_MEM) {
++	if (pcie->drv_supported &&
++	    (pm_suspend_target_state == PM_SUSPEND_TO_IDLE ||
++	     pm_suspend_target_state == PM_SUSPEND_MEM)) {
 +		if (!pcie->drv_armed) {
 +			dev_err(dev, "pcie_drv noirq reached without an ACKed handoff\n");
 +			return -EIO;
@@ -261,7 +266,7 @@
  	ret = dw_pcie_suspend_noirq(pcie->pci);
  	if (ret)
  		return ret;
-@@ -2222,7 +2415,16 @@
+@@ -2222,7 +2420,16 @@
  	pcie = dev_get_drvdata(dev);
  	if (!pcie)
  		return 0;
@@ -278,7 +283,7 @@
  	if (pcie->pci->suspended) {
  		if (pcie->use_pm_opp) {
  			ret = qcom_pcie_set_max_opp(dev);
-@@ -2281,6 +2483,33 @@
+@@ -2281,6 +2488,33 @@
  	return ret;
  }
  
@@ -312,7 +317,7 @@
  static const struct of_device_id qcom_pcie_match[] = {
  	{ .compatible = "qcom,pcie-apq8064", .data = &cfg_2_1_0 },
  	{ .compatible = "qcom,pcie-apq8084", .data = &cfg_1_0_0 },
-@@ -2325,6 +2554,8 @@
+@@ -2325,6 +2559,8 @@
  DECLARE_PCI_FIXUP_EARLY(PCI_VENDOR_ID_QCOM, 0x1001, qcom_fixup_class);
  
  static const struct dev_pm_ops qcom_pcie_pm_ops = {
