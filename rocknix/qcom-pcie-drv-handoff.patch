@@ -40,7 +40,7 @@
  
  /* PARF registers */
  #define PARF_SYS_CTRL				0x00
-@@ -292,8 +293,23 @@
+@@ -292,6 +293,21 @@
  	struct list_head ports;
  	struct gpio_desc *reset;
  	bool use_pm_opp;
@@ -55,27 +55,24 @@
 +	u32 drv_dev_id;
 +	u32 drv_l1ss_timeout_ms;
 +	struct clk_bulk_data drv_clks[6];
- };
- 
-+static const char * const qcom_pcie_drv_clock_names[] = {
-+	"pipe", "aux", "cfg", "bus_master", "bus_slave", "slave_q2a",
 +};
 +
- #define to_qcom_pcie(x)		dev_get_drvdata((x)->dev)
++static const char * const qcom_pcie_drv_clock_names[] = {
++	"pipe", "aux", "cfg", "bus_master", "bus_slave", "slave_q2a",
+ };
  
- static void __qcom_pcie_perst_assert(struct qcom_pcie *pcie, bool assert)
-@@ -2106,7 +2122,53 @@
- 	ret = pcie->cfg->ops->get_resources(pcie);
+ #define to_qcom_pcie(x)		dev_get_drvdata((x)->dev)
+@@ -2107,6 +2123,52 @@
  	if (ret)
  		goto err_pm_runtime_put;
-+
+ 
 +	pcie->drv_supported = of_property_read_bool(dev->of_node,
 +						    "qcom,drv-supported");
 +	if (pcie->drv_supported) {
 +		struct qcom_pcie_resources_2_7_0 *drv_res = &pcie->res.v2_7_0;
 +		u32 timeout_us;
 +		int i, j;
- 
++
 +		if (!of_device_is_compatible(dev->of_node, "qcom,pcie-sm8250")) {
 +			dev_err(dev, "pcie_drv handoff is only validated on SM8250\n");
 +			ret = -EINVAL;
@@ -118,14 +115,10 @@
  	pp->ops = &qcom_pcie_dw_ops;
  
  	ret = qcom_pcie_parse_ports(pcie);
-@@ -2152,7 +2214,137 @@
- err_pm_runtime_put:
- 	pm_runtime_put(dev);
- 	pm_runtime_disable(dev);
-+
-+	return ret;
-+}
-+
+@@ -2156,6 +2218,129 @@
+ 	return ret;
+ }
+ 
 +static int qcom_pcie_suspend_late(struct device *dev)
 +{
 +	struct qcom_pcie *pcie = dev_get_drvdata(dev);
@@ -159,57 +152,50 @@
 +{
 +	struct qcom_pcie_resources_2_7_0 *res = &pcie->res.v2_7_0;
 +	struct device *dev = pcie->pci->dev;
-+	int first_error = 0;
 +	int ret;
 +
 +	if (pcie->drv_supplies_disabled) {
 +		ret = regulator_bulk_enable(ARRAY_SIZE(res->supplies), res->supplies);
-+		if (ret && !first_error)
-+			first_error = ret;
-+		else if (!ret)
-+			pcie->drv_supplies_disabled = false;
++		if (ret)
++			goto err;
++		pcie->drv_supplies_disabled = false;
 +	}
 +
 +	if (pcie->drv_opp_disabled) {
 +		ret = qcom_pcie_set_max_opp(dev);
-+		if (ret && !first_error)
-+			first_error = ret;
-+		else if (!ret)
-+			pcie->drv_opp_disabled = false;
++		if (ret)
++			goto err;
++		pcie->drv_opp_disabled = false;
 +	}
 +
 +	if (pcie->drv_icc_cpu_disabled) {
 +		ret = icc_enable(pcie->icc_cpu);
-+		if (ret && !first_error)
-+			first_error = ret;
-+		else if (!ret)
-+			pcie->drv_icc_cpu_disabled = false;
++		if (ret)
++			goto err;
++		pcie->drv_icc_cpu_disabled = false;
 +	}
- 
++
 +	if (pcie->drv_icc_mem_disabled) {
 +		ret = icc_enable(pcie->icc_mem);
-+		if (ret && !first_error)
-+			first_error = ret;
-+		else if (!ret)
-+			pcie->drv_icc_mem_disabled = false;
++		if (ret)
++			goto err;
++		pcie->drv_icc_mem_disabled = false;
 +	}
 +
 +	if (pcie->drv_clocks_disabled) {
 +		ret = clk_bulk_prepare_enable(ARRAY_SIZE(pcie->drv_clks),
 +					      pcie->drv_clks);
-+		if (ret && !first_error)
-+			first_error = ret;
-+		else if (!ret)
-+			pcie->drv_clocks_disabled = false;
++		if (ret)
++			goto err;
++		pcie->drv_clocks_disabled = false;
 +	}
 +
-+	if (first_error)
-+		dev_err(dev, "failed to restore pcie_drv resources: %d\n",
-+			first_error);
-+	else
-+		pcie->drv_resources_suspended = false;
++	pcie->drv_resources_suspended = false;
++	return 0;
 +
-+	return first_error;
++err:
++	dev_err(dev, "failed to restore pcie_drv resources: %d\n", ret);
++	return ret;
 +}
 +
 +static int qcom_pcie_drv_suspend_resources(struct qcom_pcie *pcie)
@@ -253,10 +239,13 @@
 +err_restore:
 +	dev_err(dev, "failed to release pcie_drv resources: %d\n", ret);
 +	qcom_pcie_drv_restore_resources(pcie);
- 	return ret;
- }
- 
-@@ -2164,7 +2356,15 @@
++	return ret;
++}
++
+ static int qcom_pcie_suspend_noirq(struct device *dev)
+ {
+ 	struct qcom_pcie *pcie;
+@@ -2164,7 +2349,15 @@
  	pcie = dev_get_drvdata(dev);
  	if (!pcie)
  		return 0;
@@ -272,7 +261,7 @@
  	ret = dw_pcie_suspend_noirq(pcie->pci);
  	if (ret)
  		return ret;
-@@ -2222,7 +2422,16 @@
+@@ -2222,7 +2415,16 @@
  	pcie = dev_get_drvdata(dev);
  	if (!pcie)
  		return 0;
@@ -289,7 +278,7 @@
  	if (pcie->pci->suspended) {
  		if (pcie->use_pm_opp) {
  			ret = qcom_pcie_set_max_opp(dev);
-@@ -2281,6 +2490,33 @@
+@@ -2281,6 +2483,33 @@
  	return ret;
  }
  
@@ -323,7 +312,7 @@
  static const struct of_device_id qcom_pcie_match[] = {
  	{ .compatible = "qcom,pcie-apq8064", .data = &cfg_2_1_0 },
  	{ .compatible = "qcom,pcie-apq8084", .data = &cfg_1_0_0 },
-@@ -2325,6 +2561,8 @@
+@@ -2325,6 +2554,8 @@
  DECLARE_PCI_FIXUP_EARLY(PCI_VENDOR_ID_QCOM, 0x1001, qcom_fixup_class);
  
  static const struct dev_pm_ops qcom_pcie_pm_ops = {

@@ -122,7 +122,7 @@ def apply_patches(repo, source, fix, profile):
         drv_fix = Path(__file__).resolve().parent / "qcom-pcie-drv-handoff.patch"
         require(drv_fix.is_file(), "Missing Qualcomm PCIe DRV handoff patch")
         require(hashlib.sha256(drv_fix.read_bytes()).hexdigest() ==
-                "136cd0a5df585aa46ac0bb6f8d8f704457ece28af18127680365b4bc33d35600",
+                "d58b5f10b1f0253230c15adbd816a267c11e1e676d16a6db83a2afd1f4c55d54",
                 "Qualcomm PCIe DRV handoff patch checksum mismatch")
         extra_patches.append(drv_fix)
     if profile == "lpm-platform":
