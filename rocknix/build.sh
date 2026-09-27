@@ -45,6 +45,12 @@ audio-pcie-integration)
     artifact_name="rocknix-${expected_release}.tar.zst"
     dtb_name='sm8250-retroidpocket-rp5-phase4a-wireless-adsp-pcie-drv'
     ;;
+fg-coulomb-counter)
+    config_fragment="${kit}/rocknix/fg-coulomb-counter.config"
+    expected_release='7.2.0-consoleos-fgcc1'
+    artifact_name="rocknix-${expected_release}.tar.zst"
+    dtb_name='sm8250-retroidpocket-rp5-phase4a-wireless-adsp-pcie-drv'
+    ;;
 pcie-drv-handoff)
     config_fragment="${kit}/rocknix/pcie-drv-handoff.config"
     expected_release='7.2.0-consoleos-pciedrv1'
@@ -205,14 +211,14 @@ elif sys.argv[2] == 'sleepstate-handshake':
     absent_driver = sorted(required_driver - set(driver.splitlines()))
     if absent_driver:
         raise SystemExit('Sleep-state driver markers missing: ' + ', '.join(absent_driver))
-elif sys.argv[2] in ('adsp-no-auto-ab', 'lpass-devote-fix', 'lpass-pm-clock', 'audio-pcie-integration'):
+elif sys.argv[2] in ('adsp-no-auto-ab', 'lpass-devote-fix', 'lpass-pm-clock', 'audio-pcie-integration', 'fg-coulomb-counter'):
     pas = Path('drivers/remoteproc/qcom_q6v5_pas.c').read_text()
     start = pas.index('static const struct qcom_pas_data sm8250_adsp_resource = {')
     end = pas.index('\n};', start)
     block = pas[start:end]
     if block.count('.auto_boot = false,') != 1 or '.auto_boot = true,' in block:
         raise SystemExit('SM8250 ADSP auto-boot was not disabled exactly once')
-    if sys.argv[2] in ('lpass-devote-fix', 'lpass-pm-clock', 'audio-pcie-integration'):
+    if sys.argv[2] in ('lpass-devote-fix', 'lpass-pm-clock', 'audio-pcie-integration', 'fg-coulomb-counter'):
         afe = Path('sound/soc/qcom/qdsp6/q6afe.c').read_text()
         required_afe = (
             'u32 lpass_hw_client_handle;',
@@ -224,7 +230,7 @@ elif sys.argv[2] in ('adsp-no-auto-ab', 'lpass-devote-fix', 'lpass-pm-clock', 'a
         )
         if not all(marker in afe for marker in required_afe):
             raise SystemExit('LPASS hardware vote-handle repair markers missing')
-    if sys.argv[2] in ('lpass-pm-clock', 'audio-pcie-integration'):
+    if sys.argv[2] in ('lpass-pm-clock', 'audio-pcie-integration', 'fg-coulomb-counter'):
         macro_sources = {
             'sound/soc/codecs/lpass-wsa-macro.c': 'wsa',
             'sound/soc/codecs/lpass-va-macro.c': 'va',
@@ -246,7 +252,7 @@ elif sys.argv[2] in ('adsp-no-auto-ab', 'lpass-devote-fix', 'lpass-pm-clock', 'a
             if f'clk_prepare_enable({name}->macro)' in source or \
                f'clk_prepare_enable({name}->dcodec)' in source:
                 raise SystemExit(f'LPASS {name.upper()} still directly enables vote clocks')
-    if sys.argv[2] == 'audio-pcie-integration':
+    if sys.argv[2] in ('audio-pcie-integration', 'fg-coulomb-counter'):
         required = {
             'CONFIG_PCIE_QCOM=y', 'CONFIG_PCIE_QCOM_DRV=y', 'CONFIG_RPMSG=y',
             'CONFIG_PM_SLEEP=y', 'CONFIG_PM=y',
@@ -275,6 +281,19 @@ elif sys.argv[2] in ('adsp-no-auto-ab', 'lpass-devote-fix', 'lpass-pm-clock', 'a
             raise SystemExit('PCIe DRV PM ordering markers missing')
         if not all(marker in transport for marker in required_transport):
             raise SystemExit('PCIe DRV wire-protocol markers missing')
+    if sys.argv[2] == 'fg-coulomb-counter':
+        fg = Path('drivers/power/supply/qcom_fg.c').read_text()
+        required_fg = (
+            'POWER_SUPPLY_PROP_CHARGE_COUNTER,',
+            'static int qcom_fg_gen4_read_diag(',
+            'GEN4_DMA_ADDR_KIND',
+            'pm8150b_v1_layout',
+            'pm8150b_v2_layout',
+            'charge_counter_uah=',
+            'static DEVICE_ATTR_RO(gen4_diagnostics);',
+        )
+        if not all(marker in fg for marker in required_fg):
+            raise SystemExit('PM8150B Gen4 coulomb diagnostic markers missing')
 elif sys.argv[2] == 'pcie-drv-handoff':
     required = {
         'CONFIG_PCIE_QCOM=y', 'CONFIG_PCIE_QCOM_DRV=y', 'CONFIG_RPMSG=y',
@@ -472,7 +491,7 @@ elif [[ "${profile}" == adsp-no-auto-ab || "${profile}" == lpass-devote-fix || "
         'RP5 ADSP no-auto-boot candidate passed: byte-identical Phase 6D DTB and SM8250-only auto_boot=false. Not installed or boot-tested.' \
         > BUILD-SUCCESS.txt
     cd "${source_dir}"
-elif [[ "${profile}" == pcie-drv-handoff || "${profile}" == audio-pcie-integration ]]; then
+elif [[ "${profile}" == pcie-drv-handoff || "${profile}" == audio-pcie-integration || "${profile}" == fg-coulomb-counter ]]; then
     phase4_name='sm8250-retroidpocket-rp5-reenable-display-gpu-gamepad-active-only-ufs-wireless'
     make "${make_args[@]}" -j"$(nproc)" DTC_FLAGS=-@ "qcom/${phase4_name}.dtb"
     python3 "${kit}/rocknix/verify-pcie-drv-dtb.py" \
@@ -533,7 +552,7 @@ source_dir="${work}/linux-7.2"
 cd "${source_dir}"
 release=$(make "${make_args[@]}" -s kernelrelease)
 test "${release}" = "${expected_release}"
-if [[ "${profile}" == diagnostic || "${profile}" == gpu-rpmh-fix || "${profile}" == sleepstate-handshake || "${profile}" == adsp-no-auto-ab || "${profile}" == lpass-devote-fix || "${profile}" == lpass-pm-clock || "${profile}" == audio-pcie-integration || "${profile}" == pcie-drv-handoff || "${profile}" == slpi-integrated || "${profile}" == lpm-platform ]]; then
+if [[ "${profile}" == diagnostic || "${profile}" == gpu-rpmh-fix || "${profile}" == sleepstate-handshake || "${profile}" == adsp-no-auto-ab || "${profile}" == lpass-devote-fix || "${profile}" == lpass-pm-clock || "${profile}" == audio-pcie-integration || "${profile}" == fg-coulomb-counter || "${profile}" == pcie-drv-handoff || "${profile}" == slpi-integrated || "${profile}" == lpm-platform ]]; then
     # The previous build exposed an uninitialized cstate pointer in this file.
     printf '\nCFLAGS_dpu_crtc.o += -Werror=uninitialized -Werror=maybe-uninitialized\n' >> drivers/gpu/drm/msm/disp/dpu1/Makefile
 fi
@@ -547,21 +566,21 @@ rm -f "${stage}/lib/modules/${release}/build" "${stage}/lib/modules/${release}/s
 depmod -b "${stage}" "${release}"
 cp System.map Module.symvers "${out}/"
 cp drivers/ufs/host/ufs-qcom.c drivers/ufs/host/ufs-qcom.h "${out}/"
-if [[ "${profile}" == gpu-rpmh-fix || "${profile}" == sleepstate-handshake || "${profile}" == adsp-no-auto-ab || "${profile}" == lpass-devote-fix || "${profile}" == lpass-pm-clock || "${profile}" == audio-pcie-integration || "${profile}" == pcie-drv-handoff || "${profile}" == slpi-integrated || "${profile}" == lpm-platform ]]; then
+if [[ "${profile}" == gpu-rpmh-fix || "${profile}" == sleepstate-handshake || "${profile}" == adsp-no-auto-ab || "${profile}" == lpass-devote-fix || "${profile}" == lpass-pm-clock || "${profile}" == audio-pcie-integration || "${profile}" == fg-coulomb-counter || "${profile}" == pcie-drv-handoff || "${profile}" == slpi-integrated || "${profile}" == lpm-platform ]]; then
     cp drivers/gpu/drm/msm/adreno/a6xx_gmu.c "${out}/"
 fi
 if [[ "${profile}" == sleepstate-handshake || "${profile}" == slpi-integrated || "${profile}" == lpm-platform ]]; then
     cp drivers/soc/qcom/smp2p_sleepstate.c "${out}/"
     cp "arch/arm64/boot/dts/qcom/${dtb_name}.dts" "${out}/"
 fi
-if [[ "${profile}" == adsp-no-auto-ab || "${profile}" == lpass-devote-fix || "${profile}" == lpass-pm-clock || "${profile}" == audio-pcie-integration || "${profile}" == pcie-drv-handoff || "${profile}" == slpi-integrated || "${profile}" == lpm-platform ]]; then
+if [[ "${profile}" == adsp-no-auto-ab || "${profile}" == lpass-devote-fix || "${profile}" == lpass-pm-clock || "${profile}" == audio-pcie-integration || "${profile}" == fg-coulomb-counter || "${profile}" == pcie-drv-handoff || "${profile}" == slpi-integrated || "${profile}" == lpm-platform ]]; then
     cp drivers/remoteproc/qcom_q6v5_pas.c "${out}/"
 fi
-if [[ "${profile}" == lpass-devote-fix || "${profile}" == lpass-pm-clock || "${profile}" == audio-pcie-integration ]]; then
+if [[ "${profile}" == lpass-devote-fix || "${profile}" == lpass-pm-clock || "${profile}" == audio-pcie-integration || "${profile}" == fg-coulomb-counter ]]; then
     cp sound/soc/qcom/qdsp6/q6afe.c "${out}/"
     objdump -drS sound/soc/qcom/qdsp6/q6afe.o > "${out}/q6afe-disassembly.txt"
 fi
-if [[ "${profile}" == lpass-pm-clock || "${profile}" == audio-pcie-integration ]]; then
+if [[ "${profile}" == lpass-pm-clock || "${profile}" == audio-pcie-integration || "${profile}" == fg-coulomb-counter ]]; then
     for macro in wsa va rx tx; do
         cp "sound/soc/codecs/lpass-${macro}-macro.c" "${out}/"
         objdump -drS "sound/soc/codecs/lpass-${macro}-macro.o" \
@@ -571,7 +590,7 @@ fi
 if [[ "${profile}" == lpm-platform ]]; then
     cp drivers/soc/qcom/qcom_lpm_platform_suspend.c "${out}/"
 fi
-if [[ "${profile}" == pcie-drv-handoff || "${profile}" == audio-pcie-integration ]]; then
+if [[ "${profile}" == pcie-drv-handoff || "${profile}" == audio-pcie-integration || "${profile}" == fg-coulomb-counter ]]; then
     cp drivers/pci/controller/dwc/pcie-qcom.c \
         drivers/pci/controller/dwc/pcie-qcom-drv.c \
         drivers/pci/controller/dwc/pcie-qcom-drv.h "${out}/"
@@ -579,7 +598,11 @@ if [[ "${profile}" == pcie-drv-handoff || "${profile}" == audio-pcie-integration
     objdump -drS drivers/pci/controller/dwc/pcie-qcom.o > "${out}/pcie-qcom-disassembly.txt"
     objdump -drS drivers/pci/controller/dwc/pcie-qcom-drv.o > "${out}/pcie-qcom-drv-disassembly.txt"
 fi
-if [[ "${profile}" == diagnostic || "${profile}" == gpu-rpmh-fix || "${profile}" == sleepstate-handshake || "${profile}" == adsp-no-auto-ab || "${profile}" == lpass-devote-fix || "${profile}" == lpass-pm-clock || "${profile}" == audio-pcie-integration || "${profile}" == pcie-drv-handoff || "${profile}" == slpi-integrated || "${profile}" == lpm-platform ]]; then
+if [[ "${profile}" == fg-coulomb-counter ]]; then
+    cp drivers/power/supply/qcom_fg.c drivers/power/supply/qcom_fg.o "${out}/"
+    objdump -drS drivers/power/supply/qcom_fg.o > "${out}/qcom-fg-disassembly.txt"
+fi
+if [[ "${profile}" == diagnostic || "${profile}" == gpu-rpmh-fix || "${profile}" == sleepstate-handshake || "${profile}" == adsp-no-auto-ab || "${profile}" == lpass-devote-fix || "${profile}" == lpass-pm-clock || "${profile}" == audio-pcie-integration || "${profile}" == fg-coulomb-counter || "${profile}" == pcie-drv-handoff || "${profile}" == slpi-integrated || "${profile}" == lpm-platform ]]; then
     objcopy --dump-section .BTF="${out}/vmlinux.btf" vmlinux
     cp drivers/gpu/drm/msm/disp/dpu1/dpu_crtc.c drivers/gpu/drm/msm/disp/dpu1/dpu_crtc.o "${out}/"
     objdump -drS drivers/gpu/drm/msm/disp/dpu1/dpu_crtc.o > "${out}/dpu_crtc-disassembly.txt"
@@ -588,7 +611,7 @@ elif [[ "${profile}" == gmu-clock-reset ]]; then
 fi
 test -s "${stage}/boot/KERNEL"
 test -s "${stage}/lib/modules/${release}/modules.dep"
-if [[ "${profile}" == diagnostic || "${profile}" == gpu-rpmh-fix || "${profile}" == sleepstate-handshake || "${profile}" == adsp-no-auto-ab || "${profile}" == lpass-devote-fix || "${profile}" == lpass-pm-clock || "${profile}" == audio-pcie-integration || "${profile}" == pcie-drv-handoff || "${profile}" == slpi-integrated || "${profile}" == lpm-platform ]]; then
+if [[ "${profile}" == diagnostic || "${profile}" == gpu-rpmh-fix || "${profile}" == sleepstate-handshake || "${profile}" == adsp-no-auto-ab || "${profile}" == lpass-devote-fix || "${profile}" == lpass-pm-clock || "${profile}" == audio-pcie-integration || "${profile}" == fg-coulomb-counter || "${profile}" == pcie-drv-handoff || "${profile}" == slpi-integrated || "${profile}" == lpm-platform ]]; then
     test -s "${out}/vmlinux.btf"
 fi
 tar -C "${stage}" -cf - boot lib | zstd -T0 -10 -o "${out}/${artifact_name}"

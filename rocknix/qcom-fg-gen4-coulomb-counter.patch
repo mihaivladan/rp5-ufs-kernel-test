@@ -1,0 +1,458 @@
+--- a/drivers/power/supply/qcom_fg.c
++++ b/drivers/power/supply/qcom_fg.c
+@@ -1,11 +1,13 @@
+ // SPDX-License-Identifier: GPL-2.0-only
+ /* Copyright (c) 2020, The Linux Foundation. All rights reserved. */
+ 
++#include <linux/delay.h>
+ #include <linux/device.h>
+ #include <linux/interrupt.h>
+ #include <linux/kernel.h>
+ #include <linux/math64.h>
+ #include <linux/module.h>
++#include <linux/mutex.h>
+ #include <linux/of_address.h>
+ #include <linux/of_device.h>
+ #include <linux/of_irq.h>
+@@ -13,6 +15,7 @@
+ #include <linux/power_supply.h>
+ #include <linux/regmap.h>
+ #include <linux/types.h>
++#include <linux/unaligned.h>
+ #include <linux/workqueue.h>
+ 
+ /* SOC */
+@@ -31,6 +34,7 @@
+ #define ADC_RR_BATT_TEMP_LSB		0x288
+ 
+ /* MEMIF */
++#define MEM_INTF_ARB_CFG(chip)			(chip->ops->memif_base + 0x40)
+ #define MEM_INTF_STS(chip)			(chip->ops->memif_base + 0x10)
+ #define MEM_INTF_CFG(chip)			(chip->ops->memif_base + 0x50)
+ #define MEM_INTF_CTL(chip)			(chip->ops->memif_base + 0x51)
+@@ -49,7 +53,30 @@
+ #define TEMP_THRESHOLD			0x454
+ #define BATT_TEMP			0x550
+ #define BATT_VOLTAGE_CURRENT		0x5cc
++
++/* PM8150B revision peripheral, on the same SPMI USID as the fuel gauge. */
++#define PMIC_REVID_REVISION4		0x103
++#define PMIC_REVID_SUBTYPE		0x105
++#define PM8150B_SUBTYPE			0x20
++#define PM8150B_V1_REV4			0x01
++#define PM8150B_V2_REV4			0x02
++
++/* Gen4 direct-memory access controls and SRAM geometry. */
++#define GEN4_MEM_GNT			BIT(3)
++#define GEN4_MEM_ARB_REQ		BIT(0)
++#define GEN4_MEM_ACCESS_REQ		BIT(7)
++#define GEN4_IACS_SLCT			BIT(5)
++#define GEN4_DMA_ADDR_KIND		BIT(1)
++#define GEN4_ALG_ACTIVE		BIT(3)
++#define GEN4_ALG_ACTIVE_PEEK_CFG	0xac
++#define GEN4_BATT_INFO_PEEK_MUX4	0x1ee
++#define GEN4_BATT_INFO_PEEK_RD		0x1ef
++#define GEN4_MEM_GNT_RETRIES		50
++#define GEN4_MEM_GNT_WAIT_US		10000
++#define GEN4_CC_SOC_MAX			GENMASK(29, 0)
+ 
++#define GEN4_NOM_CAP_WORD		271
++
+ #define BATT_TEMP_LSB_MASK		GENMASK(7, 0)
+ #define BATT_TEMP_MSB_MASK		GENMASK(2, 0)
+ 
+@@ -67,6 +94,7 @@
+ #define SRAM_ACCESS_RELEASE_DELAY_MS	500
+ 
+ struct qcom_fg_chip;
++struct qcom_fg_gen4_layout;
+ 
+ struct qcom_fg_ops {
+ 	int (*get_capacity)(struct qcom_fg_chip *chip, int *);
+@@ -101,6 +129,10 @@
+ 	spinlock_t sram_request_lock;
+ 	spinlock_t sram_rw_lock;
+ 	int sram_requests;
++
++	struct mutex gen4_dma_lock;
++	const struct qcom_fg_gen4_layout *gen4_layout;
++	u8 pmic_rev4;
+ };
+ 
+ /************************
+@@ -852,6 +884,309 @@
+ 	.memif_base = 0x300,
+ };
+ 
++struct qcom_fg_gen4_layout {
++	const char *name;
++	u16 batt_soc_word;
++	u16 cc_soc_sw_word;
++	u16 cc_soc_word;
++	u16 act_batt_cap_word;
++};
++
++struct qcom_fg_gen4_diag {
++	u8 monotonic_soc[2];
++	u16 nominal_cap_mah;
++	u16 learned_cap_mah;
++	u32 batt_soc;
++	s32 cc_soc_sw;
++	s32 cc_soc;
++	s64 charge_counter_uah;
++	s64 charge_raw_uah;
++	u64 charge_shadow_uah;
++};
++
++static const struct qcom_fg_gen4_layout pm8150b_v1_layout = {
++	.name = "pm8150b-v1",
++	.batt_soc_word = 449,
++	.cc_soc_sw_word = 458,
++	.cc_soc_word = 460,
++	.act_batt_cap_word = 285,
++};
++
++static const struct qcom_fg_gen4_layout pm8150b_v2_layout = {
++	.name = "pm8150b-v2",
++	.batt_soc_word = 455,
++	.cc_soc_sw_word = 464,
++	.cc_soc_word = 466,
++	.act_batt_cap_word = 287,
++};
++
++static int qcom_fg_gen4_dma_address(u16 word, u8 offset, u16 *addr)
++{
++	static const struct {
++		u16 first;
++		u16 last;
++		u16 base;
++	} partitions[] = {
++		{ 0, 63, 0x4420 },
++		{ 64, 169, 0x4520 },
++		{ 170, 274, 0x4620 },
++		{ 275, 299, 0x4720 },
++		{ 300, 405, 0x4820 },
++		{ 406, 486, 0x4920 },
++	};
++	int i;
++
++	for (i = 0; i < ARRAY_SIZE(partitions); i++) {
++		if (word < partitions[i].first || word > partitions[i].last)
++			continue;
++
++		*addr = partitions[i].base + (word - partitions[i].first) * 2 +
++			offset;
++		return 0;
++	}
++
++	return -ERANGE;
++}
++
++static int qcom_fg_gen4_poll_alg_idle(struct qcom_fg_chip *chip)
++{
++	u8 value = GEN4_ALG_ACTIVE_PEEK_CFG;
++	int i, ret;
++
++	ret = qcom_fg_write(chip, &value, GEN4_BATT_INFO_PEEK_MUX4, 1);
++	if (ret)
++		return ret;
++
+++	for (i = 0; i < 35; i++) {
++		ret = qcom_fg_read(chip, &value, GEN4_BATT_INFO_PEEK_RD, 1);
++		if (ret)
++			return ret;
++		if (!(value & GEN4_ALG_ACTIVE)) {
++			usleep_range(1000, 1100);
++			return 0;
++		}
+++		usleep_range(10000, 10100);
++	}
++
++	return -ETIMEDOUT;
++}
++
++static void qcom_fg_gen4_release_access(struct qcom_fg_chip *chip)
++{
++	int ret;
++
++	ret = qcom_fg_masked_write(chip, MEM_INTF_CFG(chip),
++			GEN4_MEM_ACCESS_REQ | GEN4_IACS_SLCT, 0);
++	if (ret)
++		dev_warn(chip->dev, "failed to release Gen4 memory access: %d\n", ret);
++
++	ret = qcom_fg_masked_write(chip, MEM_INTF_ARB_CFG(chip),
++			GEN4_MEM_ARB_REQ, 0);
++	if (ret)
++		dev_warn(chip->dev, "failed to release Gen4 memory arbiter: %d\n", ret);
++}
++
++static int qcom_fg_gen4_request_access(struct qcom_fg_chip *chip)
++{
++	u8 status;
++	int i, ret;
++
++	if (chip->pmic_rev4 == PM8150B_V1_REV4) {
++		ret = qcom_fg_gen4_poll_alg_idle(chip);
++		if (ret)
++			return ret;
++	}
++
++	ret = qcom_fg_masked_write(chip, MEM_INTF_ARB_CFG(chip),
++			GEN4_MEM_ARB_REQ, GEN4_MEM_ARB_REQ);
++	if (ret)
++		return ret;
++
++	ret = qcom_fg_masked_write(chip, MEM_INTF_CFG(chip),
++			GEN4_MEM_ACCESS_REQ | GEN4_IACS_SLCT,
++			GEN4_MEM_ACCESS_REQ);
++	if (ret)
++		goto release;
++
++	usleep_range(40, 50);
++	for (i = 0; i < GEN4_MEM_GNT_RETRIES; i++) {
++		ret = qcom_fg_read(chip, &status, MEM_INTF_STS(chip), 1);
++		if (ret)
++			goto release;
++		if (status & GEN4_MEM_GNT) {
++			if (chip->pmic_rev4 == PM8150B_V1_REV4)
++				usleep_range(1000, 1100);
++			return 0;
++		}
++		usleep_range(GEN4_MEM_GNT_WAIT_US,
++				GEN4_MEM_GNT_WAIT_US + 100);
++	}
++
++	ret = -ETIMEDOUT;
++release:
++	qcom_fg_gen4_release_access(chip);
++	return ret;
++}
++
++static int qcom_fg_gen4_dma_read(struct qcom_fg_chip *chip, u16 word,
++		u8 offset, void *data, size_t len)
++{
++	u16 addr;
++	int ret;
++
++	ret = qcom_fg_gen4_dma_address(word, offset, &addr);
++	if (ret)
++		return ret;
++
++	return regmap_bulk_read(chip->regmap, addr, data, len);
++}
++
++static int qcom_fg_gen4_read_diag(struct qcom_fg_chip *chip,
++		struct qcom_fg_gen4_diag *diag)
++{
++	const struct qcom_fg_gen4_layout *layout = chip->gen4_layout;
++	u8 raw[4];
++	int ret;
++
++	if (!layout)
++		return -EOPNOTSUPP;
++
++	mutex_lock(&chip->gen4_dma_lock);
++	ret = qcom_fg_gen4_request_access(chip);
++	if (ret)
++		goto unlock;
++
++	ret = qcom_fg_gen4_dma_read(chip, GEN4_NOM_CAP_WORD, 0, raw, 2);
++	if (ret)
++		goto release;
++	diag->nominal_cap_mah = get_unaligned_le16(raw);
++
++	ret = qcom_fg_gen4_dma_read(chip, layout->act_batt_cap_word, 0,
++			raw, 2);
++	if (ret)
++		goto release;
++	diag->learned_cap_mah = get_unaligned_le16(raw);
++
++	ret = qcom_fg_gen4_dma_read(chip, layout->batt_soc_word, 0, raw, 4);
++	if (ret)
++		goto release;
++	diag->batt_soc = get_unaligned_le32(raw);
++
++	ret = qcom_fg_gen4_dma_read(chip, layout->cc_soc_sw_word, 0,
++			raw, 4);
++	if (ret)
++		goto release;
++	diag->cc_soc_sw = (s32)get_unaligned_le32(raw);
++
++	ret = qcom_fg_gen4_dma_read(chip, layout->cc_soc_word, 0, raw, 4);
++	if (ret)
++		goto release;
++	diag->cc_soc = (s32)get_unaligned_le32(raw);
++
++	ret = qcom_fg_read(chip, diag->monotonic_soc,
++			BATT_MONOTONIC_SOC, sizeof(diag->monotonic_soc));
++	if (ret)
++		goto release;
++
++	diag->charge_counter_uah = div_s64((s64)diag->cc_soc_sw *
++			diag->learned_cap_mah * 1000, GEN4_CC_SOC_MAX);
++	diag->charge_raw_uah = div_s64((s64)diag->cc_soc *
++			diag->nominal_cap_mah * 1000, GEN4_CC_SOC_MAX);
++	diag->charge_shadow_uah = div64_u64((u64)diag->batt_soc *
++			diag->learned_cap_mah * 1000, U32_MAX);
++release:
++	qcom_fg_gen4_release_access(chip);
++unlock:
++	mutex_unlock(&chip->gen4_dma_lock);
++	return ret;
++}
++
++static int qcom_fg_gen4_get_charge_counter(struct qcom_fg_chip *chip,
++		int *value)
++{
++	struct qcom_fg_gen4_diag diag = {};
++	int ret;
++
++	ret = qcom_fg_gen4_read_diag(chip, &diag);
++	if (!ret)
++		*value = diag.charge_counter_uah;
++
++	return ret;
++}
++
++static ssize_t gen4_diagnostics_show(struct device *dev,
++		struct device_attribute *attr, char *buf)
++{
++	struct qcom_fg_chip *chip = dev_get_drvdata(dev);
++	struct qcom_fg_gen4_diag diag = {};
++	int ret;
++
++	ret = qcom_fg_gen4_read_diag(chip, &diag);
++	if (ret)
++		return ret;
++
++	return sysfs_emit(buf,
++		"format_version=1\n"
++		"pmic_rev4=%u\n"
++		"layout=%s\n"
++		"monotonic_soc_raw_0=%u\n"
++		"monotonic_soc_raw_1=%u\n"
++		"nominal_capacity_raw_mah=%u\n"
++		"learned_capacity_raw_mah=%u\n"
++		"batt_soc_raw=%u\n"
++		"cc_soc_sw_raw=%d\n"
++		"cc_soc_raw=%d\n"
++		"charge_counter_uah=%lld\n"
++		"charge_raw_uah=%lld\n"
++		"charge_shadow_uah=%llu\n",
++		chip->pmic_rev4, chip->gen4_layout->name,
++		diag.monotonic_soc[0], diag.monotonic_soc[1],
++		diag.nominal_cap_mah, diag.learned_cap_mah,
++		diag.batt_soc, diag.cc_soc_sw, diag.cc_soc,
+++		(long long)diag.charge_counter_uah,
+++		(long long)diag.charge_raw_uah,
+++		(unsigned long long)diag.charge_shadow_uah);
++}
++static DEVICE_ATTR_RO(gen4_diagnostics);
++
++static int qcom_fg_gen4_init(struct qcom_fg_chip *chip)
++{
++	u8 subtype, rev4;
++	int ret;
++
++	ret = regmap_bulk_read(chip->regmap, PMIC_REVID_SUBTYPE, &subtype, 1);
++	if (ret)
++		return ret;
++	ret = regmap_bulk_read(chip->regmap, PMIC_REVID_REVISION4, &rev4, 1);
++	if (ret)
++		return ret;
++
++	chip->pmic_rev4 = rev4;
++	if (subtype != PM8150B_SUBTYPE)
++		return -ENODEV;
++
++	switch (rev4) {
++	case PM8150B_V1_REV4:
++		chip->gen4_layout = &pm8150b_v1_layout;
++		break;
++	case PM8150B_V2_REV4:
++		chip->gen4_layout = &pm8150b_v2_layout;
++		break;
++	default:
++		return -EOPNOTSUPP;
++	}
++
++	ret = qcom_fg_masked_write(chip, MEM_IF_DMA_CTL(chip),
++			GEN4_DMA_ADDR_KIND, GEN4_DMA_ADDR_KIND);
++	if (ret)
++		return ret;
++
++	qcom_fg_gen4_release_access(chip);
++	dev_info(chip->dev, "enabled read-only Gen4 diagnostics for %s\n",
++			chip->gen4_layout->name);
++	return 0;
++}
++
+ static enum power_supply_property qcom_fg_props[] = {
+ 	POWER_SUPPLY_PROP_STATUS,
+ 	POWER_SUPPLY_PROP_TECHNOLOGY,
+@@ -861,6 +1196,7 @@
+ 	POWER_SUPPLY_PROP_VOLTAGE_MIN_DESIGN,
+ 	POWER_SUPPLY_PROP_VOLTAGE_MAX_DESIGN,
+ 	POWER_SUPPLY_PROP_CHARGE_FULL_DESIGN,
++	POWER_SUPPLY_PROP_CHARGE_COUNTER,
+ 	POWER_SUPPLY_PROP_PRESENT,
+ 	POWER_SUPPLY_PROP_TEMP,
+ 	POWER_SUPPLY_PROP_TEMP_MIN,
+@@ -934,6 +1270,9 @@
+ 		break;
+ 	case POWER_SUPPLY_PROP_CHARGE_FULL_DESIGN:
+ 		val->intval = chip->batt_info->charge_full_design_uah;
++		break;
++	case POWER_SUPPLY_PROP_CHARGE_COUNTER:
++		ret = qcom_fg_gen4_get_charge_counter(chip, &val->intval);
+ 		break;
+ 	case POWER_SUPPLY_PROP_PRESENT:
+ 		val->intval = 1;
+@@ -1150,6 +1489,7 @@
+ 
+ 	chip->dev = &pdev->dev;
+ 	chip->ops = of_device_get_match_data(&pdev->dev);
++	mutex_init(&chip->gen4_dma_lock);
+ 
+ 	chip->regmap = dev_get_regmap(pdev->dev.parent, NULL);
+ 	if (!chip->regmap) {
+@@ -1198,6 +1538,13 @@
+ 	if (ret < 0) {
+ 		dev_err(chip->dev, "Failed to write dma_ctl: %d\n", ret);
+ 		return ret;
++	}
++
++	if (chip->ops == &ops_fg_gen4) {
++		ret = qcom_fg_gen4_init(chip);
++		if (ret)
++			dev_warn(chip->dev,
++				 "Gen4 coulomb diagnostics unavailable: %d\n", ret);
+ 	}
+ 
+ 	supply_config.drv_data = chip;
+@@ -1327,6 +1674,15 @@
+ 		}
+ 	}
+ 
++	if (chip->gen4_layout) {
++		ret = device_create_file(chip->dev, &dev_attr_gen4_diagnostics);
++		if (ret) {
++			dev_err(chip->dev,
++				"Failed to create Gen4 diagnostic attribute: %d\n", ret);
++			return ret;
++		}
++	}
++
+ 	return 0;
+ }
+ 
+@@ -1334,6 +1690,9 @@
+ {
+ 	struct qcom_fg_chip *chip = platform_get_drvdata(pdev);
+ 
++	if (chip->gen4_layout)
++		device_remove_file(chip->dev, &dev_attr_gen4_diagnostics);
++
+ 	power_supply_put_battery_info(chip->batt_psy, chip->batt_info);
+ 
+ 	if(chip->sram_wq)
