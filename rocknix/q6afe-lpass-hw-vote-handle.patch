@@ -1,0 +1,128 @@
+From: ConsoleOS <consoleos@example.invalid>
+Subject: [PATCH] ASoC: qcom: q6afe: preserve LPASS hardware vote handles
+
+AFE_CMD_RSP_REMOTE_LPASS_CORE_HW_VOTE_REQUEST returns the DSP-assigned
+client handle as the first payload word. The upstream callback currently
+interprets that word through the generic basic-response layout, never
+copies it to the caller and consequently sends a zero client handle in the
+later DEVOTE request.
+
+Keep the returned handle while the existing global AFE transaction lock is
+held, pass it back to the clock provider, and wait for the DEVOTE basic
+response. Reject a zero handle before transmission. The informational
+messages are intentional validation points for the RP5 power-collapse test.
+
+Signed-off-by: ConsoleOS <consoleos@example.invalid>
+---
+ sound/soc/qcom/qdsp6/q6afe.c | 39 +++++++++++++++++++++++++++++++++----
+ 1 file changed, 35 insertions(+), 4 deletions(-)
+
+diff --git a/sound/soc/qcom/qdsp6/q6afe.c b/sound/soc/qcom/qdsp6/q6afe.c
+index 4023726..fc3e435 100644
+--- a/sound/soc/qcom/qdsp6/q6afe.c
++++ b/sound/soc/qcom/qdsp6/q6afe.c
+@@ -378,6 +378,7 @@ struct q6afe {
+ 	struct device *dev;
+ 	struct q6core_svc_api_info ainfo;
+ 	struct mutex lock;
++	u32 lpass_hw_client_handle;
+ 	struct aprv2_ibasic_rsp_result_t result;
+ 	wait_queue_head_t wait;
+ 	struct list_head port_list;
+@@ -984,6 +985,7 @@ static int q6afe_callback(struct apr_device *adev, const struct apr_resp_pkt *da
+ 		case AFE_PORT_CMD_DEVICE_STOP:
+ 		case AFE_PORT_CMD_DEVICE_START:
+ 		case AFE_SVC_CMD_SET_PARAM:
++		case AFE_CMD_REMOTE_LPASS_CORE_HW_DEVOTE_REQUEST:
+ 			port = q6afe_find_port(afe, hdr->token);
+ 			if (port) {
+ 				port->result = *res;
+@@ -991,6 +993,9 @@ static int q6afe_callback(struct apr_device *adev, const struct apr_resp_pkt *da
+ 				kref_put(&port->refcount, q6afe_port_free);
+ 			} else if (hdr->token == AFE_CLK_TOKEN) {
+ 				afe->result = *res;
++				if (!res->status &&
++				    res->opcode == AFE_CMD_REMOTE_LPASS_CORE_HW_DEVOTE_REQUEST)
++					dev_info(afe->dev, "LPASS HW devote accepted\n");
+ 				wake_up(&afe->wait);
+ 			}
+ 			break;
+@@ -1001,8 +1006,14 @@ static int q6afe_callback(struct apr_device *adev, const struct apr_resp_pkt *da
+ 	}
+ 		break;
+ 	case AFE_CMD_RSP_REMOTE_LPASS_CORE_HW_VOTE_REQUEST:
++		if (data->payload_size < sizeof(u32)) {
++			dev_err(afe->dev, "short LPASS HW vote response (%d)\n",
++				data->payload_size);
++			break;
++		}
+ 		afe->result.opcode = hdr->opcode;
+-		afe->result.status = res->status;
++		afe->result.status = 0;
++		afe->lpass_hw_client_handle = *(const u32 *)data->payload;
+ 		wake_up(&afe->wait);
+ 		break;
+ 	default:
+@@ -1845,6 +1856,13 @@ int q6afe_unvote_lpass_core_hw(struct device *dev, uint32_t hw_block_id,
+ 	if (!p)
+ 		return -ENOMEM;
+ 
++	if (!client_handle) {
++		dev_err(afe->dev,
++			"refusing LPASS HW devote with zero handle (block %u)\n",
++			hw_block_id);
++		return -EINVAL;
++	}
++
+ 	pkt = p;
+ 	vote_cfg = p + APR_HDR_SIZE;
+ 
+@@ -1854,14 +1872,19 @@ int q6afe_unvote_lpass_core_hw(struct device *dev, uint32_t hw_block_id,
+ 	pkt->hdr.pkt_size = pkt_size;
+ 	pkt->hdr.src_port = 0;
+ 	pkt->hdr.dest_port = 0;
+-	pkt->hdr.token = hw_block_id;
++	pkt->hdr.token = AFE_CLK_TOKEN;
+ 	pkt->hdr.opcode = AFE_CMD_REMOTE_LPASS_CORE_HW_DEVOTE_REQUEST;
+ 	vote_cfg->hw_block_id = hw_block_id;
+ 	vote_cfg->client_handle = client_handle;
+ 
+-	ret = apr_send_pkt(afe->apr, pkt);
+-	if (ret < 0)
++	ret = afe_apr_send_pkt(afe, pkt, NULL,
++			       AFE_CMD_REMOTE_LPASS_CORE_HW_DEVOTE_REQUEST);
++	if (ret)
+ 		dev_err(afe->dev, "AFE failed to unvote (%d)\n", hw_block_id);
++	else
++		dev_info(afe->dev,
++			 "LPASS HW devote complete: block=%u handle=%u\n",
++			 hw_block_id, client_handle);
+ 
+ 	return ret;
+ }
+@@ -1895,10 +1918,22 @@ int q6afe_vote_lpass_core_hw(struct device *dev, uint32_t hw_block_id,
+ 	strscpy(vote_cfg->client_name, client_name,
+ 			sizeof(vote_cfg->client_name));
+ 
++	*client_handle = 0;
++	afe->lpass_hw_client_handle = 0;
+ 	ret = afe_apr_send_pkt(afe, pkt, NULL,
+ 			       AFE_CMD_RSP_REMOTE_LPASS_CORE_HW_VOTE_REQUEST);
+-	if (ret)
++	if (ret) {
+ 		dev_err(afe->dev, "AFE failed to vote (%d)\n", hw_block_id);
++	} else if (!afe->lpass_hw_client_handle) {
++		dev_err(afe->dev, "AFE returned zero LPASS HW handle (%d)\n",
++			hw_block_id);
++		ret = -EINVAL;
++	} else {
++		*client_handle = afe->lpass_hw_client_handle;
++		dev_info(afe->dev,
++			 "LPASS HW vote accepted: block=%u handle=%u\n",
++			 hw_block_id, *client_handle);
++	}
+ 
+ 	return ret;
+ }
+-- 
+2.50.1
