@@ -27,9 +27,9 @@ permissions:
 jobs:
   kernel:
     runs-on: ubuntu-24.04-arm
-    timeout-minutes: 90
+    timeout-minutes: 150
     env:
-      ROCKNIX_PROFILE: lpm-platform
+      ROCKNIX_PROFILE: fg-coulomb-counter
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -51,23 +51,23 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential gcc-14 g++-14 bc bison flex libssl-dev libelf-dev dwarves zstd xz-utils cpio kmod rsync squashfs-tools device-tree-compiler
-      - name: Prepare platform-suspend source and Device Tree
+      - name: Prepare full-stack PM8150B diagnostic source
         run: |
           set -euo pipefail
-          bash rocknix/build.sh prepare 2>&1 | tee rocknix-lpm-platform-prepare.log
-      - name: Build platform-suspend kernel, modules and Device Tree
+          bash rocknix/build.sh prepare 2>&1 | tee rocknix-fg-coulomb-counter-prepare.log
+      - name: Build full-stack diagnostic kernel and modules
         run: |
           set -euo pipefail
-          bash rocknix/build.sh compile 2>&1 | tee rocknix-lpm-platform-compile.log
+          bash rocknix/build.sh compile 2>&1 | tee rocknix-fg-coulomb-counter-compile.log
       - name: Upload build and evidence
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
-          name: rocknix-rp5-lpm-platform
+          name: rocknix-rp5-fg-coulomb-counter
           retention-days: 14
           compression-level: 0
           if-no-files-found: error
           path: |
             rocknix-out/
-            rocknix-lpm-platform-prepare.log
-            rocknix-lpm-platform-compile.log
+            rocknix-fg-coulomb-counter-prepare.log
+            rocknix-fg-coulomb-counter-compile.log
