@@ -157,7 +157,7 @@
 +	if (ret)
 +		return ret;
 +
-++	for (i = 0; i < 35; i++) {
++	for (i = 0; i < 35; i++) {
 +		ret = qcom_fg_read(chip, &value, GEN4_BATT_INFO_PEEK_RD, 1);
 +		if (ret)
 +			return ret;
@@ -165,7 +165,7 @@
 +			usleep_range(1000, 1100);
 +			return 0;
 +		}
-++		usleep_range(10000, 10100);
++		usleep_range(10000, 10100);
 +	}
 +
 +	return -ETIMEDOUT;
@@ -343,9 +343,9 @@
 +		diag.monotonic_soc[0], diag.monotonic_soc[1],
 +		diag.nominal_cap_mah, diag.learned_cap_mah,
 +		diag.batt_soc, diag.cc_soc_sw, diag.cc_soc,
-++		(long long)diag.charge_counter_uah,
-++		(long long)diag.charge_raw_uah,
-++		(unsigned long long)diag.charge_shadow_uah);
++		(long long)diag.charge_counter_uah,
++		(long long)diag.charge_raw_uah,
++		(unsigned long long)diag.charge_shadow_uah);
 +}
 +static DEVICE_ATTR_RO(gen4_diagnostics);
 +

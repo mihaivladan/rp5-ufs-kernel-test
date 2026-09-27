@@ -143,7 +143,7 @@ def apply_patches(repo, source, fix, profile):
         fg_counter = Path(__file__).resolve().parent / "qcom-fg-gen4-coulomb-counter.patch"
         require(fg_counter.is_file(), "Missing PM8150B Gen4 coulomb-counter patch")
         require(hashlib.sha256(fg_counter.read_bytes()).hexdigest() ==
-                "a097d137d9199f3f308967984b0de43f55b5d67a5ae63efd4376b4441d5b0190",
+                "87bd94920f1f24722cb55a8c7bb2068599103469797188cd284c1ad28b6e50e8",
                 "PM8150B Gen4 coulomb-counter patch checksum mismatch")
         extra_patches.append(fg_counter)
     if profile == "lpm-platform":
