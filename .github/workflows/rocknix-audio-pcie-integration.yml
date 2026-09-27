@@ -8,7 +8,7 @@ jobs:
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 150
     env:
-      ROCKNIX_PROFILE: audio-pcie-integration
+      ROCKNIX_PROFILE: fg-coulomb-counter
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -31,22 +31,22 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y build-essential gcc-14 g++-14 bc bison flex libssl-dev libelf-dev dwarves zstd xz-utils cpio kmod rsync squashfs-tools
           df -h /
-      - name: Validate combined audio and PCIe repairs
+      - name: Validate full stack and PM8150B diagnostics
         run: |
           set -euo pipefail
-          bash rocknix/build.sh prepare 2>&1 | tee rocknix-audio-pcie-integration-build.log
+          bash rocknix/build.sh prepare 2>&1 | tee rocknix-fg-coulomb-counter-build.log
       - name: Compile kernel and modules
         run: |
           set -euo pipefail
-          bash rocknix/build.sh compile 2>&1 | tee -a rocknix-audio-pcie-integration-build.log
+          bash rocknix/build.sh compile 2>&1 | tee -a rocknix-fg-coulomb-counter-build.log
       - name: Upload results and logs
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
-          name: rocknix-rp5-audio-pcie-integration
+          name: rocknix-rp5-fg-coulomb-counter
           retention-days: 7
           compression-level: 0
           if-no-files-found: error
           path: |
             rocknix-out/
-            rocknix-audio-pcie-integration-build.log
+            rocknix-fg-coulomb-counter-build.log
