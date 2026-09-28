@@ -1,0 +1,29 @@
+/dts-v1/;
+/plugin/;
+
+/*
+ * Apply only the three source-backed RPMh mode policies to the exact accepted
+ * Phase 4AU full-stack DTB.  Values are qcom,rpmh-regulator binding values:
+ * RET=0, LPM=1.  No rail disable or suspend voltage is requested.
+ */
+
+&{/soc@0/rsc@18200000/regulators-0/ldo5} {
+	regulator-state-mem {
+		regulator-on-in-suspend;
+		regulator-mode = <1>;
+	};
+};
+
+&{/soc@0/rsc@18200000/regulators-0/ldo6} {
+	regulator-state-mem {
+		regulator-on-in-suspend;
+		regulator-mode = <1>;
+	};
+};
+
+&{/soc@0/rsc@18200000/regulators-1/smps8} {
+	regulator-state-mem {
+		regulator-on-in-suspend;
+		regulator-mode = <0>;
+	};
+};

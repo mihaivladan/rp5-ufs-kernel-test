@@ -1,0 +1,19 @@
+diff --git a/drivers/regulator/qcom-rpmh-regulator.c b/drivers/regulator/qcom-rpmh-regulator.c
+index 80d6c62c19c5..21d2a538ab47 100644
+--- a/drivers/regulator/qcom-rpmh-regulator.c
++++ b/drivers/regulator/qcom-rpmh-regulator.c
+@@ -453,6 +453,14 @@ static int rpmh_regulator_vrm_set_suspend_mode(struct regulator_dev *rdev,
+ 	if (vreg->bypassed)
+ 		sleep_mode = wake_mode;
+ 
++	/*
++	 * Diagnostic-only marker for the RP5 A/B: name the exact VRM address
++	 * and values that must subsequently appear in the RPMh TCS trace.
++	 */
++	dev_info(vreg->dev, "consoleos-rpmh-policy: regulator=%s addr=%#x sleep_mode=%d wake_mode=%d\n",
++		 rdev_get_name(rdev), vreg->addr + RPMH_REGULATOR_REG_VRM_MODE,
++		 sleep_mode, wake_mode);
++
+ 	return rpmh_regulator_send_sleep_wake_request(vreg,
+ 			RPMH_REGULATOR_REG_VRM_MODE, sleep_mode, wake_mode);
+ }
