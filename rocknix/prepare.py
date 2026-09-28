@@ -139,6 +139,13 @@ def apply_patches(repo, source, fix, profile):
                 "dd753274154ed05388a367087dce9c27cc3da0e01390c785640b1cd4af2ddfdd",
                 "Qualcomm PCIe DRV handoff patch checksum mismatch")
         extra_patches.append(drv_fix)
+    if profile == "rpmh-sleep-policy":
+        offline_fix = Path(__file__).resolve().parent / "qcom-pcie-drv-offline-suspend.patch"
+        require(offline_fix.is_file(), "Missing Qualcomm PCIe offline-suspend patch")
+        require(hashlib.sha256(offline_fix.read_bytes()).hexdigest() ==
+                "f353f171ca02c5206e6e2db39c38709ea3bf0a342bfc902c08b3f0e0fd93607a",
+                "Qualcomm PCIe offline-suspend patch checksum mismatch")
+        extra_patches.append(offline_fix)
     if profile in ("fg-coulomb-counter", "rpmh-sleep-policy"):
         fg_counter = Path(__file__).resolve().parent / "qcom-fg-gen4-coulomb-counter.patch"
         require(fg_counter.is_file(), "Missing PM8150B Gen4 coulomb-counter patch")
@@ -226,6 +233,17 @@ def apply_patches(repo, source, fix, profile):
                     f"clk_prepare_enable({name}->dcodec)" not in macro_source,
                     f"LPASS {name.upper()} still directly enables vote clocks")
     if profile == "rpmh-sleep-policy":
+        pcie_source = (source / "drivers/pci/controller/dwc/pcie-qcom.c").read_text()
+        required_pcie_offline = (
+            "bool drv_offline;",
+            "static bool qcom_pcie_has_downstream_device(",
+            "if (pcie->drv_armed || pcie->drv_offline)",
+            "if (!pcie->drv_armed && !pcie->drv_offline)",
+            "PCIe RC%u endpoint absent; skipping ADSP handoff",
+            "PCIe RC%u offline suspend completed",
+        )
+        require(all(marker in pcie_source for marker in required_pcie_offline),
+                "Qualcomm PCIe offline-suspend implementation markers missing")
         rpmh_regulator = (source / "drivers/regulator/qcom-rpmh-regulator.c").read_text()
         regulator_core = (source / "drivers/regulator/core.c").read_text()
         required_rpmh = (
@@ -422,6 +440,10 @@ def main():
         "pcie_drv_handoff": (
             "ACK-validated ADSP pcie_drv ownership transfer around SM8250 PCIe RC0 resource release"
             if profile in ("pcie-drv-handoff", "audio-pcie-integration", "fg-coulomb-counter", "rpmh-sleep-policy") else None
+        ),
+        "pcie_drv_offline_suspend": (
+            "When RC0 is link-down with no downstream PCI device, skip ADSP transfer but reuse the handoff path's symmetric resource suspend/restore"
+            if profile == "rpmh-sleep-policy" else None
         ),
         "pm8150b_gen4_coulomb_diagnostics": (
             "Revision-selected raw CC_SOC/CC_SOC_SW/BATT_SOC plus derived microamp-hours"

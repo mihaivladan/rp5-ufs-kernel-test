@@ -53,7 +53,7 @@ fg-coulomb-counter)
     ;;
 rpmh-sleep-policy)
     config_fragment="${kit}/rocknix/rpmh-sleep-policy.config"
-    expected_release='7.2.0-consoleos-rpmhslp1'
+    expected_release='7.2.0-consoleos-pcieoff1'
     artifact_name="rocknix-${expected_release}.tar.zst"
     dtb_name='sm8250-retroidpocket-rp5-rpmh-sleep-control'
     treatment_dtb_name='sm8250-retroidpocket-rp5-rpmh-sleep-treatment'

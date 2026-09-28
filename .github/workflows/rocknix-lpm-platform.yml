@@ -1,4 +1,4 @@
-name: ROCKNIX RP5 RPMh regulator sleep policy
+name: ROCKNIX RP5 PCIe endpoint-off suspend
 on:
   workflow_dispatch:
   push:
@@ -16,6 +16,7 @@ on:
       - 'rocknix/rpmh-sleep-policy.config'
       - 'rocknix/qcom-fg-gen4-coulomb-counter.patch'
       - 'rocknix/qcom-pcie-drv-handoff.patch'
+      - 'rocknix/qcom-pcie-drv-offline-suspend.patch'
       - 'rocknix/lpass-macro-pm-clock-backport.patch'
       - 'rocknix/q6afe-lpass-hw-vote-handle.patch'
       - 'rocknix/sm8250-adsp-no-auto-boot.patch'
@@ -56,23 +57,23 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential gcc-14 g++-14 bc bison flex libssl-dev libelf-dev dwarves zstd xz-utils cpio kmod rsync squashfs-tools device-tree-compiler
-      - name: Prepare RPMh sleep-policy A/B source
+      - name: Prepare PCIe endpoint-off suspend source
         run: |
           set -euo pipefail
-          bash rocknix/build.sh prepare 2>&1 | tee rocknix-rpmh-sleep-policy-prepare.log
-      - name: Build RPMh sleep-policy kernel, modules and two DTBs
+          bash rocknix/build.sh prepare 2>&1 | tee rocknix-pcie-offline-suspend-prepare.log
+      - name: Build PCIe endpoint-off kernel, modules and DTBs
         run: |
           set -euo pipefail
-          bash rocknix/build.sh compile 2>&1 | tee rocknix-rpmh-sleep-policy-compile.log
+          bash rocknix/build.sh compile 2>&1 | tee rocknix-pcie-offline-suspend-compile.log
       - name: Upload build and evidence
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
-          name: rocknix-rp5-rpmh-sleep-policy
+          name: rocknix-rp5-pcie-offline-suspend
           retention-days: 14
           compression-level: 0
           if-no-files-found: error
           path: |
             rocknix-out/
-            rocknix-rpmh-sleep-policy-prepare.log
-            rocknix-rpmh-sleep-policy-compile.log
+            rocknix-pcie-offline-suspend-prepare.log
+            rocknix-pcie-offline-suspend-compile.log
