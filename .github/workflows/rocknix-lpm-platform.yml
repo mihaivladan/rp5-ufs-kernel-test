@@ -1,4 +1,4 @@
-name: ConsoleOS RP5 final kernel RC2
+name: ConsoleOS RP5 final kernel RC3
 on:
   workflow_dispatch:
   push:
@@ -17,6 +17,9 @@ on:
       - 'rocknix/qcom-pcie-offline-pinctrl.patch'
       - 'rocknix/qcom-fg-gen4-coulomb-counter.patch'
       - 'rocknix/retroid-gamepad-remove.patch'
+      - 'rocknix/rpmh-regulator-suspend-state.patch'
+      - 'rocknix/regulator-core-s2idle-state-mem.patch'
+      - 'rocknix/rpmh-regulator-suspend-trace.patch'
       - 'rocknix/sm8250-retroidpocket-rp5-phase4a-wireless-adsp-pcie-drv.dts'
       - 'rocknix/sm8250-retroidpocket-rp5-consoleos-rc1.dts'
       - 'rocknix/verify-pcie-drv-dtb.py'
