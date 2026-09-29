@@ -53,7 +53,7 @@ fg-coulomb-counter)
     ;;
 consoleos-rc1)
     config_fragment="${kit}/rocknix/consoleos-rc1.config"
-    expected_release='7.2.0-consoleos-rc1'
+    expected_release='7.2.0-consoleos-rc2'
     artifact_name="rocknix-${expected_release}.tar.zst"
     dtb_name='sm8250-retroidpocket-rp5-consoleos-rc1'
     ;;
@@ -301,6 +301,19 @@ elif sys.argv[2] in ('adsp-no-auto-ab', 'lpass-devote-fix', 'lpass-pm-clock', 'a
         if not all(marker in fg for marker in required_fg):
             raise SystemExit('PM8150B Gen4 coulomb diagnostic markers missing')
     if sys.argv[2] == 'consoleos-rc1':
+        pcie = Path('drivers/pci/controller/dwc/pcie-qcom.c').read_text()
+        required_pcie_offline = (
+            'bool drv_offline;',
+            'static bool qcom_pcie_has_downstream_device(',
+            'pinctrl_pm_select_sleep_state(dev);',
+            'pinctrl_pm_select_default_state(dev);',
+            'PCIe RC%u offline sleep pins selected',
+            'PCIe RC%u offline default pins restored',
+            'PCIe RC%u endpoint absent; skipping ADSP handoff',
+            'PCIe RC%u offline suspend completed',
+        )
+        if not all(marker in pcie for marker in required_pcie_offline):
+            raise SystemExit('PCIe offline pinctrl markers missing')
         gamepad = Path('drivers/input/joystick/retroid.c').read_text()
         required_gamepad = (
             'static void gamepad_mcu_uart_remove(struct serdev_device *serdev)',
@@ -532,7 +545,7 @@ elif [[ "${profile}" == consoleos-rc1 ]]; then
     cd "${out}"
     sha256sum "${dtb_name}.dtb" > CONSOLEOS-RC1-DTB-SHA256SUMS
     printf '%s\n' \
-        'ConsoleOS RC1 passed: accepted full product stack, validated kernel fixes, diagnostics, and controllable MCU/RGB/gamepad rail. Not installed or boot-tested.' \
+        'ConsoleOS RC2 passed: RC1 full product stack plus endpoint-absent PCIe suspend and GPIO80 sleep/default pinctrl switching. Not installed or boot-tested.' \
         > BUILD-SUCCESS.txt
     cd "${source_dir}"
 elif [[ "${profile}" == slpi-integrated ]]; then

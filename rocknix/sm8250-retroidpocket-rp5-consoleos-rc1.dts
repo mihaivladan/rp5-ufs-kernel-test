@@ -53,3 +53,19 @@
 &{/vreg-mcu-3v3-regulator} {
 	/delete-property/ regulator-always-on;
 };
+
+&tlmm {
+	pcie0_sleep_state: pcie0-sleep-state {
+		clkreq-pins {
+			pins = "gpio80";
+			function = "gpio";
+			drive-strength = <2>;
+			bias-pull-up;
+		};
+	};
+};
+
+&pcie0 {
+	pinctrl-names = "default", "sleep";
+	pinctrl-1 = <&pcie0_sleep_state>;
+};

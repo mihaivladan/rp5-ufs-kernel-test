@@ -139,6 +139,18 @@ def apply_patches(repo, source, fix, profile):
                 "dd753274154ed05388a367087dce9c27cc3da0e01390c785640b1cd4af2ddfdd",
                 "Qualcomm PCIe DRV handoff patch checksum mismatch")
         extra_patches.append(drv_fix)
+    if profile == "consoleos-rc1":
+        offline_fix = Path(__file__).resolve().parent / "qcom-pcie-drv-offline-suspend.patch"
+        pinctrl_fix = Path(__file__).resolve().parent / "qcom-pcie-offline-pinctrl.patch"
+        require(offline_fix.is_file() and pinctrl_fix.is_file(),
+                "Missing Qualcomm PCIe offline pinctrl patches")
+        require(hashlib.sha256(offline_fix.read_bytes()).hexdigest() ==
+                "f353f171ca02c5206e6e2db39c38709ea3bf0a342bfc902c08b3f0e0fd93607a",
+                "Qualcomm PCIe offline-suspend patch checksum mismatch")
+        require(hashlib.sha256(pinctrl_fix.read_bytes()).hexdigest() ==
+                "2c57942a2912ac64460386283b926f5cd7a245770b14f4c073b2d7a178bdce2f",
+                "Qualcomm PCIe offline pinctrl patch checksum mismatch")
+        extra_patches.extend((offline_fix, pinctrl_fix))
     if profile in ("fg-coulomb-counter", "consoleos-rc1"):
         fg_counter = Path(__file__).resolve().parent / "qcom-fg-gen4-coulomb-counter.patch"
         require(fg_counter.is_file(), "Missing PM8150B Gen4 coulomb-counter patch")
@@ -217,6 +229,19 @@ def apply_patches(repo, source, fix, profile):
                     f"clk_prepare_enable({name}->dcodec)" not in macro_source,
                     f"LPASS {name.upper()} still directly enables vote clocks")
     if profile == "consoleos-rc1":
+        pcie_source = (source / "drivers/pci/controller/dwc/pcie-qcom.c").read_text()
+        required_pcie_offline = (
+            "bool drv_offline;",
+            "static bool qcom_pcie_has_downstream_device(",
+            "pinctrl_pm_select_sleep_state(dev);",
+            "pinctrl_pm_select_default_state(dev);",
+            "PCIe RC%u offline sleep pins selected",
+            "PCIe RC%u offline default pins restored",
+            "PCIe RC%u endpoint absent; skipping ADSP handoff",
+            "PCIe RC%u offline suspend completed",
+        )
+        require(all(marker in pcie_source for marker in required_pcie_offline),
+                "Qualcomm PCIe offline pinctrl implementation markers missing")
         gamepad = (source / "drivers/input/joystick/retroid.c").read_text()
         require("static void gamepad_mcu_uart_remove(struct serdev_device *serdev)" in gamepad and
                 "device_remove_file(&gamepad_dev->platform_dev->dev," in gamepad and

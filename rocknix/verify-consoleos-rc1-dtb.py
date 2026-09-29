@@ -30,9 +30,15 @@ STATUS_NODES = {
 }
 PCIE = "/soc@0/pcie@1c00000"
 MCU_ALWAYS_ON = "/vreg-mcu-3v3-regulator/regulator-always-on"
+PCIE_SLEEP = "/soc@0/pinctrl@f100000/pcie0-sleep-state"
+PCIE_SLEEP_CLKREQ = f"{PCIE_SLEEP}/clkreq-pins"
 EXPECTED = {f"{node}/status" for node in STATUS_NODES} | {
     f"{PCIE}/qcom,drv-supported", f"{PCIE}/qcom,drv-dev-id",
-    f"{PCIE}/qcom,drv-l1ss-timeout-us", MCU_ALWAYS_ON,
+    f"{PCIE}/qcom,drv-l1ss-timeout-us", f"{PCIE}/pinctrl-names",
+    f"{PCIE}/pinctrl-1", MCU_ALWAYS_ON,
+    f"{PCIE_SLEEP}/phandle", f"{PCIE_SLEEP_CLKREQ}/pins",
+    f"{PCIE_SLEEP_CLKREQ}/function", f"{PCIE_SLEEP_CLKREQ}/drive-strength",
+    f"{PCIE_SLEEP_CLKREQ}/bias-pull-up", "/__symbols__/pcie0_sleep_state",
 }
 
 
@@ -93,6 +99,24 @@ def main() -> None:
         raise SystemExit("wrong PCIe DRV device ID")
     if candidate[f"{PCIE}/qcom,drv-l1ss-timeout-us"] != struct.pack(">I", 10000):
         raise SystemExit("wrong PCIe DRV L1SS timeout")
+    if candidate[f"{PCIE}/pinctrl-names"] != b"default\0sleep\0":
+        raise SystemExit("wrong PCIe pinctrl state names")
+    sleep_phandle = candidate[f"{PCIE_SLEEP}/phandle"]
+    if len(sleep_phandle) != 4 or candidate[f"{PCIE}/pinctrl-1"] != sleep_phandle:
+        raise SystemExit("PCIe sleep state phandle mismatch")
+    expected_sleep = {
+        f"{PCIE_SLEEP_CLKREQ}/pins": b"gpio80\0",
+        f"{PCIE_SLEEP_CLKREQ}/function": b"gpio\0",
+        f"{PCIE_SLEEP_CLKREQ}/drive-strength": struct.pack(">I", 2),
+        f"{PCIE_SLEEP_CLKREQ}/bias-pull-up": b"",
+        "/__symbols__/pcie0_sleep_state": b"/soc@0/pinctrl@f100000/pcie0-sleep-state\0",
+    }
+    for key, value in expected_sleep.items():
+        if candidate[key] != value:
+            raise SystemExit(f"wrong PCIe sleep property: {key}")
+    default_clkreq = "/soc@0/pinctrl@f100000/pcie0-default-state/clkreq-pins/function"
+    if candidate[default_clkreq] != b"pci_e0\0":
+        raise SystemExit("PCIe default CLKREQ mux was altered")
     if MCU_ALWAYS_ON not in base or MCU_ALWAYS_ON in candidate:
         raise SystemExit("MCU/RGB rail was not changed from always-on to controllable")
     for node in (
@@ -101,7 +125,7 @@ def main() -> None:
     ):
         if status(candidate[f"{node}/status"]) != b"disabled":
             raise SystemExit(f"unvalidated subsystem enabled: {node}")
-    print("VERIFIED: accepted full stack, exact PCIe/ADSP handoff, and only MCU/RGB rail made controllable")
+    print("VERIFIED: RC1 full stack plus controllable MCU/RGB rail and exact GPIO80 sleep/default pinctrl")
 
 
 if __name__ == "__main__":
