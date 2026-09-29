@@ -1,0 +1,55 @@
+// SPDX-License-Identifier: BSD-3-Clause
+/*
+ * ConsoleOS RP5 release-candidate device tree.
+ *
+ * Start from the strict Phase 4A wireless + ADSP/PCIe-DRV source tree, then
+ * enable exactly the peripherals present in the accepted Phase 4AT full-stack
+ * DTB.  The sole power-policy delta is making the shared MCU/RGB/gamepad rail
+ * controllable; userspace may then execute the validated Phase 4BE lifecycle.
+ */
+
+#include "sm8250-retroidpocket-rp5-phase4a-wireless-adsp-pcie-drv.dts"
+
+&{/audio-codec} { status = "okay"; };
+&{/multi-ledl1} { status = "okay"; };
+&{/multi-ledl2} { status = "okay"; };
+&{/multi-ledl3} { status = "okay"; };
+&{/multi-ledl4} { status = "okay"; };
+&{/multi-ledr1} { status = "okay"; };
+&{/multi-ledr2} { status = "okay"; };
+&{/multi-ledr3} { status = "okay"; };
+&{/multi-ledr4} { status = "okay"; };
+&{/pwm-fan} { status = "okay"; };
+&{/sound} { status = "okay"; };
+&{/vdc-5v-regulator} { status = "okay"; };
+&{/vreg-fan-pwr-regulator} { status = "okay"; };
+
+&{/soc@0/codec@3240000} { status = "okay"; };
+&{/soc@0/codec@3370000} { status = "okay"; };
+&{/soc@0/display-subsystem@ae00000/displayport-controller@ae90000} { status = "okay"; };
+&{/soc@0/geniqup@8c0000/i2c@884000} { status = "okay"; };
+&{/soc@0/geniqup@9c0000/i2c@98c000} { status = "okay"; };
+&{/soc@0/geniqup@9c0000/i2c@994000} { status = "okay"; };
+&{/soc@0/geniqup@ac0000} { status = "okay"; };
+&{/soc@0/geniqup@ac0000/i2c@a94000} { status = "okay"; };
+&{/soc@0/phy@88e3000} { status = "okay"; };
+&{/soc@0/phy@88e8000} { status = "okay"; };
+&{/soc@0/pinctrl@33c0000} { status = "okay"; };
+&{/soc@0/pmu@9091000} { status = "okay"; };
+&{/soc@0/pmu@90b6400} { status = "okay"; };
+&{/soc@0/rsc@18200000/regulators-1/ldo1} { status = "okay"; };
+&{/soc@0/rxmacro@3200000} { status = "okay"; };
+&{/soc@0/soundwire@3210000} { status = "okay"; };
+&{/soc@0/soundwire@3230000} { status = "okay"; };
+&{/soc@0/soundwire@3250000} { status = "okay"; };
+&{/soc@0/spmi@c440000/pmic@2/typec@1500} { status = "okay"; };
+&{/soc@0/spmi@c440000/pmic@2/usb-vbus-regulator@1100} { status = "okay"; };
+&{/soc@0/spmi@c440000/pmic@3/haptics@c000} { status = "okay"; };
+&{/soc@0/spmi@c440000/pmic@5/pwm} { status = "okay"; };
+&{/soc@0/txmacro@3220000} { status = "okay"; };
+&{/soc@0/usb@a6f8800} { status = "okay"; };
+&{/soc@0/usb@a6f8800/usb@a600000} { status = "okay"; };
+
+&{/vreg-mcu-3v3-regulator} {
+	/delete-property/ regulator-always-on;
+};

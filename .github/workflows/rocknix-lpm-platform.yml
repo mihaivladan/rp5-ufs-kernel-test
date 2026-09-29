@@ -1,4 +1,4 @@
-name: ROCKNIX RP5 exact-state platform suspend
+name: ConsoleOS RP5 final kernel RC1
 on:
   workflow_dispatch:
   push:
@@ -7,14 +7,18 @@ on:
       - '.github/workflows/rocknix-lpm-platform.yml'
       - 'rocknix/build.sh'
       - 'rocknix/prepare.py'
-      - 'rocknix/lpm-platform.config'
-      - 'rocknix/qcom-lpm-platform-suspend.patch'
-      - 'rocknix/smp2p-sleepstate.patch'
+      - 'rocknix/consoleos-rc1.config'
+      - 'rocknix/CONSOLEOS-RC1.md'
       - 'rocknix/sm8250-adsp-no-auto-boot.patch'
-      - 'rocknix/sm8250-retroidpocket-rp5-adsp-slpi-sleepstate.dts'
-      - 'rocknix/sm8250-retroidpocket-rp5-lpm-platform.dts'
-      - 'rocknix/verify-slpi-integrated-dtb.py'
-      - 'rocknix/verify-lpm-platform-dtb.py'
+      - 'rocknix/q6afe-lpass-hw-vote-handle.patch'
+      - 'rocknix/lpass-macro-pm-clock-backport.patch'
+      - 'rocknix/qcom-pcie-drv-handoff.patch'
+      - 'rocknix/qcom-fg-gen4-coulomb-counter.patch'
+      - 'rocknix/retroid-gamepad-remove.patch'
+      - 'rocknix/sm8250-retroidpocket-rp5-phase4a-wireless-adsp-pcie-drv.dts'
+      - 'rocknix/sm8250-retroidpocket-rp5-consoleos-rc1.dts'
+      - 'rocknix/verify-pcie-drv-dtb.py'
+      - 'rocknix/verify-consoleos-rc1-dtb.py'
       - 'rocknix/sm8250-retroidpocket-rp5-minsleep4.dts'
       - 'rocknix/sm8250-retroidpocket-rp5-stock-pruned.dts'
       - 'rocknix/reenable-matrix.json'
@@ -29,7 +33,7 @@ jobs:
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 150
     env:
-      ROCKNIX_PROFILE: fg-coulomb-counter
+      ROCKNIX_PROFILE: consoleos-rc1
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -51,23 +55,23 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential gcc-14 g++-14 bc bison flex libssl-dev libelf-dev dwarves zstd xz-utils cpio kmod rsync squashfs-tools device-tree-compiler
-      - name: Prepare full-stack PM8150B diagnostic source
+      - name: Prepare ConsoleOS RP5 release-candidate source
         run: |
           set -euo pipefail
-          bash rocknix/build.sh prepare 2>&1 | tee rocknix-fg-coulomb-counter-prepare.log
-      - name: Build full-stack diagnostic kernel and modules
+          bash rocknix/build.sh prepare 2>&1 | tee rocknix-consoleos-rc1-prepare.log
+      - name: Build ConsoleOS RP5 release-candidate kernel and modules
         run: |
           set -euo pipefail
-          bash rocknix/build.sh compile 2>&1 | tee rocknix-fg-coulomb-counter-compile.log
+          bash rocknix/build.sh compile 2>&1 | tee rocknix-consoleos-rc1-compile.log
       - name: Upload build and evidence
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
-          name: rocknix-rp5-fg-coulomb-counter
+          name: rocknix-rp5-consoleos-rc1
           retention-days: 14
           compression-level: 0
           if-no-files-found: error
           path: |
             rocknix-out/
-            rocknix-fg-coulomb-counter-prepare.log
-            rocknix-fg-coulomb-counter-compile.log
+            rocknix-consoleos-rc1-prepare.log
+            rocknix-consoleos-rc1-compile.log

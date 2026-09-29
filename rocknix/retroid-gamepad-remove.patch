@@ -1,0 +1,47 @@
+From: ConsoleOS <consoleos@localhost>
+Date: Tue, 29 Sep 2026 00:00:00 +0000
+Subject: [PATCH] Input: retroid: release rumble platform device on unbind
+
+The ROCKNIX force-feedback extension creates an auxiliary platform device at
+every serdev probe but never unregisters it.  Rebinding then fails with
+-EEXIST and leaves a stale rumble sysfs owner.  Pair the allocation with a
+serdev remove callback so the validated suspend hook can unbind and rebind the
+gamepad without leaking global state.
+---
+ drivers/input/joystick/retroid.c | 14 ++++++++++++++
+ 1 file changed, 14 insertions(+)
+
+diff --git a/drivers/input/joystick/retroid.c b/drivers/input/joystick/retroid.c
+index 97e9c7a6cbfe..cd4db292f1a1 100644
+--- a/drivers/input/joystick/retroid.c
++++ b/drivers/input/joystick/retroid.c
+@@ -510,6 +510,19 @@ static int gamepad_mcu_uart_probe(struct serdev_device *serdev)
+ 	return 0;
+ }
+ 
++static void gamepad_mcu_uart_remove(struct serdev_device *serdev)
++{
++	struct gamepad_device *gamepad_dev = serdev_device_get_drvdata(serdev);
++
++	if (!gamepad_dev || IS_ERR_OR_NULL(gamepad_dev->platform_dev))
++		return;
++
++	device_remove_file(&gamepad_dev->platform_dev->dev,
++			   &dev_attr_rumble_enable);
++	platform_device_unregister(gamepad_dev->platform_dev);
++	gamepad_dev->platform_dev = NULL;
++}
++
+ static const struct of_device_id gamepad_mcu_uart_of_match[] = {
+ 	{ .compatible = "retroid,retroid-pocket-gamepad" },
+ 	{}
+@@ -522,6 +535,7 @@ static struct serdev_device_driver gamepad_mcu_uart_driver = {
+ 		.of_match_table = gamepad_mcu_uart_of_match,
+ 	},
+ 	.probe = gamepad_mcu_uart_probe,
++	.remove = gamepad_mcu_uart_remove,
+ };
+ 
+ module_serdev_device_driver(gamepad_mcu_uart_driver);
+-- 
+2.51.0
