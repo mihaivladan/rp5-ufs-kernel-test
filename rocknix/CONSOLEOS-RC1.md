@@ -1,14 +1,21 @@
-# ConsoleOS RP5 kernel RC3
+# ConsoleOS RP5 kernel RC4
 
 This profile consolidates the device-tested native Linux fixes on the ROCKNIX
 20260901 / Linux 7.2 baseline. It deliberately excludes diagnostic changes
 that failed, had no measurable effect, or widened the test matrix.
 
-RC3 is RC2 plus the exact three RPMh regulator suspend patches already used
+RC3 was RC2 plus the exact three RPMh regulator suspend patches already used
 by the device-tested `pcieoff1` baseline. They mirror ACTIVE regulator requests
 into the RPMh SLEEP cache, provide SLEEP/WAKE regulator operations, map existing
 `regulator-state-mem` constraints onto s2idle, and retain the diagnostic mode
-marker. RC3 adds no new DT rail policy.
+marker. RC3 added no new DT rail policy.
+
+RC4 replaces RC2/RC3's late-suspend GPIO80 transition with a guarded sysfs
+control. Userspace may select the PCIe sleep pins only after the link is down
+and no downstream device remains. Suspend then refuses the offline path unless
+that state was selected while awake. The sleep pins remain selected across
+resume and userspace restores the default pins before PCIe rescan. No pinctrl
+write occurs inside suspend or resume.
 
 RC2 was RC1 plus the Phase 4BL-proven QCA-off PCIe lifecycle: an absent
 endpoint uses the validated offline resource-suspend path, GPIO80 changes from
@@ -26,7 +33,7 @@ Included kernel changes:
 - Qualcomm PCIe `pcie_drv` ownership handoff around suspend;
 - endpoint-absent PCIe resource suspend with fail-closed downstream-device
   detection;
-- Android-style PCIe0 `default`/`sleep` pinctrl switching for GPIO80;
+- guarded awake-time PCIe0 `default`/`sleep` pinctrl switching for GPIO80;
 - PM8150B Gen4 coulomb-counter diagnostics;
 - Retroid gamepad rumble-device cleanup on serdev unbind/rebind;
 - RPMh regulator SLEEP/WAKE support and ACTIVE-to-SLEEP cache mirroring;
@@ -40,6 +47,6 @@ the PCIe0 sleep pinctrl state proven by Phase 4BL. It does not enable
 QCE, Venus, CDSP, or SLPI. It does not include speculative RPMh rail policies,
 PCIe PHY power-off, or the failed exact-PSCI-state platform driver.
 
-RC3 retains BTF, ftrace, kprobes, PM diagnostics, and the fuel-gauge interface
+RC4 retains BTF, ftrace, kprobes, PM diagnostics, and the fuel-gauge interface
 so the one-shot qualification boot can prove residency and recovery. These can
 be stripped only after the RC passes the product validation matrix.

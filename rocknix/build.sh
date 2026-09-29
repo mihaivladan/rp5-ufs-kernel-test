@@ -53,7 +53,7 @@ fg-coulomb-counter)
     ;;
 consoleos-rc1)
     config_fragment="${kit}/rocknix/consoleos-rc1.config"
-    expected_release='7.2.0-consoleos-rc3'
+    expected_release='7.2.0-consoleos-rc4'
     artifact_name="rocknix-${expected_release}.tar.zst"
     dtb_name='sm8250-retroidpocket-rp5-consoleos-rc1'
     ;;
@@ -304,11 +304,16 @@ elif sys.argv[2] in ('adsp-no-auto-ab', 'lpass-devote-fix', 'lpass-pm-clock', 'a
         pcie = Path('drivers/pci/controller/dwc/pcie-qcom.c').read_text()
         required_pcie_offline = (
             'bool drv_offline;',
+            'bool drv_offline_pins_selected;',
             'static bool qcom_pcie_has_downstream_device(',
+            'static DEVICE_ATTR_RW(offline_pins);',
+            '.dev_groups = qcom_pcie_groups,',
             'pinctrl_pm_select_sleep_state(dev);',
             'pinctrl_pm_select_default_state(dev);',
-            'PCIe RC%u offline sleep pins selected',
-            'PCIe RC%u offline default pins restored',
+            'PCIe RC%u offline sleep pins selected while awake',
+            'PCIe RC%u offline default pins restored while awake',
+            'refusing offline suspend before awake pin selection',
+            'PCIe RC%u offline sleep pins retained after resume',
             'PCIe RC%u endpoint absent; skipping ADSP handoff',
             'PCIe RC%u offline suspend completed',
         )
@@ -545,7 +550,7 @@ elif [[ "${profile}" == consoleos-rc1 ]]; then
     cd "${out}"
     sha256sum "${dtb_name}.dtb" > CONSOLEOS-RC1-DTB-SHA256SUMS
     printf '%s\n' \
-        'ConsoleOS RC3 passed: RC2 plus the exact device-tested RPMh regulator SLEEP/WAKE plumbing, with no new DT rail policy. Not installed or boot-tested.' \
+        'ConsoleOS RC4 passed: RC3 plus guarded awake-time GPIO80 offline/default control; no pinctrl transition occurs during suspend. Not installed or boot-tested.' \
         > BUILD-SUCCESS.txt
     cd "${source_dir}"
 elif [[ "${profile}" == slpi-integrated ]]; then

@@ -148,7 +148,7 @@ def apply_patches(repo, source, fix, profile):
                 "f353f171ca02c5206e6e2db39c38709ea3bf0a342bfc902c08b3f0e0fd93607a",
                 "Qualcomm PCIe offline-suspend patch checksum mismatch")
         require(hashlib.sha256(pinctrl_fix.read_bytes()).hexdigest() ==
-                "2c57942a2912ac64460386283b926f5cd7a245770b14f4c073b2d7a178bdce2f",
+                "cd9cb30004115a4de9b6b7937421cac851fb4a5c02fc85325beed2b52a5d156e",
                 "Qualcomm PCIe offline pinctrl patch checksum mismatch")
         extra_patches.extend((offline_fix, pinctrl_fix))
     if profile in ("fg-coulomb-counter", "consoleos-rc1"):
@@ -247,11 +247,16 @@ def apply_patches(repo, source, fix, profile):
         pcie_source = (source / "drivers/pci/controller/dwc/pcie-qcom.c").read_text()
         required_pcie_offline = (
             "bool drv_offline;",
+            "bool drv_offline_pins_selected;",
             "static bool qcom_pcie_has_downstream_device(",
+            "static DEVICE_ATTR_RW(offline_pins);",
+            ".dev_groups = qcom_pcie_groups,",
             "pinctrl_pm_select_sleep_state(dev);",
             "pinctrl_pm_select_default_state(dev);",
-            "PCIe RC%u offline sleep pins selected",
-            "PCIe RC%u offline default pins restored",
+            "PCIe RC%u offline sleep pins selected while awake",
+            "PCIe RC%u offline default pins restored while awake",
+            "refusing offline suspend before awake pin selection",
+            "PCIe RC%u offline sleep pins retained after resume",
             "PCIe RC%u endpoint absent; skipping ADSP handoff",
             "PCIe RC%u offline suspend completed",
         )
