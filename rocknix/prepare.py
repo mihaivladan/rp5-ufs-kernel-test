@@ -165,6 +165,21 @@ def apply_patches(repo, source, fix, profile):
                 "9201056b19b2bd62b1827e91351bdf4369259b4894aadc609b5a73c832e09919",
                 "Retroid gamepad cleanup patch checksum mismatch")
         extra_patches.append(gamepad_remove)
+        rpmh_suspend = Path(__file__).resolve().parent / "rpmh-regulator-suspend-state.patch"
+        regulator_s2idle = Path(__file__).resolve().parent / "regulator-core-s2idle-state-mem.patch"
+        rpmh_trace = Path(__file__).resolve().parent / "rpmh-regulator-suspend-trace.patch"
+        require(rpmh_suspend.is_file() and regulator_s2idle.is_file() and rpmh_trace.is_file(),
+                "Missing RC3 RPMh regulator suspend patches")
+        require(hashlib.sha256(rpmh_suspend.read_bytes()).hexdigest() ==
+                "71e0d61fda70fe3f2a7e3ebb94fa89b56434e89d9b7ee03848b9f3cabcfb38b9",
+                "RPMh regulator suspend-state patch checksum mismatch")
+        require(hashlib.sha256(regulator_s2idle.read_bytes()).hexdigest() ==
+                "86ccb3f75b89920e289f16609eca288eb4bb3d6f93ffea7a267631280379037c",
+                "Regulator s2idle state-mem patch checksum mismatch")
+        require(hashlib.sha256(rpmh_trace.read_bytes()).hexdigest() ==
+                "06c5d49db2dc5ac27fa4fc04700df94fb6751c0678ed77c07c275c2d7b8476e6",
+                "RPMh regulator suspend trace patch checksum mismatch")
+        extra_patches.extend((rpmh_suspend, regulator_s2idle, rpmh_trace))
     if profile == "lpm-platform":
         lpm_fix = Path(__file__).resolve().parent / "qcom-lpm-platform-suspend.patch"
         require(lpm_fix.is_file(), "Missing exact-state platform suspend patch")
@@ -248,6 +263,22 @@ def apply_patches(repo, source, fix, profile):
                 "platform_device_unregister(gamepad_dev->platform_dev);" in gamepad and
                 ".remove = gamepad_mcu_uart_remove," in gamepad,
                 "Retroid gamepad unbind cleanup missing")
+        rpmh_regulator = (source / "drivers/regulator/qcom-rpmh-regulator.c").read_text()
+        regulator_core = (source / "drivers/regulator/core.c").read_text()
+        required_rpmh = (
+            "static int rpmh_regulator_set_suspend_enable(",
+            "static int rpmh_regulator_vrm_set_suspend_mode(",
+            "static int rpmh_regulator_resume(",
+            ".set_suspend_enable\t= rpmh_regulator_set_suspend_enable,",
+            ".set_suspend_mode\t= rpmh_regulator_vrm_set_suspend_mode,",
+            ".resume\t\t\t= rpmh_regulator_resume,",
+            "return rpmh_write(vreg->dev, RPMH_SLEEP_STATE, cmd, 1);",
+            "consoleos-rpmh-policy: regulator=%s addr=%#x sleep_mode=%d wake_mode=%d",
+        )
+        require(all(marker in rpmh_regulator for marker in required_rpmh),
+                "RC3 RPMh regulator SLEEP/WAKE implementation markers missing")
+        require("case PM_SUSPEND_TO_IDLE:\n\tcase PM_SUSPEND_MEM:" in regulator_core,
+                "RC3 s2idle is not mapped to regulator state_mem")
     if profile == "lpm-platform":
         lpm_source = (source / "drivers/soc/qcom/qcom_lpm_platform_suspend.c").read_text()
         require("#define CONSOLEOS_SM8250_SUSPEND_STATE\t0x4100c244" in lpm_source and
