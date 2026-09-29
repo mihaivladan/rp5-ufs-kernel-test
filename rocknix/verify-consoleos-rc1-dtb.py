@@ -38,7 +38,7 @@ EXPECTED = {f"{node}/status" for node in STATUS_NODES} | {
     f"{PCIE}/pinctrl-1", MCU_ALWAYS_ON,
     f"{PCIE_SLEEP}/phandle", f"{PCIE_SLEEP_CLKREQ}/pins",
     f"{PCIE_SLEEP_CLKREQ}/function", f"{PCIE_SLEEP_CLKREQ}/drive-strength",
-    f"{PCIE_SLEEP_CLKREQ}/bias-pull-up", "/__symbols__/pcie0_sleep_state",
+    f"{PCIE_SLEEP_CLKREQ}/bias-pull-up",
 }
 
 
@@ -84,6 +84,10 @@ def main() -> None:
     if len(sys.argv) != 3:
         raise SystemExit("usage: verify-consoleos-rc1-dtb.py PHASE4A_BASE RC1")
     base, candidate = parse(Path(sys.argv[1])), parse(Path(sys.argv[2]))
+    fixed_sleep_phandle = struct.pack(">I", 0x10000)
+    if any(key.endswith("/phandle") and value == fixed_sleep_phandle
+           for key, value in base.items()):
+        raise SystemExit("reserved PCIe sleep phandle collides with base tree")
     changed = {key for key in base.keys() | candidate.keys()
                if base.get(key) != candidate.get(key)}
     if changed != EXPECTED:
@@ -102,14 +106,14 @@ def main() -> None:
     if candidate[f"{PCIE}/pinctrl-names"] != b"default\0sleep\0":
         raise SystemExit("wrong PCIe pinctrl state names")
     sleep_phandle = candidate[f"{PCIE_SLEEP}/phandle"]
-    if len(sleep_phandle) != 4 or candidate[f"{PCIE}/pinctrl-1"] != sleep_phandle:
+    if sleep_phandle != fixed_sleep_phandle or \
+       candidate[f"{PCIE}/pinctrl-1"] != sleep_phandle:
         raise SystemExit("PCIe sleep state phandle mismatch")
     expected_sleep = {
         f"{PCIE_SLEEP_CLKREQ}/pins": b"gpio80\0",
         f"{PCIE_SLEEP_CLKREQ}/function": b"gpio\0",
         f"{PCIE_SLEEP_CLKREQ}/drive-strength": struct.pack(">I", 2),
         f"{PCIE_SLEEP_CLKREQ}/bias-pull-up": b"",
-        "/__symbols__/pcie0_sleep_state": b"/soc@0/pinctrl@f100000/pcie0-sleep-state\0",
     }
     for key, value in expected_sleep.items():
         if candidate[key] != value:

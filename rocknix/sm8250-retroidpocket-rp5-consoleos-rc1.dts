@@ -55,7 +55,9 @@
 };
 
 &tlmm {
-	pcie0_sleep_state: pcie0-sleep-state {
+	pcie0-sleep-state {
+		phandle = <0x10000>;
+
 		clkreq-pins {
 			pins = "gpio80";
 			function = "gpio";
@@ -67,5 +69,5 @@
 
 &pcie0 {
 	pinctrl-names = "default", "sleep";
-	pinctrl-1 = <&pcie0_sleep_state>;
+	pinctrl-1 = <0x10000>;
 };
