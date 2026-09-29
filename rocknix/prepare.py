@@ -159,12 +159,6 @@ def apply_patches(repo, source, fix, profile):
                 "PM8150B Gen4 coulomb-counter patch checksum mismatch")
         extra_patches.append(fg_counter)
     if profile == "consoleos-rc1":
-        gamepad_remove = Path(__file__).resolve().parent / "retroid-gamepad-remove.patch"
-        require(gamepad_remove.is_file(), "Missing Retroid gamepad cleanup patch")
-        require(hashlib.sha256(gamepad_remove.read_bytes()).hexdigest() ==
-                "9201056b19b2bd62b1827e91351bdf4369259b4894aadc609b5a73c832e09919",
-                "Retroid gamepad cleanup patch checksum mismatch")
-        extra_patches.append(gamepad_remove)
         rpmh_suspend = Path(__file__).resolve().parent / "rpmh-regulator-suspend-state.patch"
         regulator_s2idle = Path(__file__).resolve().parent / "regulator-core-s2idle-state-mem.patch"
         rpmh_trace = Path(__file__).resolve().parent / "rpmh-regulator-suspend-trace.patch"
@@ -258,11 +252,13 @@ def apply_patches(repo, source, fix, profile):
         require(all(marker in pcie_source for marker in required_pcie_offline),
                 "Qualcomm PCIe offline pinctrl implementation markers missing")
         gamepad = (source / "drivers/input/joystick/retroid.c").read_text()
-        require("static void gamepad_mcu_uart_remove(struct serdev_device *serdev)" in gamepad and
-                "device_remove_file(&gamepad_dev->platform_dev->dev," in gamepad and
-                "platform_device_unregister(gamepad_dev->platform_dev);" in gamepad and
-                ".remove = gamepad_mcu_uart_remove," in gamepad,
-                "Retroid gamepad unbind cleanup missing")
+        gamepad_remove_markers = (
+            "static void gamepad_mcu_uart_remove(struct serdev_device *serdev)",
+            "platform_device_unregister(gamepad_dev->platform_dev);",
+            ".remove = gamepad_mcu_uart_remove,",
+        )
+        require(not any(marker in gamepad for marker in gamepad_remove_markers),
+                "No-gamepad discriminator unexpectedly contains cleanup patch")
         rpmh_regulator = (source / "drivers/regulator/qcom-rpmh-regulator.c").read_text()
         regulator_core = (source / "drivers/regulator/core.c").read_text()
         required_rpmh = (
@@ -457,8 +453,8 @@ def main():
         ),
         "consoleos_rc1_policy": (
             "Accepted Phase 4AT full stack; shared MCU/RGB/gamepad rail controllable; "
-            "gamepad unbind cleanup; failed/no-effect RPMh, endpoint-off and exact-state "
-            "diagnostics excluded"
+            "RC3 no-gamepad discriminator deliberately excludes the gamepad unbind cleanup; "
+            "failed/no-effect endpoint-off and exact-state diagnostics excluded"
             if profile == "consoleos-rc1" else None
         ),
         "platform_suspend": (

@@ -1,4 +1,4 @@
-name: ConsoleOS RP5 final kernel RC3
+name: ConsoleOS RP5 RC3 no-gamepad discriminator
 on:
   workflow_dispatch:
   push:
@@ -16,7 +16,6 @@ on:
       - 'rocknix/qcom-pcie-drv-offline-suspend.patch'
       - 'rocknix/qcom-pcie-offline-pinctrl.patch'
       - 'rocknix/qcom-fg-gen4-coulomb-counter.patch'
-      - 'rocknix/retroid-gamepad-remove.patch'
       - 'rocknix/rpmh-regulator-suspend-state.patch'
       - 'rocknix/regulator-core-s2idle-state-mem.patch'
       - 'rocknix/rpmh-regulator-suspend-trace.patch'
@@ -60,23 +59,23 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential gcc-14 g++-14 bc bison flex libssl-dev libelf-dev dwarves zstd xz-utils cpio kmod rsync squashfs-tools device-tree-compiler
-      - name: Prepare ConsoleOS RP5 RC3 source
+      - name: Prepare ConsoleOS RP5 RC3 no-gamepad source
         run: |
           set -euo pipefail
-          bash rocknix/build.sh prepare 2>&1 | tee rocknix-consoleos-rc3-prepare.log
-      - name: Build ConsoleOS RP5 RC3 kernel and modules
+          bash rocknix/build.sh prepare 2>&1 | tee rocknix-consoleos-rc3nogp1-prepare.log
+      - name: Build ConsoleOS RP5 RC3 no-gamepad kernel and modules
         run: |
           set -euo pipefail
-          bash rocknix/build.sh compile 2>&1 | tee rocknix-consoleos-rc3-compile.log
+          bash rocknix/build.sh compile 2>&1 | tee rocknix-consoleos-rc3nogp1-compile.log
       - name: Upload build and evidence
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
-          name: rocknix-rp5-consoleos-rc3
+          name: rocknix-rp5-consoleos-rc3nogp1
           retention-days: 14
           compression-level: 0
           if-no-files-found: error
           path: |
             rocknix-out/
-            rocknix-consoleos-rc3-prepare.log
-            rocknix-consoleos-rc3-compile.log
+            rocknix-consoleos-rc3nogp1-prepare.log
+            rocknix-consoleos-rc3nogp1-compile.log

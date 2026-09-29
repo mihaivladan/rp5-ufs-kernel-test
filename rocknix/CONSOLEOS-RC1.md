@@ -1,9 +1,10 @@
-# ConsoleOS RP5 kernel RC3
+# ConsoleOS RP5 kernel RC3 no-gamepad discriminator
 
 This profile consolidates the device-tested native Linux fixes on the ROCKNIX
 20260901 / Linux 7.2 baseline. It deliberately excludes diagnostic changes
 that failed, had no measurable effect, or widened the test matrix.
 
+This build is exact RC3 with only `retroid-gamepad-remove.patch` excluded.
 RC3 is RC2 plus the exact three RPMh regulator suspend patches already used
 by the device-tested `pcieoff1` baseline. They mirror ACTIVE regulator requests
 into the RPMh SLEEP cache, provide SLEEP/WAKE regulator operations, map existing
@@ -28,7 +29,7 @@ Included kernel changes:
   detection;
 - Android-style PCIe0 `default`/`sleep` pinctrl switching for GPIO80;
 - PM8150B Gen4 coulomb-counter diagnostics;
-- Retroid gamepad rumble-device cleanup on serdev unbind/rebind;
+- deliberately no Retroid gamepad rumble-device cleanup on serdev unbind/rebind;
 - RPMh regulator SLEEP/WAKE support and ACTIVE-to-SLEEP cache mirroring;
 - regulator-core application of existing `state_mem` policy during s2idle;
 - the already-tested RPMh suspend-policy diagnostic marker.

@@ -53,7 +53,7 @@ fg-coulomb-counter)
     ;;
 consoleos-rc1)
     config_fragment="${kit}/rocknix/consoleos-rc1.config"
-    expected_release='7.2.0-consoleos-rc3'
+    expected_release='7.2.0-consoleos-rc3nogp1'
     artifact_name="rocknix-${expected_release}.tar.zst"
     dtb_name='sm8250-retroidpocket-rp5-consoleos-rc1'
     ;;
@@ -315,14 +315,13 @@ elif sys.argv[2] in ('adsp-no-auto-ab', 'lpass-devote-fix', 'lpass-pm-clock', 'a
         if not all(marker in pcie for marker in required_pcie_offline):
             raise SystemExit('PCIe offline pinctrl markers missing')
         gamepad = Path('drivers/input/joystick/retroid.c').read_text()
-        required_gamepad = (
+        forbidden_gamepad = (
             'static void gamepad_mcu_uart_remove(struct serdev_device *serdev)',
-            'device_remove_file(&gamepad_dev->platform_dev->dev,',
             'platform_device_unregister(gamepad_dev->platform_dev);',
             '.remove = gamepad_mcu_uart_remove,',
         )
-        if not all(marker in gamepad for marker in required_gamepad):
-            raise SystemExit('Retroid gamepad unbind cleanup markers missing')
+        if any(marker in gamepad for marker in forbidden_gamepad):
+            raise SystemExit('No-gamepad discriminator unexpectedly contains cleanup patch')
 elif sys.argv[2] == 'pcie-drv-handoff':
     required = {
         'CONFIG_PCIE_QCOM=y', 'CONFIG_PCIE_QCOM_DRV=y', 'CONFIG_RPMSG=y',
@@ -545,7 +544,7 @@ elif [[ "${profile}" == consoleos-rc1 ]]; then
     cd "${out}"
     sha256sum "${dtb_name}.dtb" > CONSOLEOS-RC1-DTB-SHA256SUMS
     printf '%s\n' \
-        'ConsoleOS RC3 passed: RC2 plus the exact device-tested RPMh regulator SLEEP/WAKE plumbing, with no new DT rail policy. Not installed or boot-tested.' \
+        'ConsoleOS RC3 no-gamepad discriminator passed: exact RC3 recipe with only retroid-gamepad-remove.patch excluded. Not installed or boot-tested.' \
         > BUILD-SUCCESS.txt
     cd "${source_dir}"
 elif [[ "${profile}" == slpi-integrated ]]; then
