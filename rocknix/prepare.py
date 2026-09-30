@@ -143,7 +143,9 @@ def apply_patches(repo, source, fix, profile):
         offline_fix = Path(__file__).resolve().parent / "qcom-pcie-drv-offline-suspend.patch"
         pinctrl_fix = Path(__file__).resolve().parent / "qcom-pcie-offline-pinctrl.patch"
         d3cold_fix = Path(__file__).resolve().parent / "qcom-pcie-offline-phy-power.patch"
-        require(offline_fix.is_file() and pinctrl_fix.is_file() and d3cold_fix.is_file(),
+        force_d3cold_fix = Path(__file__).resolve().parent / "qcom-pcie-endpoint-absent-force-d3cold.patch"
+        require(offline_fix.is_file() and pinctrl_fix.is_file() and d3cold_fix.is_file() and
+                force_d3cold_fix.is_file(),
                 "Missing Qualcomm PCIe offline lifecycle patches")
         require(hashlib.sha256(offline_fix.read_bytes()).hexdigest() ==
                 "f1ad6e6d519cc775e277c6447bcbecbc7035b6c0228351b12633a83cd0828a89",
@@ -154,7 +156,10 @@ def apply_patches(repo, source, fix, profile):
         require(hashlib.sha256(d3cold_fix.read_bytes()).hexdigest() ==
                 "dc74e2828df69997c4f3ee690ca8785fac2891059dd6f67c2100e703d7beb69e",
                 "Qualcomm PCIe offline D3cold patch checksum mismatch")
-        extra_patches.extend((offline_fix, pinctrl_fix, d3cold_fix))
+        require(hashlib.sha256(force_d3cold_fix.read_bytes()).hexdigest() ==
+                "69c037fa67aae0a115fffb584e6ef1699ddc6adacc2dcf88fba33db819e2f3c8",
+                "Qualcomm PCIe empty-bus D3cold patch checksum mismatch")
+        extra_patches.extend((offline_fix, pinctrl_fix, d3cold_fix, force_d3cold_fix))
     if profile in ("fg-coulomb-counter", "consoleos-rc1"):
         fg_counter = Path(__file__).resolve().parent / "qcom-fg-gen4-coulomb-counter.patch"
         require(fg_counter.is_file(), "Missing PM8150B Gen4 coulomb-counter patch")
@@ -260,12 +265,18 @@ def apply_patches(repo, source, fix, profile):
             "PCIe RC%u offline default pins restored before QCA power-on",
             "PCIe RC%u endpoint absent with link %s; skipping ADSP handoff",
             "PCIe RC%u offline using D3cold host teardown",
+            "PCIe RC%u offline forcing D3cold for empty bus",
             "PCIe RC%u offline D3cold host teardown completed",
             "PCIe RC%u offline D3cold host restored",
             "PCIe RC%u offline suspend completed",
         )
         require(all(marker in pcie_source for marker in required_pcie_offline),
                 "Qualcomm PCIe offline pinctrl implementation markers missing")
+        dw_host = (source / "drivers/pci/controller/dwc/pcie-designware-host.c").read_text()
+        dw_header = (source / "drivers/pci/controller/dwc/pcie-designware.h").read_text()
+        require("bool\t\t\tforce_d3cold;" in dw_header and
+                "if (!pci->force_d3cold &&" in dw_host,
+                "DesignWare empty-bus D3cold override missing")
         gamepad = (source / "drivers/input/joystick/retroid.c").read_text()
         require("static void gamepad_mcu_uart_remove(struct serdev_device *serdev)" in gamepad and
                 "device_remove_file(&gamepad_dev->platform_dev->dev," in gamepad and

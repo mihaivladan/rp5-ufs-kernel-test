@@ -1,0 +1,37 @@
+--- a/drivers/pci/controller/dwc/pcie-designware-host.c
++++ b/drivers/pci/controller/dwc/pcie-designware-host.c
+@@ -1229,7 +1229,8 @@
+ 	if (!dw_pcie_link_up(pci))
+ 		goto stop_link;
+ 
+-	if (!pci_host_common_d3cold_possible(pci->pp.bridge, &pme_capable))
++	if (!pci->force_d3cold &&
++	    !pci_host_common_d3cold_possible(pci->pp.bridge, &pme_capable))
+ 		return 0;
+ 
+ 	if (pci->pp.ops->pme_turn_off) {
+--- a/drivers/pci/controller/dwc/pcie-designware.h
++++ b/drivers/pci/controller/dwc/pcie-designware.h
+@@ -574,6 +574,7 @@
+ 	struct reset_control_bulk_data	core_rsts[DW_PCIE_NUM_CORE_RSTS];
+ 	struct gpio_desc		*pe_rst;
+ 	bool			suspended;
++	bool			force_d3cold;
+ 	struct debugfs_info	*debugfs;
+ 	enum			dw_pcie_device_mode mode;
+ 	u16			ptm_vsec_offset;
+--- a/drivers/pci/controller/dwc/pcie-qcom.c
++++ b/drivers/pci/controller/dwc/pcie-qcom.c
+@@ -2439,7 +2439,12 @@
+ 		/* Endpoint absent: use the existing DesignWare/Qualcomm teardown. */
+ 	}
+ 
++	if (pcie->drv_offline)
++		dev_info(dev, "PCIe RC%u offline forcing D3cold for empty bus\n",
++			 pcie->drv_dev_id);
++	pcie->pci->force_d3cold = pcie->drv_offline;
+ 	ret = dw_pcie_suspend_noirq(pcie->pci);
++	pcie->pci->force_d3cold = false;
+ 	if (ret)
+ 		return ret;
+ 

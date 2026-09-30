@@ -53,7 +53,7 @@ fg-coulomb-counter)
     ;;
 consoleos-rc1)
     config_fragment="${kit}/rocknix/consoleos-rc1.config"
-    expected_release='7.2.0-consoleos-pcied3c3'
+    expected_release='7.2.0-consoleos-pcied3c4'
     artifact_name="rocknix-${expected_release}.tar.zst"
     dtb_name='sm8250-retroidpocket-rp5-consoleos-rc1'
     ;;
@@ -313,12 +313,17 @@ elif sys.argv[2] in ('adsp-no-auto-ab', 'lpass-devote-fix', 'lpass-pm-clock', 'a
             'PCIe RC%u offline default pins restored before QCA power-on',
             'PCIe RC%u endpoint absent with link %s; skipping ADSP handoff',
             'PCIe RC%u offline using D3cold host teardown',
+            'PCIe RC%u offline forcing D3cold for empty bus',
             'PCIe RC%u offline D3cold host teardown completed',
             'PCIe RC%u offline D3cold host restored',
             'PCIe RC%u offline suspend completed',
         )
         if not all(marker in pcie for marker in required_pcie_offline):
             raise SystemExit('PCIe offline pinctrl markers missing')
+        dw_host = Path('drivers/pci/controller/dwc/pcie-designware-host.c').read_text()
+        dw_header = Path('drivers/pci/controller/dwc/pcie-designware.h').read_text()
+        if 'bool\t\t\tforce_d3cold;' not in dw_header or 'if (!pci->force_d3cold &&' not in dw_host:
+            raise SystemExit('DesignWare empty-bus D3cold override missing')
         gamepad = Path('drivers/input/joystick/retroid.c').read_text()
         required_gamepad = (
             'static void gamepad_mcu_uart_remove(struct serdev_device *serdev)',
@@ -550,7 +555,7 @@ elif [[ "${profile}" == consoleos-rc1 ]]; then
     cd "${out}"
     sha256sum "${dtb_name}.dtb" > CONSOLEOS-RC1-DTB-SHA256SUMS
     printf '%s\n' \
-        'ConsoleOS downstream-order PCIe D3cold candidate passed: endpoint absence selects full host teardown; after L23, sleep pins and controller/PHY shutdown precede QCA power-off, and default pins return before QCA power-on. No L1SS or PARF override. Not installed or boot-tested.' \
+        'ConsoleOS downstream-order PCIe D3cold candidate passed: endpoint absence forces the empty-bus host teardown; after L23, sleep pins and controller/PHY shutdown precede QCA power-off, and default pins return before QCA power-on. No L1SS or PARF override. Not installed or boot-tested.' \
         > BUILD-SUCCESS.txt
     cd "${source_dir}"
 elif [[ "${profile}" == slpi-integrated ]]; then

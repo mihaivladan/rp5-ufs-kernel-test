@@ -1,4 +1,4 @@
-# ConsoleOS RP5 downstream-order PCIe D3cold candidate
+# ConsoleOS RP5 downstream-order PCIe empty-bus D3cold candidate
 
 This branch keeps the exact RC3 kernel baseline and adds one bounded diagnostic
 delta: when the RC0 endpoint is already absent, select the validated offline
