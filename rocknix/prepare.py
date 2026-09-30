@@ -146,10 +146,10 @@ def apply_patches(repo, source, fix, profile):
         require(offline_fix.is_file() and pinctrl_fix.is_file() and d3cold_fix.is_file(),
                 "Missing Qualcomm PCIe offline lifecycle patches")
         require(hashlib.sha256(offline_fix.read_bytes()).hexdigest() ==
-                "f353f171ca02c5206e6e2db39c38709ea3bf0a342bfc902c08b3f0e0fd93607a",
+                "f1ad6e6d519cc775e277c6447bcbecbc7035b6c0228351b12633a83cd0828a89",
                 "Qualcomm PCIe offline-suspend patch checksum mismatch")
         require(hashlib.sha256(pinctrl_fix.read_bytes()).hexdigest() ==
-                "2c57942a2912ac64460386283b926f5cd7a245770b14f4c073b2d7a178bdce2f",
+                "0c8d628fa3715fe67d3a7f493e73c15097081d938aef6f579e2e3a58452afd03",
                 "Qualcomm PCIe offline pinctrl patch checksum mismatch")
         require(hashlib.sha256(d3cold_fix.read_bytes()).hexdigest() ==
                 "dc74e2828df69997c4f3ee690ca8785fac2891059dd6f67c2100e703d7beb69e",
@@ -256,7 +256,7 @@ def apply_patches(repo, source, fix, profile):
             "pinctrl_pm_select_default_state(dev);",
             "PCIe RC%u offline sleep pins selected",
             "PCIe RC%u offline default pins restored",
-            "PCIe RC%u endpoint absent; skipping ADSP handoff",
+            "PCIe RC%u endpoint absent with link %s; skipping ADSP handoff",
             "PCIe RC%u offline using D3cold host teardown",
             "PCIe RC%u offline D3cold host teardown completed",
             "PCIe RC%u offline D3cold host restored",

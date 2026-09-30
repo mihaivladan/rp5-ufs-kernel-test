@@ -1,4 +1,4 @@
-name: ConsoleOS RP5 PCIe offline D3cold candidate
+name: ConsoleOS RP5 endpoint-absent PCIe D3cold candidate
 on:
   workflow_dispatch:
   push:
@@ -61,23 +61,23 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential gcc-14 g++-14 bc bison flex libssl-dev libelf-dev dwarves zstd xz-utils cpio kmod rsync squashfs-tools device-tree-compiler
-      - name: Prepare ConsoleOS RP5 PCIe offline D3cold source
+      - name: Prepare ConsoleOS RP5 endpoint-absent PCIe D3cold source
         run: |
           set -euo pipefail
-          bash rocknix/build.sh prepare 2>&1 | tee rocknix-consoleos-pcied3c1-prepare.log
-      - name: Build ConsoleOS RP5 PCIe offline D3cold kernel and modules
+          bash rocknix/build.sh prepare 2>&1 | tee rocknix-consoleos-pcied3c2-prepare.log
+      - name: Build ConsoleOS RP5 endpoint-absent PCIe D3cold kernel and modules
         run: |
           set -euo pipefail
-          bash rocknix/build.sh compile 2>&1 | tee rocknix-consoleos-pcied3c1-compile.log
+          bash rocknix/build.sh compile 2>&1 | tee rocknix-consoleos-pcied3c2-compile.log
       - name: Upload build and evidence
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
-          name: rocknix-rp5-consoleos-pcied3c1
+          name: rocknix-rp5-consoleos-pcied3c2
           retention-days: 14
           compression-level: 0
           if-no-files-found: error
           path: |
             rocknix-out/
-            rocknix-consoleos-pcied3c1-prepare.log
-            rocknix-consoleos-pcied3c1-compile.log
+            rocknix-consoleos-pcied3c2-prepare.log
+            rocknix-consoleos-pcied3c2-compile.log

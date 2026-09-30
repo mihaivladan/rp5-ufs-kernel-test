@@ -8,10 +8,8 @@
  #include <linux/pm_runtime.h>
  #include <linux/platform_device.h>
  #include <linux/phy/pcie.h>
-@@ -2265,6 +2266,15 @@ static int qcom_pcie_suspend_late(struct device *dev)
- 			return -ENOLINK;
- 		}
- 
+@@ -2258,4 +2259,13 @@ static int qcom_pcie_suspend_late(struct device *dev)
+ 	if (!qcom_pcie_has_downstream_device(pcie)) {
 +		ret = pinctrl_pm_select_sleep_state(dev);
 +		if (ret) {
 +			dev_err(dev, "failed to select PCIe offline sleep pins: %d\n",
@@ -23,8 +21,8 @@
 +
  		pcie->drv_offline = true;
  		dev_info(dev,
- 			 "PCIe RC%u endpoint absent; skipping ADSP handoff\n",
-@@ -2540,6 +2550,15 @@ static int qcom_pcie_resume_early(struct device *dev)
+ 			 "PCIe RC%u endpoint absent with link %s; skipping ADSP handoff\n",
+@@ -2538,6 +2548,15 @@ static int qcom_pcie_resume_early(struct device *dev)
  			return -EIO;
  		}
  

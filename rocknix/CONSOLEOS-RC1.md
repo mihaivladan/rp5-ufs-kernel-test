@@ -1,11 +1,13 @@
-# ConsoleOS RP5 PCIe offline D3cold candidate
+# ConsoleOS RP5 endpoint-absent PCIe D3cold candidate
 
 This branch keeps the exact RC3 kernel baseline and adds one bounded diagnostic
-delta: when the RC0 endpoint is already absent and the validated offline path
-is selected, let the driver use Linux 7.2's existing DesignWare D3cold host
-teardown and Qualcomm host deinit instead of returning through the partial
-`pcie_drv` resource path. Resume uses the matching existing host restore. The
-ordinary live-endpoint/ADSP handoff path is unchanged.
+delta: when the RC0 endpoint is already absent, select the validated offline
+path even if the electrical link still reports up, then use Linux 7.2's
+existing DesignWare D3cold host teardown and Qualcomm host deinit instead of
+returning through the partial `pcie_drv` resource path. Resume uses the
+matching existing host restore. The ordinary live-endpoint/ADSP handoff path is
+unchanged, and the retained pwrctrl owner remains available to power QCA back
+on before link training.
 
 The candidate does not add a PARF CLKREQ override, change GPIO80, alter L1SS,
 or add any new device-tree power policy. The reused host deinit asserts PERST,

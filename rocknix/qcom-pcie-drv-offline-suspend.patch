@@ -49,20 +49,18 @@
 +	if (pcie->drv_armed || pcie->drv_offline)
  		return -EBUSY;
  
- 	if (!dw_pcie_link_up(pcie->pci)) {
--		dev_err(dev, "refusing pcie_drv handoff while link is down\n");
--		return -ENOLINK;
-+		if (qcom_pcie_has_downstream_device(pcie)) {
-+			dev_err(dev,
-+				"refusing pcie_drv offline suspend with a downstream device\n");
-+			return -ENOLINK;
-+		}
-+
++	if (!qcom_pcie_has_downstream_device(pcie)) {
 +		pcie->drv_offline = true;
 +		dev_info(dev,
-+			 "PCIe RC%u endpoint absent; skipping ADSP handoff\n",
-+			 pcie->drv_dev_id);
++			 "PCIe RC%u endpoint absent with link %s; skipping ADSP handoff\n",
++			 pcie->drv_dev_id,
++			 dw_pcie_link_up(pcie->pci) ? "up" : "down");
 +		return 0;
++	}
++
+ 	if (!dw_pcie_link_up(pcie->pci)) {
+ 		dev_err(dev, "refusing pcie_drv handoff while link is down\n");
+ 		return -ENOLINK;
  	}
  
  	ret = qcom_pcie_drv_handoff(pcie->drv_dev_id,
