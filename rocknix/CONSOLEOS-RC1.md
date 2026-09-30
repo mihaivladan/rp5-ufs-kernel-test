@@ -1,4 +1,14 @@
-# ConsoleOS RP5 kernel RC3
+# ConsoleOS RP5 PCIe offline PHY candidate
+
+This branch keeps the exact RC3 kernel baseline and adds one bounded diagnostic
+delta: when the RC0 endpoint is already absent and the validated offline path
+is selected, power off the QMP PCIe PHY before the existing controller-resource
+shutdown. Resume restores the existing resources first and then powers the PHY
+back on. The ordinary live-endpoint/ADSP handoff path is unchanged.
+
+The candidate does not add a PARF CLKREQ override, change GPIO80, alter L1SS,
+or add any new device-tree power policy. It emits explicit offline PHY off/on
+markers and fails closed if the PHY is not restored before offline completion.
 
 This profile consolidates the device-tested native Linux fixes on the ROCKNIX
 20260901 / Linux 7.2 baseline. It deliberately excludes diagnostic changes
@@ -38,7 +48,7 @@ exactly the accepted Phase 4AT product stack, and removes only
 `regulator-always-on` from the shared MCU/RGB/gamepad rail. It also adds only
 the PCIe0 sleep pinctrl state proven by Phase 4BL. It does not enable
 QCE, Venus, CDSP, or SLPI. It does not include speculative RPMh rail policies,
-PCIe PHY power-off, or the failed exact-PSCI-state platform driver.
+a raw PARF override, or the failed exact-PSCI-state platform driver.
 
 RC3 retains BTF, ftrace, kprobes, PM diagnostics, and the fuel-gauge interface
 so the one-shot qualification boot can prove residency and recovery. These can

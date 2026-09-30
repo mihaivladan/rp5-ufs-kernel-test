@@ -1,0 +1,100 @@
+--- a/drivers/pci/controller/dwc/pcie-qcom.c
++++ b/drivers/pci/controller/dwc/pcie-qcom.c
+@@ -297,6 +297,7 @@
+ 	bool drv_supported;
+ 	bool drv_armed;
+ 	bool drv_offline;
++	bool drv_phy_powered_off;
+ 	bool drv_resources_suspended;
+ 	bool drv_clocks_disabled;
+ 	bool drv_supplies_disabled;
+@@ -2391,6 +2392,7 @@
+ static int qcom_pcie_suspend_noirq(struct device *dev)
+ {
+ 	struct qcom_pcie *pcie;
++	int phy_ret;
+ 	int ret = 0;
+ 
+ 	pcie = dev_get_drvdata(dev);
+@@ -2404,7 +2406,35 @@
+ 			return -EIO;
+ 		}
+ 
+-		return qcom_pcie_drv_suspend_resources(pcie);
++		if (pcie->drv_offline) {
++			if (pcie->drv_phy_powered_off) {
++				dev_err(dev, "PCIe RC%u offline PHY is already powered off\n",
++					pcie->drv_dev_id);
++				return -EBUSY;
++			}
++
++			qcom_pcie_phy_power_off(pcie);
++			pcie->drv_phy_powered_off = true;
++			dev_info(dev, "PCIe RC%u offline PHY powered off\n",
++				 pcie->drv_dev_id);
++		}
++
++		ret = qcom_pcie_drv_suspend_resources(pcie);
++		if (ret && pcie->drv_phy_powered_off) {
++			phy_ret = qcom_pcie_phy_power_on(pcie);
++			if (phy_ret) {
++				dev_err(dev,
++					"failed to restore PCIe RC%u offline PHY after suspend error: %d\n",
++					pcie->drv_dev_id, phy_ret);
++			} else {
++				pcie->drv_phy_powered_off = false;
++				dev_info(dev,
++					 "PCIe RC%u offline PHY restored after suspend error\n",
++					 pcie->drv_dev_id);
++			}
++		}
++
++		return ret;
+ 	}
+ 
+ 	ret = dw_pcie_suspend_noirq(pcie->pci);
+@@ -2465,13 +2495,28 @@
+ 	if (!pcie)
+ 		return 0;
+ 	if (pcie->drv_armed || pcie->drv_offline) {
+-		if (!pcie->drv_resources_suspended &&
+-		    !pcie->drv_clocks_disabled && !pcie->drv_supplies_disabled &&
+-		    !pcie->drv_icc_mem_disabled && !pcie->drv_icc_cpu_disabled &&
+-		    !pcie->drv_opp_disabled)
+-			return 0;
++		if (pcie->drv_resources_suspended || pcie->drv_clocks_disabled ||
++		    pcie->drv_supplies_disabled || pcie->drv_icc_mem_disabled ||
++		    pcie->drv_icc_cpu_disabled || pcie->drv_opp_disabled) {
++			ret = qcom_pcie_drv_restore_resources(pcie);
++			if (ret)
++				return ret;
++		}
+ 
+-		return qcom_pcie_drv_restore_resources(pcie);
++		if (pcie->drv_offline && pcie->drv_phy_powered_off) {
++			ret = qcom_pcie_phy_power_on(pcie);
++			if (ret) {
++				dev_err(dev, "failed to power on PCIe RC%u offline PHY: %d\n",
++					pcie->drv_dev_id, ret);
++				return ret;
++			}
++
++			pcie->drv_phy_powered_off = false;
++			dev_info(dev, "PCIe RC%u offline PHY powered on\n",
++				 pcie->drv_dev_id);
++		}
++
++		return 0;
+ 	}
+ 
+ 	if (pcie->pci->suspended) {
+@@ -2543,7 +2588,8 @@
+ 	if (pcie->drv_offline) {
+ 		if (pcie->drv_resources_suspended || pcie->drv_clocks_disabled ||
+ 		    pcie->drv_supplies_disabled || pcie->drv_icc_mem_disabled ||
+-		    pcie->drv_icc_cpu_disabled || pcie->drv_opp_disabled) {
++		    pcie->drv_icc_cpu_disabled || pcie->drv_opp_disabled ||
++		    pcie->drv_phy_powered_off) {
+ 			dev_err(dev, "refusing offline completion before resources are restored\n");
+ 			return -EIO;
+ 		}
