@@ -1,20 +1,21 @@
-# ConsoleOS RP5 endpoint-absent PCIe D3cold candidate
+# ConsoleOS RP5 downstream-order PCIe D3cold candidate
 
 This branch keeps the exact RC3 kernel baseline and adds one bounded diagnostic
 delta: when the RC0 endpoint is already absent, select the validated offline
 path even if the electrical link still reports up, then use Linux 7.2's
 existing DesignWare D3cold host teardown and Qualcomm host deinit instead of
-returning through the partial `pcie_drv` resource path. Resume uses the
-matching existing host restore. The ordinary live-endpoint/ADSP handoff path is
-unchanged, and the retained pwrctrl owner remains available to power QCA back
-on before link training.
+returning through the partial `pcie_drv` resource path. The endpoint remains
+powered through PME/L23. Only then does the offline path select the sleep pins,
+assert PERST, stop the PHY and controller clocks/supplies, and power QCA off
+last. Resume restores the default pins and controller before powering QCA on.
+The ordinary live-endpoint/ADSP handoff path is unchanged.
 
-The candidate does not add a PARF CLKREQ override, change GPIO80, alter L1SS,
-or add any new device-tree power policy. The reused host deinit asserts PERST,
-asks pwrctrl to power the endpoint down, powers off the QMP PHY, applies
+The candidate does not add a PARF CLKREQ override or alter L1SS. GPIO80 uses
+the existing DT sleep state only after L23 and returns to `pci_e0` before QCA
+power-on. The reused host deinit asserts PERST, powers off the QMP PHY, applies
 `qcom_pcie_deinit_2_7_0()` (including `PHY_TEST_PWR_DOWN`, controller clocks and
-supplies), and sets the DesignWare suspended state. Explicit markers and state
-checks prove that the matching restore completed before offline completion.
+supplies), then releases the retained QCA pwrctrl target. Explicit markers and
+state checks prove the order and matching restore before offline completion.
 
 This profile consolidates the device-tested native Linux fixes on the ROCKNIX
 20260901 / Linux 7.2 baseline. It deliberately excludes diagnostic changes

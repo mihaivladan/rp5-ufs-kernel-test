@@ -53,7 +53,7 @@ fg-coulomb-counter)
     ;;
 consoleos-rc1)
     config_fragment="${kit}/rocknix/consoleos-rc1.config"
-    expected_release='7.2.0-consoleos-pcied3c2'
+    expected_release='7.2.0-consoleos-pcied3c3'
     artifact_name="rocknix-${expected_release}.tar.zst"
     dtb_name='sm8250-retroidpocket-rp5-consoleos-rc1'
     ;;
@@ -307,8 +307,10 @@ elif sys.argv[2] in ('adsp-no-auto-ab', 'lpass-devote-fix', 'lpass-pm-clock', 'a
             'static bool qcom_pcie_has_downstream_device(',
             'pinctrl_pm_select_sleep_state(dev);',
             'pinctrl_pm_select_default_state(dev);',
-            'PCIe RC%u offline sleep pins selected',
-            'PCIe RC%u offline default pins restored',
+            'PCIe RC%u offline sleep pins selected after L23',
+            'PCIe RC%u offline PHY/clocks down before QCA power-off',
+            'PCIe RC%u offline QCA powered off last',
+            'PCIe RC%u offline default pins restored before QCA power-on',
             'PCIe RC%u endpoint absent with link %s; skipping ADSP handoff',
             'PCIe RC%u offline using D3cold host teardown',
             'PCIe RC%u offline D3cold host teardown completed',
@@ -548,7 +550,7 @@ elif [[ "${profile}" == consoleos-rc1 ]]; then
     cd "${out}"
     sha256sum "${dtb_name}.dtb" > CONSOLEOS-RC1-DTB-SHA256SUMS
     printf '%s\n' \
-        'ConsoleOS endpoint-absent PCIe D3cold candidate passed: exact RC3 plus endpoint-presence selection of the existing DesignWare/Qualcomm host teardown and restore, with retained pwrctrl and no GPIO, L1SS, PARF or DT policy change. Not installed or boot-tested.' \
+        'ConsoleOS downstream-order PCIe D3cold candidate passed: endpoint absence selects full host teardown; after L23, sleep pins and controller/PHY shutdown precede QCA power-off, and default pins return before QCA power-on. No L1SS or PARF override. Not installed or boot-tested.' \
         > BUILD-SUCCESS.txt
     cd "${source_dir}"
 elif [[ "${profile}" == slpi-integrated ]]; then

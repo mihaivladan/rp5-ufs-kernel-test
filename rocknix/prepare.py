@@ -149,7 +149,7 @@ def apply_patches(repo, source, fix, profile):
                 "f1ad6e6d519cc775e277c6447bcbecbc7035b6c0228351b12633a83cd0828a89",
                 "Qualcomm PCIe offline-suspend patch checksum mismatch")
         require(hashlib.sha256(pinctrl_fix.read_bytes()).hexdigest() ==
-                "0c8d628fa3715fe67d3a7f493e73c15097081d938aef6f579e2e3a58452afd03",
+                "e71fc4c18c594640de507e8eb80cf853ae75f700731e2b9916610c93e048f349",
                 "Qualcomm PCIe offline pinctrl patch checksum mismatch")
         require(hashlib.sha256(d3cold_fix.read_bytes()).hexdigest() ==
                 "dc74e2828df69997c4f3ee690ca8785fac2891059dd6f67c2100e703d7beb69e",
@@ -254,8 +254,10 @@ def apply_patches(repo, source, fix, profile):
             "static bool qcom_pcie_has_downstream_device(",
             "pinctrl_pm_select_sleep_state(dev);",
             "pinctrl_pm_select_default_state(dev);",
-            "PCIe RC%u offline sleep pins selected",
-            "PCIe RC%u offline default pins restored",
+            "PCIe RC%u offline sleep pins selected after L23",
+            "PCIe RC%u offline PHY/clocks down before QCA power-off",
+            "PCIe RC%u offline QCA powered off last",
+            "PCIe RC%u offline default pins restored before QCA power-on",
             "PCIe RC%u endpoint absent with link %s; skipping ADSP handoff",
             "PCIe RC%u offline using D3cold host teardown",
             "PCIe RC%u offline D3cold host teardown completed",

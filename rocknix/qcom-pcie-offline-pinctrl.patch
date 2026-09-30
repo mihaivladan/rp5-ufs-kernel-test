@@ -1,6 +1,6 @@
 --- a/drivers/pci/controller/dwc/pcie-qcom.c
 +++ b/drivers/pci/controller/dwc/pcie-qcom.c
-@@ -24,6 +24,7 @@
+@@ -26,6 +26,7 @@
  #include <linux/pci-ecam.h>
  #include <linux/pci-pwrctrl.h>
  #include <linux/pm_opp.h>
@@ -8,33 +8,65 @@
  #include <linux/pm_runtime.h>
  #include <linux/platform_device.h>
  #include <linux/phy/pcie.h>
-@@ -2258,4 +2259,13 @@ static int qcom_pcie_suspend_late(struct device *dev)
- 	if (!qcom_pcie_has_downstream_device(pcie)) {
-+		ret = pinctrl_pm_select_sleep_state(dev);
-+		if (ret) {
-+			dev_err(dev, "failed to select PCIe offline sleep pins: %d\n",
-+				ret);
-+			return ret;
-+		}
-+		dev_info(dev, "PCIe RC%u offline sleep pins selected\n",
-+			 pcie->drv_dev_id);
-+
- 		pcie->drv_offline = true;
- 		dev_info(dev,
- 			 "PCIe RC%u endpoint absent with link %s; skipping ADSP handoff\n",
-@@ -2538,6 +2548,15 @@ static int qcom_pcie_resume_early(struct device *dev)
- 			return -EIO;
- 		}
+@@ -1382,6 +1383,18 @@
+ 	int ret;
  
-+		ret = pinctrl_pm_select_default_state(dev);
+ 	qcom_pcie_perst_assert(pcie);
++	if (pcie->drv_offline) {
++		ret = pinctrl_pm_select_default_state(pci->dev);
 +		if (ret) {
-+			dev_err(dev, "failed to restore PCIe offline default pins: %d\n",
++			dev_err(pci->dev,
++				"failed to restore PCIe offline default pins before QCA power-on: %d\n",
 +				ret);
 +			return ret;
 +		}
-+		dev_info(dev, "PCIe RC%u offline default pins restored\n",
++		dev_info(pci->dev,
++			 "PCIe RC%u offline default pins restored before QCA power-on\n",
 +			 pcie->drv_dev_id);
++	}
+ 
+ 	ret = pcie->cfg->ops->init(pcie);
+ 	if (ret)
+@@ -1445,10 +1458,24 @@
+ {
+ 	struct dw_pcie *pci = to_dw_pcie_from_pp(pp);
+ 	struct qcom_pcie *pcie = to_qcom_pcie(pci);
++	int ret;
+ 
+ 	qcom_pcie_perst_assert(pcie);
+ 
+-	if (!pci->pp.skip_pwrctrl_off) {
++	if (pcie->drv_offline) {
++		ret = pinctrl_pm_select_sleep_state(pci->dev);
++		if (ret) {
++			dev_err(pci->dev,
++				"failed to select PCIe offline sleep pins after L23: %d\n",
++				ret);
++		} else {
++			dev_info(pci->dev,
++				 "PCIe RC%u offline sleep pins selected after L23\n",
++				 pcie->drv_dev_id);
++		}
++	}
 +
- 		pcie->drv_offline = false;
- 		qcom_pcie_icc_opp_update(pcie);
- 		dev_info(dev, "PCIe RC%u offline suspend completed\n",
++	if (!pci->pp.skip_pwrctrl_off && !pcie->drv_offline) {
+ 		/*
+ 		 * No need to destroy pwrctrl devices as this function only
+ 		 * gets called during system suspend as of now.
+@@ -1458,6 +1485,16 @@
+ 
+ 	qcom_pcie_phy_power_off(pcie);
+ 	pcie->cfg->ops->deinit(pcie);
++
++	if (!pci->pp.skip_pwrctrl_off && pcie->drv_offline) {
++		dev_info(pci->dev,
++			 "PCIe RC%u offline PHY/clocks down before QCA power-off\n",
++			 pcie->drv_dev_id);
++		pci_pwrctrl_power_off_devices(pci->dev);
++		dev_info(pci->dev,
++			 "PCIe RC%u offline QCA powered off last\n",
++			 pcie->drv_dev_id);
++	}
+ }
+ 
+ static void qcom_pcie_host_post_init(struct dw_pcie_rp *pp)
