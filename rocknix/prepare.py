@@ -252,8 +252,8 @@ def apply_patches(repo, source, fix, profile):
         required_pcie_offline = (
             "bool drv_offline;",
             "static bool qcom_pcie_has_downstream_device(",
-            "pinctrl_pm_select_sleep_state(dev);",
-            "pinctrl_pm_select_default_state(dev);",
+            "pinctrl_pm_select_sleep_state(pci->dev);",
+            "pinctrl_pm_select_default_state(pci->dev);",
             "PCIe RC%u offline sleep pins selected after L23",
             "PCIe RC%u offline PHY/clocks down before QCA power-off",
             "PCIe RC%u offline QCA powered off last",
