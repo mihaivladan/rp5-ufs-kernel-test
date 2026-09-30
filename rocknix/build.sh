@@ -270,7 +270,7 @@ elif sys.argv[2] in ('adsp-no-auto-ab', 'lpass-devote-fix', 'lpass-pm-clock', 'a
         transport = Path('drivers/pci/controller/dwc/pcie-qcom-drv.c').read_text()
         required_pcie = (
             'static int qcom_pcie_suspend_late(struct device *dev)',
-            'return qcom_pcie_drv_suspend_resources(pcie);',
+            'qcom_pcie_drv_suspend_resources(pcie);',
             'static int qcom_pcie_resume_early(struct device *dev)',
             'ret = qcom_pcie_drv_reclaim(pcie->drv_dev_id);',
             '\t.suspend_late = qcom_pcie_suspend_late,',
@@ -344,7 +344,7 @@ elif sys.argv[2] == 'pcie-drv-handoff':
     transport = Path('drivers/pci/controller/dwc/pcie-qcom-drv.c').read_text()
     required_pcie = (
         'static int qcom_pcie_suspend_late(struct device *dev)',
-        'return qcom_pcie_drv_suspend_resources(pcie);',
+        'qcom_pcie_drv_suspend_resources(pcie);',
         'static int qcom_pcie_resume_early(struct device *dev)',
         'ret = qcom_pcie_drv_reclaim(pcie->drv_dev_id);',
         '\t.suspend_late = qcom_pcie_suspend_late,',
