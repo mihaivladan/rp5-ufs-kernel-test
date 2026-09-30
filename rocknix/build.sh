@@ -111,7 +111,10 @@ reenable-matrix)
 esac
 : "${dtb_name:=sm8250-retroidpocket-rp5}"
 export ARCH=arm64
-make_args=(ARCH=arm64 CC=gcc-14 HOSTCC=gcc-14 HOSTCXX=g++-14)
+kernel_cc="${KERNEL_CC:-gcc-14}"
+host_cc="${HOST_CC:-gcc-14}"
+host_cxx="${HOST_CXX:-g++-14}"
+make_args=(ARCH=arm64 "CC=${kernel_cc}" "HOSTCC=${host_cc}" "HOSTCXX=${host_cxx}")
 export KBUILD_BUILD_USER=consoleos KBUILD_BUILD_HOST=github-arm
 export KBUILD_BUILD_TIMESTAMP='2026-09-01 00:00:00 UTC'
 export LOCALVERSION=
