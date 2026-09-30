@@ -1,14 +1,18 @@
-# ConsoleOS RP5 PCIe offline PHY candidate
+# ConsoleOS RP5 PCIe offline D3cold candidate
 
 This branch keeps the exact RC3 kernel baseline and adds one bounded diagnostic
 delta: when the RC0 endpoint is already absent and the validated offline path
-is selected, power off the QMP PCIe PHY before the existing controller-resource
-shutdown. Resume restores the existing resources first and then powers the PHY
-back on. The ordinary live-endpoint/ADSP handoff path is unchanged.
+is selected, let the driver use Linux 7.2's existing DesignWare D3cold host
+teardown and Qualcomm host deinit instead of returning through the partial
+`pcie_drv` resource path. Resume uses the matching existing host restore. The
+ordinary live-endpoint/ADSP handoff path is unchanged.
 
 The candidate does not add a PARF CLKREQ override, change GPIO80, alter L1SS,
-or add any new device-tree power policy. It emits explicit offline PHY off/on
-markers and fails closed if the PHY is not restored before offline completion.
+or add any new device-tree power policy. The reused host deinit asserts PERST,
+asks pwrctrl to power the endpoint down, powers off the QMP PHY, applies
+`qcom_pcie_deinit_2_7_0()` (including `PHY_TEST_PWR_DOWN`, controller clocks and
+supplies), and sets the DesignWare suspended state. Explicit markers and state
+checks prove that the matching restore completed before offline completion.
 
 This profile consolidates the device-tested native Linux fixes on the ROCKNIX
 20260901 / Linux 7.2 baseline. It deliberately excludes diagnostic changes
