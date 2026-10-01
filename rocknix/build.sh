@@ -53,7 +53,7 @@ fg-coulomb-counter)
     ;;
 consoleos-rc1)
     config_fragment="${kit}/rocknix/consoleos-rc1.config"
-    expected_release='7.2.0-consoleos-rc6'
+    expected_release='7.2.0-consoleos-rc7-rsccdiag'
     artifact_name="rocknix-${expected_release}.tar.zst"
     dtb_name='sm8250-retroidpocket-rp5-consoleos-rc1'
     ;;
@@ -663,6 +663,9 @@ if [[ "${profile}" == consoleos-rc1 ]]; then
         > "${out}/qcom-pmic-typec-pdphy-disassembly.txt"
     objdump -drS drivers/usb/typec/tcpm/qcom/qcom_pmic_typec_port.o \
         > "${out}/qcom-pmic-typec-port-disassembly.txt"
+    cp drivers/gpu/drm/msm/msm_mdss.c drivers/gpu/drm/msm/msm_mdss.o "${out}/"
+    objdump -drS drivers/gpu/drm/msm/msm_mdss.o \
+        > "${out}/msm-mdss-disassembly.txt"
 fi
 if [[ "${profile}" == diagnostic || "${profile}" == gpu-rpmh-fix || "${profile}" == sleepstate-handshake || "${profile}" == adsp-no-auto-ab || "${profile}" == lpass-devote-fix || "${profile}" == lpass-pm-clock || "${profile}" == audio-pcie-integration || "${profile}" == fg-coulomb-counter || "${profile}" == consoleos-rc1 || "${profile}" == pcie-drv-handoff || "${profile}" == slpi-integrated || "${profile}" == lpm-platform ]]; then
     objcopy --dump-section .BTF="${out}/vmlinux.btf" vmlinux

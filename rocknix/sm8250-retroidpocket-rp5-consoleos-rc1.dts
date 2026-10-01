@@ -50,6 +50,11 @@
 &{/soc@0/usb@a6f8800} { status = "okay"; };
 &{/soc@0/usb@a6f8800/usb@a600000} { status = "okay"; };
 
+/* Read-only RC7 diagnostic: acquire this clock only around the pinned RSCC reads. */
+&mdss {
+	consoleos,display-rscc-ahb-clock = <&dispcc DISP_CC_MDSS_RSCC_AHB_CLK>;
+};
+
 &{/vreg-mcu-3v3-regulator} {
 	/delete-property/ regulator-always-on;
 };
