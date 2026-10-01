@@ -52,6 +52,15 @@
 +int mhi_pm_fast_resume(struct mhi_controller *mhi_cntrl);
 +
 +/**
++ * mhi_pm_is_fast_suspended - Test whether the host retained MHI channels
++ * @mhi_cntrl: MHI controller
++ *
++ * This is a host-side transport state.  The endpoint deliberately remains
++ * in M0/M1 and therefore does not report M3 through MHISTATUS.
++ */
++bool mhi_pm_is_fast_suspended(struct mhi_controller *mhi_cntrl);
++
++/**
   * mhi_download_rddm_image - Download ramdump image from device for
   *                           debugging purpose.
   * @mhi_cntrl: MHI controller
@@ -178,6 +187,18 @@
 +	return ret;
 +}
 +EXPORT_SYMBOL_GPL(mhi_pm_fast_suspend);
++
++bool mhi_pm_is_fast_suspended(struct mhi_controller *mhi_cntrl)
++{
++	bool suspended;
++
++	read_lock_bh(&mhi_cntrl->pm_lock);
++	suspended = mhi_cntrl->fast_suspended;
++	read_unlock_bh(&mhi_cntrl->pm_lock);
++
++	return suspended;
++}
++EXPORT_SYMBOL_GPL(mhi_pm_is_fast_suspended);
 +
 +int mhi_pm_fast_resume(struct mhi_controller *mhi_cntrl)
 +{
@@ -391,3 +412,33 @@
  
  static inline struct ath11k_pci *ath11k_pci_priv(struct ath11k_base *ab)
 
+--- a/net/qrtr/mhi.c
++++ b/net/qrtr/mhi.c
+@@ -124,8 +124,13 @@ static int __maybe_unused qcom_mhi_qrtr_pm_suspend_late(struct device *dev)
+ 	 * If the device is in suspend state, then no need for the
+ 	 * client driver to unprepare the channels.
+ 	 */
+-	if (state == MHI_STATE_M3)
++	if (state == MHI_STATE_M3 ||
++	    mhi_pm_is_fast_suspended(mhi_dev->mhi_cntrl)) {
++		dev_info(dev,
++			 "retaining prepared IPCR channels across host-only MHI fast suspend\n");
+ 		return 0;
++	}
+ 
+ 	mhi_unprepare_from_transfer(mhi_dev);
+ 
+@@ -143,8 +148,13 @@ static int __maybe_unused qcom_mhi_qrtr_pm_resume_early(struct device *dev)
+ 	 * in suspend callback, therefore no need to prepare channels when
+ 	 * resume.
+ 	 */
+-	if (state == MHI_STATE_M3)
++	if (state == MHI_STATE_M3 ||
++	    mhi_pm_is_fast_suspended(mhi_dev->mhi_cntrl)) {
++		dev_info(dev,
++			 "reusing retained IPCR channels after host-only MHI fast suspend\n");
+ 		return 0;
++	}
+ 
+ 	rc = mhi_prepare_for_transfer(mhi_dev);
+ 	if (rc) {

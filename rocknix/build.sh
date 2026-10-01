@@ -53,7 +53,7 @@ fg-coulomb-counter)
     ;;
 consoleos-rc1)
     config_fragment="${kit}/rocknix/consoleos-rc1.config"
-    expected_release='7.2.0-consoleos-rc8'
+    expected_release='7.2.0-consoleos-rc9'
     artifact_name="rocknix-${expected_release}.tar.zst"
     dtb_name='sm8250-retroidpocket-rp5-consoleos-rc1'
     ;;
@@ -333,6 +333,7 @@ elif sys.argv[2] in ('adsp-no-auto-ab', 'lpass-devote-fix', 'lpass-pm-clock', 'a
         required_fast = (
             'int mhi_pm_fast_suspend(struct mhi_controller *mhi_cntrl);',
             'int mhi_pm_fast_resume(struct mhi_controller *mhi_cntrl);',
+            'bool mhi_pm_is_fast_suspended(struct mhi_controller *mhi_cntrl);',
             'bool fast_suspended;',
         )
         if not all(marker in mhi_api for marker in required_fast):
@@ -341,6 +342,8 @@ elif sys.argv[2] in ('adsp-no-auto-ab', 'lpass-devote-fix', 'lpass-pm-clock', 'a
             'int mhi_pm_fast_suspend(struct mhi_controller *mhi_cntrl)',
             'Deliberately do not write MHICTRL',
             'mhi_cntrl->dev_state = MHI_STATE_M3_FAST;',
+            'bool mhi_pm_is_fast_suspended(struct mhi_controller *mhi_cntrl)',
+            'EXPORT_SYMBOL_GPL(mhi_pm_is_fast_suspended);',
             'int mhi_pm_fast_resume(struct mhi_controller *mhi_cntrl)',
             'fast resume found firmware in RDDM',
         )
@@ -361,6 +364,14 @@ elif sys.argv[2] in ('adsp-no-auto-ab', 'lpass-devote-fix', 'lpass-pm-clock', 'a
         )
         if not all(marker in ath_pci for marker in required_pci_d0):
             raise SystemExit('ath11k endpoint-D0 retention markers missing')
+        qrtr = Path('net/qrtr/mhi.c').read_text()
+        required_qrtr = (
+            'mhi_pm_is_fast_suspended(mhi_dev->mhi_cntrl)',
+            'retaining prepared IPCR channels across host-only MHI fast suspend',
+            'reusing retained IPCR channels after host-only MHI fast suspend',
+        )
+        if not all(marker in qrtr for marker in required_qrtr):
+            raise SystemExit('QRTR fast-suspend channel-retention markers missing')
 elif sys.argv[2] == 'pcie-drv-handoff':
     required = {
         'CONFIG_PCIE_QCOM=y', 'CONFIG_PCIE_QCOM_DRV=y', 'CONFIG_RPMSG=y',
