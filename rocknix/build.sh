@@ -548,7 +548,7 @@ elif [[ "${profile}" == consoleos-rc1 ]]; then
     cd "${out}"
     sha256sum "${dtb_name}.dtb" > CONSOLEOS-RC1-DTB-SHA256SUMS
     printf '%s\n' \
-        'ConsoleOS RC6 built: RC5 power behavior plus corrected attached-session PD PHY locking, with no new DT policy. Not installed or boot-tested.' \
+        'ConsoleOS RC7 diagnostic built: RC6 power behavior plus guarded read-only SM8250 display-RSCC state capture. Not installed or boot-tested.' \
         > BUILD-SUCCESS.txt
     cd "${source_dir}"
 elif [[ "${profile}" == slpi-integrated ]]; then
