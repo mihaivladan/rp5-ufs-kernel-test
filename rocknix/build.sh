@@ -653,9 +653,13 @@ if [[ "${profile}" == consoleos-rc1 ]]; then
     objdump -drS drivers/regulator/qcom-rpmh-regulator.o \
         > "${out}/qcom-rpmh-regulator-disassembly.txt"
     cp drivers/usb/typec/tcpm/qcom/qcom_pmic_typec_pdphy.c \
-        drivers/usb/typec/tcpm/qcom/qcom_pmic_typec_pdphy.o "${out}/"
+        drivers/usb/typec/tcpm/qcom/qcom_pmic_typec_pdphy.o \
+        drivers/usb/typec/tcpm/qcom/qcom_pmic_typec_port.c \
+        drivers/usb/typec/tcpm/qcom/qcom_pmic_typec_port.o "${out}/"
     objdump -drS drivers/usb/typec/tcpm/qcom/qcom_pmic_typec_pdphy.o \
         > "${out}/qcom-pmic-typec-pdphy-disassembly.txt"
+    objdump -drS drivers/usb/typec/tcpm/qcom/qcom_pmic_typec_port.o \
+        > "${out}/qcom-pmic-typec-port-disassembly.txt"
 fi
 if [[ "${profile}" == diagnostic || "${profile}" == gpu-rpmh-fix || "${profile}" == sleepstate-handshake || "${profile}" == adsp-no-auto-ab || "${profile}" == lpass-devote-fix || "${profile}" == lpass-pm-clock || "${profile}" == audio-pcie-integration || "${profile}" == fg-coulomb-counter || "${profile}" == consoleos-rc1 || "${profile}" == pcie-drv-handoff || "${profile}" == slpi-integrated || "${profile}" == lpm-platform ]]; then
     objcopy --dump-section .BTF="${out}/vmlinux.btf" vmlinux

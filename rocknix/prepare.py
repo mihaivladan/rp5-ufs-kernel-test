@@ -183,7 +183,7 @@ def apply_patches(repo, source, fix, profile):
         pdphy_gating = Path(__file__).resolve().parent / "qcom-pmic-typec-pdphy-attach-gating.patch"
         require(pdphy_gating.is_file(), "Missing PM8150B PD-PHY attach-gating patch")
         require(hashlib.sha256(pdphy_gating.read_bytes()).hexdigest() ==
-                "d96f16cb6098f317b0298abe794c8d122bd4b2df92b0be58128a327c6e826748",
+                "d5ebc031055adfa45a24f3b7df9454071d6d1b84575b0f076e4d854471a6f105",
                 "PM8150B PD-PHY attach-gating patch checksum mismatch")
         extra_patches.append(pdphy_gating)
     if profile == "lpm-platform":
@@ -289,6 +289,7 @@ def apply_patches(repo, source, fix, profile):
         required_pdphy = (
             "qcom_pmic_typec_pdphy_power_on(",
             "qcom_pmic_typec_pdphy_power_off(",
+            "qcom_pmic_typec_port_is_attached(tcpm);",
             "PD PHY left off until Type-C attachment",
             "disable_irq_nosync(pmic_typec_pdphy->irq_data[i].irq);",
             "regulator_set_voltage(pmic_typec_pdphy->vdd_pdphy,",
@@ -300,6 +301,10 @@ def apply_patches(repo, source, fix, profile):
         stop = pdphy.index("qcom_pmic_typec_pdphy_stop(", start)
         require("regulator_enable(" not in pdphy[start:stop],
                 "PM8150B PD PHY is still powered at driver start")
+        port = (source / "drivers/usb/typec/tcpm/qcom/qcom_pmic_typec_port.c").read_text()
+        require("int qcom_pmic_typec_port_is_attached(struct pmic_typec *tcpm)" in port and
+                "return !!(misc & CC_ATTACHED);" in port,
+                "PM8150B physical CC-attachment guard missing")
     if profile == "lpm-platform":
         lpm_source = (source / "drivers/soc/qcom/qcom_lpm_platform_suspend.c").read_text()
         require("#define CONSOLEOS_SM8250_SUSPEND_STATE\t0x4100c244" in lpm_source and

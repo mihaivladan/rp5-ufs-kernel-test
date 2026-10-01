@@ -1,23 +1,5 @@
-From: ConsoleOS Kernel Team <kernel@consoleos.dev>
-Subject: [PATCH] usb: typec: qcom: gate PD PHY while unattached
-
-The Qualcomm PMIC Type-C driver currently enables the PD PHY, its IRQs and
-vdd-pdphy regulator for the entire lifetime of the driver.  This keeps the
-PM8150B L2A supply requested even when no cable is attached.
-
-Keep the CC/Type-C port active for attach detection, but defer the PD PHY
-power sequence until TCPM reports an attached session.  Disable the PD PHY,
-its regulator voltage and load requests after TCPM disables PD reception on
-detach.  Also power it back up defensively when PD reception is enabled,
-which covers hard-reset recovery paths that temporarily clear the attached
-state.
-
-This follows the lifecycle used by Qualcomm's downstream PD policy engine
-without changing the TCPM state machine or the Type-C port hardware.
-
-Signed-off-by: ConsoleOS Kernel Team <kernel@consoleos.dev>
----
 diff --git a/drivers/usb/typec/tcpm/qcom/qcom_pmic_typec_pdphy.c b/drivers/usb/typec/tcpm/qcom/qcom_pmic_typec_pdphy.c
+index e6b2864..449b52d 100644
 --- a/drivers/usb/typec/tcpm/qcom/qcom_pmic_typec_pdphy.c
 +++ b/drivers/usb/typec/tcpm/qcom/qcom_pmic_typec_pdphy.c
 @@ -7,6 +7,7 @@
@@ -28,7 +10,15 @@ diff --git a/drivers/usb/typec/tcpm/qcom/qcom_pmic_typec_pdphy.c b/drivers/usb/t
  #include <linux/platform_device.h>
  #include <linux/regmap.h>
  #include <linux/regulator/consumer.h>
-@@ -100,9 +101,16 @@
+@@ -16,6 +17,7 @@
+ #include <linux/usb/tcpm.h>
+ #include "qcom_pmic_typec.h"
+ #include "qcom_pmic_typec_pdphy.h"
++#include "qcom_pmic_typec_port.h"
+ 
+ /* PD PHY register offsets and bit fields */
+ #define USB_PDPHY_MSG_CONFIG_REG	0x40
+@@ -100,9 +102,16 @@ struct pmic_typec_pdphy {
  	struct work_struct		reset_work;
  	struct work_struct		receive_work;
  	struct regulator		*vdd_pdphy;
@@ -45,7 +35,7 @@ diff --git a/drivers/usb/typec/tcpm/qcom/qcom_pmic_typec_pdphy.c b/drivers/usb/t
  static void qcom_pmic_typec_pdphy_reset_on(struct pmic_typec_pdphy *pmic_typec_pdphy)
  {
  	struct device *dev = pmic_typec_pdphy->dev;
-@@ -139,17 +147,24 @@
+@@ -139,17 +148,24 @@ static void qcom_pmic_typec_pdphy_reset_off(struct pmic_typec_pdphy *pmic_typec_
  static void qcom_pmic_typec_pdphy_sig_reset_work(struct work_struct *work)
  {
  	struct pmic_typec_pdphy *pmic_typec_pdphy = container_of(work, struct pmic_typec_pdphy,
@@ -74,7 +64,7 @@ diff --git a/drivers/usb/typec/tcpm/qcom/qcom_pmic_typec_pdphy.c b/drivers/usb/t
  }
  
  static int
-@@ -186,7 +201,12 @@
+@@ -186,7 +202,12 @@ qcom_pmic_typec_pdphy_pd_transmit_signal(struct pmic_typec_pdphy *pmic_typec_pdp
  	unsigned long flags;
  	int ret;
  
@@ -87,7 +77,7 @@ diff --git a/drivers/usb/typec/tcpm/qcom/qcom_pmic_typec_pdphy.c b/drivers/usb/t
  
  	/* Clear TX control register */
  	ret = qcom_pmic_typec_pdphy_clear_tx_control_reg(pmic_typec_pdphy);
-@@ -225,11 +245,15 @@
+@@ -225,12 +246,16 @@ qcom_pmic_typec_pdphy_pd_transmit_payload(struct pmic_typec_pdphy *pmic_typec_pd
  	unsigned long flags;
  	int ret;
  
@@ -96,16 +86,17 @@ diff --git a/drivers/usb/typec/tcpm/qcom/qcom_pmic_typec_pdphy.c b/drivers/usb/t
  	hdr_len = sizeof(msg->header);
  	txbuf_len = pd_header_cnt_le(msg->header) * 4;
  	txsize_len = hdr_len + txbuf_len - 1;
-+
+ 
 +	spin_lock_irqsave(&pmic_typec_pdphy->lock, flags);
 +	if (!pmic_typec_pdphy->enabled) {
 +		ret = -ENODEV;
 +		goto done;
 +	}
- 
++
  	ret = regmap_read(pmic_typec_pdphy->regmap,
  			  pmic_typec_pdphy->base + USB_PDPHY_RX_ACKNOWLEDGE_REG,
-@@ -332,6 +356,10 @@
+ 			  &val);
+@@ -332,6 +357,10 @@ static void qcom_pmic_typec_pdphy_pd_receive(struct pmic_typec_pdphy *pmic_typec
  	int ret;
  
  	spin_lock_irqsave(&pmic_typec_pdphy->lock, flags);
@@ -116,7 +107,7 @@ diff --git a/drivers/usb/typec/tcpm/qcom/qcom_pmic_typec_pdphy.c b/drivers/usb/t
  
  	ret = regmap_read(pmic_typec_pdphy->regmap,
  			  pmic_typec_pdphy->base + USB_PDPHY_RX_SIZE_REG, &size);
-@@ -369,6 +397,7 @@
+@@ -369,6 +398,7 @@ done:
  		dev_vdbg(dev, "pd_receive: handing %d bytes to tcpm\n", size);
  		tcpm_pd_receive(pmic_typec_pdphy->tcpm_port, &msg, TCPC_TX_SOP);
  	}
@@ -124,13 +115,13 @@ diff --git a/drivers/usb/typec/tcpm/qcom/qcom_pmic_typec_pdphy.c b/drivers/usb/t
  }
  
  static irqreturn_t qcom_pmic_typec_pdphy_isr(int irq, void *dev_id)
-@@ -409,12 +438,22 @@
+@@ -409,12 +439,22 @@ static int qcom_pmic_typec_pdphy_set_pd_rx(struct tcpc_dev *tcpc, bool on)
  	struct pmic_typec *tcpm = tcpc_to_tcpm(tcpc);
  	struct pmic_typec_pdphy *pmic_typec_pdphy = tcpm->pmic_typec_pdphy;
  	unsigned long flags;
 -	int ret;
 +	int ret = 0;
- 
++
 +	if (on) {
 +		if (!pmic_typec_pdphy->tcpm_port)
 +			pmic_typec_pdphy->tcpm_port = tcpm->tcpm_port;
@@ -138,7 +129,7 @@ diff --git a/drivers/usb/typec/tcpm/qcom/qcom_pmic_typec_pdphy.c b/drivers/usb/t
 +		if (ret)
 +			return ret;
 +	}
-+
+ 
  	spin_lock_irqsave(&pmic_typec_pdphy->lock, flags);
  
 -	ret = regmap_write(pmic_typec_pdphy->regmap,
@@ -150,13 +141,13 @@ diff --git a/drivers/usb/typec/tcpm/qcom/qcom_pmic_typec_pdphy.c b/drivers/usb/t
  
  	spin_unlock_irqrestore(&pmic_typec_pdphy->lock, flags);
  
-@@ -431,19 +470,35 @@
+@@ -431,18 +471,39 @@ static int qcom_pmic_typec_pdphy_set_roles(struct tcpc_dev *tcpc, bool attached,
  	struct pmic_typec_pdphy *pmic_typec_pdphy = tcpm->pmic_typec_pdphy;
  	struct device *dev = pmic_typec_pdphy->dev;
  	unsigned long flags;
 -	int ret;
-+	int ret = 0, off_ret;
- 
++	int ret = 0, off_ret, port_attached;
++
 +	if (attached) {
 +		if (!pmic_typec_pdphy->tcpm_port)
 +			pmic_typec_pdphy->tcpm_port = tcpm->tcpm_port;
@@ -164,7 +155,7 @@ diff --git a/drivers/usb/typec/tcpm/qcom/qcom_pmic_typec_pdphy.c b/drivers/usb/t
 +		if (ret)
 +			return ret;
 +	}
-+
+ 
  	spin_lock_irqsave(&pmic_typec_pdphy->lock, flags);
  
 -	ret = regmap_update_bits(pmic_typec_pdphy->regmap,
@@ -184,16 +175,20 @@ diff --git a/drivers/usb/typec/tcpm/qcom/qcom_pmic_typec_pdphy.c b/drivers/usb/t
  
  	spin_unlock_irqrestore(&pmic_typec_pdphy->lock, flags);
 +	if (!attached) {
-+		off_ret = qcom_pmic_typec_pdphy_power_off(pmic_typec_pdphy);
- 
-+		if (!ret)
-+			ret = off_ret;
++		port_attached = qcom_pmic_typec_port_is_attached(tcpm);
++		if (port_attached < 0) {
++			if (!ret)
++				ret = port_attached;
++		} else if (!port_attached) {
++			off_ret = qcom_pmic_typec_pdphy_power_off(pmic_typec_pdphy);
++			if (!ret)
++				ret = off_ret;
++		}
 +	}
-+
+ 
  	dev_dbg(dev, "pdphy_set_roles: data_role_host=%d power_role_src=%d\n",
  		data_role, power_role);
- 
-@@ -507,47 +562,146 @@
+@@ -507,45 +568,144 @@ done:
  	return ret;
  }
  
@@ -225,29 +220,27 @@ diff --git a/drivers/usb/typec/tcpm/qcom/qcom_pmic_typec_pdphy.c b/drivers/usb/t
 +				    VDD_PDPHY_VOL_MIN, VDD_PDPHY_VOL_MAX);
 +	if (ret)
 +		goto err_reset_load;
- 
++
 +	ret = regulator_enable(pmic_typec_pdphy->vdd_pdphy);
 +	if (ret)
 +		goto err_reset_voltage;
-+
+ 
  	ret = pmic_typec_pdphy_reset(pmic_typec_pdphy);
  	if (ret)
 -		goto err_disable_vdd_pdhy;
 +		goto err_disable_regulator;
- 
++
 +	spin_lock_irqsave(&pmic_typec_pdphy->lock, flags);
 +	pmic_typec_pdphy->enabled = true;
 +	spin_unlock_irqrestore(&pmic_typec_pdphy->lock, flags);
-+
+ 
  	for (i = 0; i < pmic_typec_pdphy->nr_irqs; i++)
  		enable_irq(pmic_typec_pdphy->irq_data[i].irq);
  
 -	return 0;
 +	dev_dbg(pmic_typec_pdphy->dev, "PD PHY powered on for attached Type-C session\n");
 +	goto done;
- 
--err_disable_vdd_pdhy:
--	regulator_disable(pmic_typec_pdphy->vdd_pdphy);
++
 +err_disable_regulator:
 +	cleanup_ret = regulator_disable(pmic_typec_pdphy->vdd_pdphy);
 +	if (cleanup_ret)
@@ -267,19 +260,16 @@ diff --git a/drivers/usb/typec/tcpm/qcom/qcom_pmic_typec_pdphy.c b/drivers/usb/t
 +			"failed to release PD PHY load request: %d\n", cleanup_ret);
 +done:
 +	mutex_unlock(&pmic_typec_pdphy->state_lock);
- 
- 	return ret;
- }
- 
--static void qcom_pmic_typec_pdphy_stop(struct pmic_typec *tcpm)
++
++	return ret;
++}
++
 +static int
 +qcom_pmic_typec_pdphy_power_off(struct pmic_typec_pdphy *pmic_typec_pdphy)
- {
--	struct pmic_typec_pdphy *pmic_typec_pdphy = tcpm->pmic_typec_pdphy;
--	int i;
++{
 +	unsigned long flags;
 +	int i, ret, cleanup_ret;
- 
++
 +	mutex_lock(&pmic_typec_pdphy->state_lock);
 +	if (!pmic_typec_pdphy->enabled) {
 +		ret = 0;
@@ -290,19 +280,16 @@ diff --git a/drivers/usb/typec/tcpm/qcom/qcom_pmic_typec_pdphy.c b/drivers/usb/t
 +	pmic_typec_pdphy->enabled = false;
 +	spin_unlock_irqrestore(&pmic_typec_pdphy->lock, flags);
 +
- 	for (i = 0; i < pmic_typec_pdphy->nr_irqs; i++)
--		disable_irq(pmic_typec_pdphy->irq_data[i].irq);
++	for (i = 0; i < pmic_typec_pdphy->nr_irqs; i++)
 +		disable_irq_nosync(pmic_typec_pdphy->irq_data[i].irq);
 +	cancel_work(&pmic_typec_pdphy->reset_work);
- 
--	qcom_pmic_typec_pdphy_reset_on(pmic_typec_pdphy);
++
 +	spin_lock_irqsave(&pmic_typec_pdphy->lock, flags);
 +	ret = qcom_pmic_typec_pdphy_disable(pmic_typec_pdphy);
 +	spin_unlock_irqrestore(&pmic_typec_pdphy->lock, flags);
 +	if (ret)
 +		goto err_restore_pdphy;
- 
--	regulator_disable(pmic_typec_pdphy->vdd_pdphy);
++
 +	ret = regulator_disable(pmic_typec_pdphy->vdd_pdphy);
 +	if (ret)
 +		goto err_restore_pdphy;
@@ -321,7 +308,9 @@ diff --git a/drivers/usb/typec/tcpm/qcom/qcom_pmic_typec_pdphy.c b/drivers/usb/t
 +
 +	dev_dbg(pmic_typec_pdphy->dev, "PD PHY powered off while Type-C is unattached\n");
 +	goto done;
-+
+ 
+-err_disable_vdd_pdhy:
+-	regulator_disable(pmic_typec_pdphy->vdd_pdphy);
 +err_restore_pdphy:
 +	if (pmic_typec_pdphy_reset(pmic_typec_pdphy))
 +		dev_err(pmic_typec_pdphy->dev, "failed to restore PD PHY after power-off error\n");
@@ -332,33 +321,37 @@ diff --git a/drivers/usb/typec/tcpm/qcom/qcom_pmic_typec_pdphy.c b/drivers/usb/t
 +		enable_irq(pmic_typec_pdphy->irq_data[i].irq);
 +done:
 +	mutex_unlock(&pmic_typec_pdphy->state_lock);
-+
-+	return ret;
+ 
+ 	return ret;
  }
  
+-static void qcom_pmic_typec_pdphy_stop(struct pmic_typec *tcpm)
 +static int qcom_pmic_typec_pdphy_start(struct pmic_typec *tcpm,
 +				       struct tcpm_port *tcpm_port)
-+{
-+	struct pmic_typec_pdphy *pmic_typec_pdphy = tcpm->pmic_typec_pdphy;
-+
+ {
+ 	struct pmic_typec_pdphy *pmic_typec_pdphy = tcpm->pmic_typec_pdphy;
+-	int i;
+ 
+-	for (i = 0; i < pmic_typec_pdphy->nr_irqs; i++)
+-		disable_irq(pmic_typec_pdphy->irq_data[i].irq);
 +	pmic_typec_pdphy->tcpm_port = tcpm_port;
 +	dev_dbg(pmic_typec_pdphy->dev, "PD PHY left off until Type-C attachment\n");
-+
+ 
+-	qcom_pmic_typec_pdphy_reset_on(pmic_typec_pdphy);
 +	return 0;
 +}
 +
 +static void qcom_pmic_typec_pdphy_stop(struct pmic_typec *tcpm)
 +{
 +	struct pmic_typec_pdphy *pmic_typec_pdphy = tcpm->pmic_typec_pdphy;
-+
+ 
+-	regulator_disable(pmic_typec_pdphy->vdd_pdphy);
 +	if (qcom_pmic_typec_pdphy_power_off(pmic_typec_pdphy))
 +		dev_err(pmic_typec_pdphy->dev, "failed to power off PD PHY\n");
-+}
-+
+ }
+ 
  int qcom_pmic_typec_pdphy_probe(struct platform_device *pdev,
- 				struct pmic_typec *tcpm,
- 				const struct pmic_typec_pdphy_resources *res,
-@@ -580,6 +734,7 @@
+@@ -580,6 +740,7 @@ int qcom_pmic_typec_pdphy_probe(struct platform_device *pdev,
  	pmic_typec_pdphy->regmap = regmap;
  	pmic_typec_pdphy->nr_irqs = res->nr_irqs;
  	pmic_typec_pdphy->irq_data = irq_data;
@@ -366,4 +359,45 @@ diff --git a/drivers/usb/typec/tcpm/qcom/qcom_pmic_typec_pdphy.c b/drivers/usb/t
  	spin_lock_init(&pmic_typec_pdphy->lock);
  	INIT_WORK(&pmic_typec_pdphy->reset_work, qcom_pmic_typec_pdphy_sig_reset_work);
  
-
+diff --git a/drivers/usb/typec/tcpm/qcom/qcom_pmic_typec_port.c b/drivers/usb/typec/tcpm/qcom/qcom_pmic_typec_port.c
+index bf985ef..3a9f4b7 100644
+--- a/drivers/usb/typec/tcpm/qcom/qcom_pmic_typec_port.c
++++ b/drivers/usb/typec/tcpm/qcom/qcom_pmic_typec_port.c
+@@ -208,6 +208,24 @@ static const char * const rp_sel_name[] = {
+ 	[TYPEC_SRC_RP_SEL_330UA]	= "Rp-3.0-330uA",
+ };
+ 
++int qcom_pmic_typec_port_is_attached(struct pmic_typec *tcpm)
++{
++	struct pmic_typec_port *pmic_typec_port = tcpm->pmic_typec_port;
++	unsigned long flags;
++	unsigned int misc;
++	int ret;
++
++	spin_lock_irqsave(&pmic_typec_port->lock, flags);
++	ret = regmap_read(pmic_typec_port->regmap,
++			  pmic_typec_port->base + TYPEC_MISC_STATUS_REG, &misc);
++	spin_unlock_irqrestore(&pmic_typec_port->lock, flags);
++
++	if (ret)
++		return ret;
++
++	return !!(misc & CC_ATTACHED);
++}
++
+ static const char *rp_sel_to_name(int rp_sel)
+ {
+ 	if (rp_sel > TYPEC_SRC_RP_SEL_330UA)
+diff --git a/drivers/usb/typec/tcpm/qcom/qcom_pmic_typec_port.h b/drivers/usb/typec/tcpm/qcom/qcom_pmic_typec_port.h
+index 2ca83a4..5ff911a 100644
+--- a/drivers/usb/typec/tcpm/qcom/qcom_pmic_typec_port.h
++++ b/drivers/usb/typec/tcpm/qcom/qcom_pmic_typec_port.h
+@@ -26,6 +26,8 @@ struct pmic_typec_port_resources {
+ 
+ extern const struct pmic_typec_port_resources pm8150b_port_res;
+ 
++int qcom_pmic_typec_port_is_attached(struct pmic_typec *tcpm);
++
+ int qcom_pmic_typec_port_probe(struct platform_device *pdev,
+ 			       struct pmic_typec *tcpm,
+ 			       const struct pmic_typec_port_resources *res,

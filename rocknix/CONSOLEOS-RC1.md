@@ -8,6 +8,9 @@ RC5 keeps the exact device-proven RC3 base and adds one product-facing change:
 the PM8150B PD PHY and its L2A regulator request remain off while USB-C is
 unplugged. The CC/Type-C port stays active for cable detection. TCPM powers the
 PD PHY before an attached session and powers it back down after disconnect.
+The power-down path also verifies the PMIC's physical CC-attached bit, so
+TCPM's temporary `attached=false` role update during a PD hard reset cannot
+cycle the PHY or its supply.
 This is the driver implementation justified by the approximately 5 mA Phase
 4CS result; it does not ship that test's diagnostic compatible substitution.
 
