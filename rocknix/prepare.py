@@ -186,6 +186,12 @@ def apply_patches(repo, source, fix, profile):
                 "a5eb215c6a2477407882e345bfff4b0a7f5864196c7773456507fd7ad4de8c59",
                 "PM8150B PD-PHY attach-gating patch checksum mismatch")
         extra_patches.append(pdphy_gating)
+        qca_fast = Path(__file__).resolve().parent / "qcom-qca6390-mhi-fast-suspend.patch"
+        require(qca_fast.is_file(), "Missing QCA6390 host-only MHI suspend patch")
+        require(hashlib.sha256(qca_fast.read_bytes()).hexdigest() ==
+                "ec298301246c734d0b4c8f7f657a9899ea9ce7196d31b67ae9fc65a2955b0a1c",
+                "QCA6390 host-only MHI suspend patch checksum mismatch")
+        extra_patches.append(qca_fast)
     if profile == "lpm-platform":
         lpm_fix = Path(__file__).resolve().parent / "qcom-lpm-platform-suspend.patch"
         require(lpm_fix.is_file(), "Missing exact-state platform suspend patch")

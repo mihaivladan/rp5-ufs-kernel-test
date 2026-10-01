@@ -53,7 +53,7 @@ fg-coulomb-counter)
     ;;
 consoleos-rc1)
     config_fragment="${kit}/rocknix/consoleos-rc1.config"
-    expected_release='7.2.0-consoleos-rc6'
+    expected_release='7.2.0-consoleos-rc8'
     artifact_name="rocknix-${expected_release}.tar.zst"
     dtb_name='sm8250-retroidpocket-rp5-consoleos-rc1'
     ;;
@@ -326,6 +326,41 @@ elif sys.argv[2] in ('adsp-no-auto-ab', 'lpass-devote-fix', 'lpass-pm-clock', 'a
         )
         if not all(marker in gamepad for marker in required_gamepad):
             raise SystemExit('Retroid gamepad unbind cleanup markers missing')
+        mhi_api = Path('include/linux/mhi.h').read_text()
+        mhi_pm = Path('drivers/bus/mhi/host/pm.c').read_text()
+        ath_mhi = Path('drivers/net/wireless/ath/ath11k/mhi.c').read_text()
+        ath_pci = Path('drivers/net/wireless/ath/ath11k/pci.c').read_text()
+        required_fast = (
+            'int mhi_pm_fast_suspend(struct mhi_controller *mhi_cntrl);',
+            'int mhi_pm_fast_resume(struct mhi_controller *mhi_cntrl);',
+            'bool fast_suspended;',
+        )
+        if not all(marker in mhi_api for marker in required_fast):
+            raise SystemExit('MHI fast-suspend public API markers missing')
+        required_mhi_pm = (
+            'int mhi_pm_fast_suspend(struct mhi_controller *mhi_cntrl)',
+            'Deliberately do not write MHICTRL',
+            'mhi_cntrl->dev_state = MHI_STATE_M3_FAST;',
+            'int mhi_pm_fast_resume(struct mhi_controller *mhi_cntrl)',
+            'fast resume found firmware in RDDM',
+        )
+        if not all(marker in mhi_pm for marker in required_mhi_pm):
+            raise SystemExit('MHI host-only suspend implementation markers missing')
+        required_ath = (
+            'module_param_named(fast_mhi_suspend, fast_mhi_suspend, bool, 0644);',
+            'ret = mhi_pm_fast_suspend(ab_pci->mhi_ctrl);',
+            'ret = mhi_pm_fast_resume(ab_pci->mhi_ctrl);',
+        )
+        if not all(marker in ath_mhi for marker in required_ath):
+            raise SystemExit('ath11k MHI fast-suspend selection markers missing')
+        required_pci_d0 = (
+            'pci_save_state(pdev);',
+            'pdev->skip_bus_pm = true;',
+            'fast suspend endpoint retained in D0:',
+            'fast resume endpoint after ADSP reclaim:',
+        )
+        if not all(marker in ath_pci for marker in required_pci_d0):
+            raise SystemExit('ath11k endpoint-D0 retention markers missing')
 elif sys.argv[2] == 'pcie-drv-handoff':
     required = {
         'CONFIG_PCIE_QCOM=y', 'CONFIG_PCIE_QCOM_DRV=y', 'CONFIG_RPMSG=y',
@@ -548,7 +583,7 @@ elif [[ "${profile}" == consoleos-rc1 ]]; then
     cd "${out}"
     sha256sum "${dtb_name}.dtb" > CONSOLEOS-RC1-DTB-SHA256SUMS
     printf '%s\n' \
-        'ConsoleOS RC6 built: RC5 power behavior plus corrected attached-session PD PHY locking, with no new DT policy. Not installed or boot-tested.' \
+        'ConsoleOS RC8 diagnostic built: exact RC6 product base plus opt-in QCA6390 host-only MHI suspend and endpoint-D0 retention for Android-firmware WoW qualification. Not installed or boot-tested.' \
         > BUILD-SUCCESS.txt
     cd "${source_dir}"
 elif [[ "${profile}" == slpi-integrated ]]; then
@@ -663,6 +698,13 @@ if [[ "${profile}" == consoleos-rc1 ]]; then
         > "${out}/qcom-pmic-typec-pdphy-disassembly.txt"
     objdump -drS drivers/usb/typec/tcpm/qcom/qcom_pmic_typec_port.o \
         > "${out}/qcom-pmic-typec-port-disassembly.txt"
+    cp include/linux/mhi.h drivers/bus/mhi/host/pm.c \
+        drivers/net/wireless/ath/ath11k/mhi.c \
+        drivers/net/wireless/ath/ath11k/pci.c \
+        drivers/net/wireless/ath/ath11k/pci.h "${out}/"
+    objdump -drS drivers/bus/mhi/host/pm.o > "${out}/mhi-pm-disassembly.txt"
+    objdump -drS drivers/net/wireless/ath/ath11k/ath11k_pci.o \
+        > "${out}/ath11k-pci-disassembly.txt"
 fi
 if [[ "${profile}" == diagnostic || "${profile}" == gpu-rpmh-fix || "${profile}" == sleepstate-handshake || "${profile}" == adsp-no-auto-ab || "${profile}" == lpass-devote-fix || "${profile}" == lpass-pm-clock || "${profile}" == audio-pcie-integration || "${profile}" == fg-coulomb-counter || "${profile}" == consoleos-rc1 || "${profile}" == pcie-drv-handoff || "${profile}" == slpi-integrated || "${profile}" == lpm-platform ]]; then
     objcopy --dump-section .BTF="${out}/vmlinux.btf" vmlinux
