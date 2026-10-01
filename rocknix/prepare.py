@@ -180,6 +180,12 @@ def apply_patches(repo, source, fix, profile):
                 "06c5d49db2dc5ac27fa4fc04700df94fb6751c0678ed77c07c275c2d7b8476e6",
                 "RPMh regulator suspend trace patch checksum mismatch")
         extra_patches.extend((rpmh_suspend, regulator_s2idle, rpmh_trace))
+        pdphy_gating = Path(__file__).resolve().parent / "qcom-pmic-typec-pdphy-attach-gating.patch"
+        require(pdphy_gating.is_file(), "Missing PM8150B PD-PHY attach-gating patch")
+        require(hashlib.sha256(pdphy_gating.read_bytes()).hexdigest() ==
+                "d96f16cb6098f317b0298abe794c8d122bd4b2df92b0be58128a327c6e826748",
+                "PM8150B PD-PHY attach-gating patch checksum mismatch")
+        extra_patches.append(pdphy_gating)
     if profile == "lpm-platform":
         lpm_fix = Path(__file__).resolve().parent / "qcom-lpm-platform-suspend.patch"
         require(lpm_fix.is_file(), "Missing exact-state platform suspend patch")
@@ -279,6 +285,21 @@ def apply_patches(repo, source, fix, profile):
                 "RC3 RPMh regulator SLEEP/WAKE implementation markers missing")
         require("case PM_SUSPEND_TO_IDLE:\n\tcase PM_SUSPEND_MEM:" in regulator_core,
                 "RC3 s2idle is not mapped to regulator state_mem")
+        pdphy = (source / "drivers/usb/typec/tcpm/qcom/qcom_pmic_typec_pdphy.c").read_text()
+        required_pdphy = (
+            "qcom_pmic_typec_pdphy_power_on(",
+            "qcom_pmic_typec_pdphy_power_off(",
+            "PD PHY left off until Type-C attachment",
+            "disable_irq_nosync(pmic_typec_pdphy->irq_data[i].irq);",
+            "regulator_set_voltage(pmic_typec_pdphy->vdd_pdphy,",
+            "regulator_set_load(pmic_typec_pdphy->vdd_pdphy, 0);",
+        )
+        require(all(marker in pdphy for marker in required_pdphy),
+                "PM8150B PD-PHY attach-gating markers missing")
+        start = pdphy.index("qcom_pmic_typec_pdphy_start(")
+        stop = pdphy.index("qcom_pmic_typec_pdphy_stop(", start)
+        require("regulator_enable(" not in pdphy[start:stop],
+                "PM8150B PD PHY is still powered at driver start")
     if profile == "lpm-platform":
         lpm_source = (source / "drivers/soc/qcom/qcom_lpm_platform_suspend.c").read_text()
         require("#define CONSOLEOS_SM8250_SUSPEND_STATE\t0x4100c244" in lpm_source and
@@ -459,6 +480,10 @@ def main():
             "Accepted Phase 4AT full stack; shared MCU/RGB/gamepad rail controllable; "
             "gamepad unbind cleanup; failed/no-effect RPMh, endpoint-off and exact-state "
             "diagnostics excluded"
+            if profile == "consoleos-rc1" else None
+        ),
+        "pm8150b_pdphy_attach_gating": (
+            "Keep CC detection active; power PD PHY and L2A only during an attached session"
             if profile == "consoleos-rc1" else None
         ),
         "platform_suspend": (

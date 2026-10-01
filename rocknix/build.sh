@@ -53,7 +53,7 @@ fg-coulomb-counter)
     ;;
 consoleos-rc1)
     config_fragment="${kit}/rocknix/consoleos-rc1.config"
-    expected_release='7.2.0-consoleos-rc3'
+    expected_release='7.2.0-consoleos-rc5'
     artifact_name="rocknix-${expected_release}.tar.zst"
     dtb_name='sm8250-retroidpocket-rp5-consoleos-rc1'
     ;;
@@ -545,7 +545,7 @@ elif [[ "${profile}" == consoleos-rc1 ]]; then
     cd "${out}"
     sha256sum "${dtb_name}.dtb" > CONSOLEOS-RC1-DTB-SHA256SUMS
     printf '%s\n' \
-        'ConsoleOS RC3 passed: RC2 plus the exact device-tested RPMh regulator SLEEP/WAKE plumbing, with no new DT rail policy. Not installed or boot-tested.' \
+        'ConsoleOS RC5 passed: exact proven RC3 base plus unattached PM8150B PD-PHY/L2A gating, with no new DT policy. Not installed or boot-tested.' \
         > BUILD-SUCCESS.txt
     cd "${source_dir}"
 elif [[ "${profile}" == slpi-integrated ]]; then
@@ -652,6 +652,10 @@ if [[ "${profile}" == consoleos-rc1 ]]; then
     objdump -drS drivers/input/joystick/retroid.o > "${out}/retroid-gamepad-disassembly.txt"
     objdump -drS drivers/regulator/qcom-rpmh-regulator.o \
         > "${out}/qcom-rpmh-regulator-disassembly.txt"
+    cp drivers/usb/typec/tcpm/qcom/qcom_pmic_typec_pdphy.c \
+        drivers/usb/typec/tcpm/qcom/qcom_pmic_typec_pdphy.o "${out}/"
+    objdump -drS drivers/usb/typec/tcpm/qcom/qcom_pmic_typec_pdphy.o \
+        > "${out}/qcom-pmic-typec-pdphy-disassembly.txt"
 fi
 if [[ "${profile}" == diagnostic || "${profile}" == gpu-rpmh-fix || "${profile}" == sleepstate-handshake || "${profile}" == adsp-no-auto-ab || "${profile}" == lpass-devote-fix || "${profile}" == lpass-pm-clock || "${profile}" == audio-pcie-integration || "${profile}" == fg-coulomb-counter || "${profile}" == consoleos-rc1 || "${profile}" == pcie-drv-handoff || "${profile}" == slpi-integrated || "${profile}" == lpm-platform ]]; then
     objcopy --dump-section .BTF="${out}/vmlinux.btf" vmlinux

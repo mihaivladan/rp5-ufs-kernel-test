@@ -1,0 +1,369 @@
+From: ConsoleOS Kernel Team <kernel@consoleos.dev>
+Subject: [PATCH] usb: typec: qcom: gate PD PHY while unattached
+
+The Qualcomm PMIC Type-C driver currently enables the PD PHY, its IRQs and
+vdd-pdphy regulator for the entire lifetime of the driver.  This keeps the
+PM8150B L2A supply requested even when no cable is attached.
+
+Keep the CC/Type-C port active for attach detection, but defer the PD PHY
+power sequence until TCPM reports an attached session.  Disable the PD PHY,
+its regulator voltage and load requests after TCPM disables PD reception on
+detach.  Also power it back up defensively when PD reception is enabled,
+which covers hard-reset recovery paths that temporarily clear the attached
+state.
+
+This follows the lifecycle used by Qualcomm's downstream PD policy engine
+without changing the TCPM state machine or the Type-C port hardware.
+
+Signed-off-by: ConsoleOS Kernel Team <kernel@consoleos.dev>
+---
+diff --git a/drivers/usb/typec/tcpm/qcom/qcom_pmic_typec_pdphy.c b/drivers/usb/typec/tcpm/qcom/qcom_pmic_typec_pdphy.c
+--- a/drivers/usb/typec/tcpm/qcom/qcom_pmic_typec_pdphy.c
++++ b/drivers/usb/typec/tcpm/qcom/qcom_pmic_typec_pdphy.c
+@@ -7,6 +7,7 @@
+ #include <linux/interrupt.h>
+ #include <linux/kernel.h>
+ #include <linux/module.h>
++#include <linux/mutex.h>
+ #include <linux/platform_device.h>
+ #include <linux/regmap.h>
+ #include <linux/regulator/consumer.h>
+@@ -100,9 +101,16 @@
+ 	struct work_struct		reset_work;
+ 	struct work_struct		receive_work;
+ 	struct regulator		*vdd_pdphy;
++	struct mutex			state_lock;	/* Power state transitions */
+ 	spinlock_t			lock;		/* Register atomicity */
++	bool				enabled;
+ };
+ 
++static int
++qcom_pmic_typec_pdphy_power_on(struct pmic_typec_pdphy *pmic_typec_pdphy);
++static int
++qcom_pmic_typec_pdphy_power_off(struct pmic_typec_pdphy *pmic_typec_pdphy);
++
+ static void qcom_pmic_typec_pdphy_reset_on(struct pmic_typec_pdphy *pmic_typec_pdphy)
+ {
+ 	struct device *dev = pmic_typec_pdphy->dev;
+@@ -139,17 +147,24 @@
+ static void qcom_pmic_typec_pdphy_sig_reset_work(struct work_struct *work)
+ {
+ 	struct pmic_typec_pdphy *pmic_typec_pdphy = container_of(work, struct pmic_typec_pdphy,
+-						     reset_work);
++							     reset_work);
+ 	unsigned long flags;
++	bool enabled;
+ 
++	mutex_lock(&pmic_typec_pdphy->state_lock);
+ 	spin_lock_irqsave(&pmic_typec_pdphy->lock, flags);
+ 
+-	qcom_pmic_typec_pdphy_reset_on(pmic_typec_pdphy);
+-	qcom_pmic_typec_pdphy_reset_off(pmic_typec_pdphy);
++	enabled = pmic_typec_pdphy->enabled;
++	if (enabled) {
++		qcom_pmic_typec_pdphy_reset_on(pmic_typec_pdphy);
++		qcom_pmic_typec_pdphy_reset_off(pmic_typec_pdphy);
++	}
+ 
+ 	spin_unlock_irqrestore(&pmic_typec_pdphy->lock, flags);
+ 
+-	tcpm_pd_hard_reset(pmic_typec_pdphy->tcpm_port);
++	if (enabled)
++		tcpm_pd_hard_reset(pmic_typec_pdphy->tcpm_port);
++	mutex_unlock(&pmic_typec_pdphy->state_lock);
+ }
+ 
+ static int
+@@ -186,7 +201,12 @@
+ 	unsigned long flags;
+ 	int ret;
+ 
++	mutex_lock(&pmic_typec_pdphy->state_lock);
+ 	spin_lock_irqsave(&pmic_typec_pdphy->lock, flags);
++	if (!pmic_typec_pdphy->enabled) {
++		ret = -ENODEV;
++		goto done;
++	}
+ 
+ 	/* Clear TX control register */
+ 	ret = qcom_pmic_typec_pdphy_clear_tx_control_reg(pmic_typec_pdphy);
+@@ -225,11 +245,15 @@
+ 	unsigned long flags;
+ 	int ret;
+ 
+-	spin_lock_irqsave(&pmic_typec_pdphy->lock, flags);
+-
+ 	hdr_len = sizeof(msg->header);
+ 	txbuf_len = pd_header_cnt_le(msg->header) * 4;
+ 	txsize_len = hdr_len + txbuf_len - 1;
++
++	spin_lock_irqsave(&pmic_typec_pdphy->lock, flags);
++	if (!pmic_typec_pdphy->enabled) {
++		ret = -ENODEV;
++		goto done;
++	}
+ 
+ 	ret = regmap_read(pmic_typec_pdphy->regmap,
+ 			  pmic_typec_pdphy->base + USB_PDPHY_RX_ACKNOWLEDGE_REG,
+@@ -332,6 +356,10 @@
+ 	int ret;
+ 
+ 	spin_lock_irqsave(&pmic_typec_pdphy->lock, flags);
++	if (!pmic_typec_pdphy->enabled) {
++		ret = -ENODEV;
++		goto done;
++	}
+ 
+ 	ret = regmap_read(pmic_typec_pdphy->regmap,
+ 			  pmic_typec_pdphy->base + USB_PDPHY_RX_SIZE_REG, &size);
+@@ -369,6 +397,7 @@
+ 		dev_vdbg(dev, "pd_receive: handing %d bytes to tcpm\n", size);
+ 		tcpm_pd_receive(pmic_typec_pdphy->tcpm_port, &msg, TCPC_TX_SOP);
+ 	}
++	mutex_unlock(&pmic_typec_pdphy->state_lock);
+ }
+ 
+ static irqreturn_t qcom_pmic_typec_pdphy_isr(int irq, void *dev_id)
+@@ -409,12 +438,22 @@
+ 	struct pmic_typec *tcpm = tcpc_to_tcpm(tcpc);
+ 	struct pmic_typec_pdphy *pmic_typec_pdphy = tcpm->pmic_typec_pdphy;
+ 	unsigned long flags;
+-	int ret;
++	int ret = 0;
+ 
++	if (on) {
++		if (!pmic_typec_pdphy->tcpm_port)
++			pmic_typec_pdphy->tcpm_port = tcpm->tcpm_port;
++		ret = qcom_pmic_typec_pdphy_power_on(pmic_typec_pdphy);
++		if (ret)
++			return ret;
++	}
++
+ 	spin_lock_irqsave(&pmic_typec_pdphy->lock, flags);
+ 
+-	ret = regmap_write(pmic_typec_pdphy->regmap,
+-			   pmic_typec_pdphy->base + USB_PDPHY_RX_ACKNOWLEDGE_REG, !on);
++	if (pmic_typec_pdphy->enabled)
++		ret = regmap_write(pmic_typec_pdphy->regmap,
++				   pmic_typec_pdphy->base + USB_PDPHY_RX_ACKNOWLEDGE_REG,
++				   !on);
+ 
+ 	spin_unlock_irqrestore(&pmic_typec_pdphy->lock, flags);
+ 
+@@ -431,19 +470,35 @@
+ 	struct pmic_typec_pdphy *pmic_typec_pdphy = tcpm->pmic_typec_pdphy;
+ 	struct device *dev = pmic_typec_pdphy->dev;
+ 	unsigned long flags;
+-	int ret;
++	int ret = 0, off_ret;
+ 
++	if (attached) {
++		if (!pmic_typec_pdphy->tcpm_port)
++			pmic_typec_pdphy->tcpm_port = tcpm->tcpm_port;
++		ret = qcom_pmic_typec_pdphy_power_on(pmic_typec_pdphy);
++		if (ret)
++			return ret;
++	}
++
+ 	spin_lock_irqsave(&pmic_typec_pdphy->lock, flags);
+ 
+-	ret = regmap_update_bits(pmic_typec_pdphy->regmap,
+-				 pmic_typec_pdphy->base + USB_PDPHY_MSG_CONFIG_REG,
+-				 MSG_CONFIG_PORT_DATA_ROLE |
+-				 MSG_CONFIG_PORT_POWER_ROLE,
+-				 (data_role == TYPEC_HOST ? MSG_CONFIG_PORT_DATA_ROLE : 0) |
+-				 (power_role == TYPEC_SOURCE ? MSG_CONFIG_PORT_POWER_ROLE : 0));
++	if (pmic_typec_pdphy->enabled)
++		ret = regmap_update_bits(pmic_typec_pdphy->regmap,
++					 pmic_typec_pdphy->base + USB_PDPHY_MSG_CONFIG_REG,
++					 MSG_CONFIG_PORT_DATA_ROLE |
++					 MSG_CONFIG_PORT_POWER_ROLE,
++					 (data_role == TYPEC_HOST ? MSG_CONFIG_PORT_DATA_ROLE : 0) |
++					 (power_role == TYPEC_SOURCE ?
++					  MSG_CONFIG_PORT_POWER_ROLE : 0));
+ 
+ 	spin_unlock_irqrestore(&pmic_typec_pdphy->lock, flags);
++	if (!attached) {
++		off_ret = qcom_pmic_typec_pdphy_power_off(pmic_typec_pdphy);
+ 
++		if (!ret)
++			ret = off_ret;
++	}
++
+ 	dev_dbg(dev, "pdphy_set_roles: data_role_host=%d power_role_src=%d\n",
+ 		data_role, power_role);
+ 
+@@ -507,47 +562,146 @@
+ 	return ret;
+ }
+ 
+-static int qcom_pmic_typec_pdphy_start(struct pmic_typec *tcpm,
+-				       struct tcpm_port *tcpm_port)
++static int
++qcom_pmic_typec_pdphy_power_on(struct pmic_typec_pdphy *pmic_typec_pdphy)
+ {
+-	struct pmic_typec_pdphy *pmic_typec_pdphy = tcpm->pmic_typec_pdphy;
+-	int i;
+-	int ret;
++	unsigned long flags;
++	int i, ret, cleanup_ret;
+ 
+-	ret = regulator_enable(pmic_typec_pdphy->vdd_pdphy);
++	mutex_lock(&pmic_typec_pdphy->state_lock);
++	if (pmic_typec_pdphy->enabled) {
++		ret = 0;
++		goto done;
++	}
++
++	ret = regulator_set_load(pmic_typec_pdphy->vdd_pdphy, VDD_PDPHY_HPM_LOAD);
+ 	if (ret)
+-		return ret;
++		goto done;
+ 
+-	pmic_typec_pdphy->tcpm_port = tcpm_port;
++	ret = regulator_set_voltage(pmic_typec_pdphy->vdd_pdphy,
++				    VDD_PDPHY_VOL_MIN, VDD_PDPHY_VOL_MAX);
++	if (ret)
++		goto err_reset_load;
+ 
++	ret = regulator_enable(pmic_typec_pdphy->vdd_pdphy);
++	if (ret)
++		goto err_reset_voltage;
++
+ 	ret = pmic_typec_pdphy_reset(pmic_typec_pdphy);
+ 	if (ret)
+-		goto err_disable_vdd_pdhy;
++		goto err_disable_regulator;
+ 
++	spin_lock_irqsave(&pmic_typec_pdphy->lock, flags);
++	pmic_typec_pdphy->enabled = true;
++	spin_unlock_irqrestore(&pmic_typec_pdphy->lock, flags);
++
+ 	for (i = 0; i < pmic_typec_pdphy->nr_irqs; i++)
+ 		enable_irq(pmic_typec_pdphy->irq_data[i].irq);
+ 
+-	return 0;
++	dev_dbg(pmic_typec_pdphy->dev, "PD PHY powered on for attached Type-C session\n");
++	goto done;
+ 
+-err_disable_vdd_pdhy:
+-	regulator_disable(pmic_typec_pdphy->vdd_pdphy);
++err_disable_regulator:
++	cleanup_ret = regulator_disable(pmic_typec_pdphy->vdd_pdphy);
++	if (cleanup_ret)
++		dev_err(pmic_typec_pdphy->dev,
++			"failed to disable PD PHY regulator after enable error: %d\n",
++			cleanup_ret);
++err_reset_voltage:
++	cleanup_ret = regulator_set_voltage(pmic_typec_pdphy->vdd_pdphy,
++					    0, VDD_PDPHY_VOL_MAX);
++	if (cleanup_ret)
++		dev_err(pmic_typec_pdphy->dev,
++			"failed to release PD PHY voltage request: %d\n", cleanup_ret);
++err_reset_load:
++	cleanup_ret = regulator_set_load(pmic_typec_pdphy->vdd_pdphy, 0);
++	if (cleanup_ret)
++		dev_err(pmic_typec_pdphy->dev,
++			"failed to release PD PHY load request: %d\n", cleanup_ret);
++done:
++	mutex_unlock(&pmic_typec_pdphy->state_lock);
+ 
+ 	return ret;
+ }
+ 
+-static void qcom_pmic_typec_pdphy_stop(struct pmic_typec *tcpm)
++static int
++qcom_pmic_typec_pdphy_power_off(struct pmic_typec_pdphy *pmic_typec_pdphy)
+ {
+-	struct pmic_typec_pdphy *pmic_typec_pdphy = tcpm->pmic_typec_pdphy;
+-	int i;
++	unsigned long flags;
++	int i, ret, cleanup_ret;
+ 
++	mutex_lock(&pmic_typec_pdphy->state_lock);
++	if (!pmic_typec_pdphy->enabled) {
++		ret = 0;
++		goto done;
++	}
++
++	spin_lock_irqsave(&pmic_typec_pdphy->lock, flags);
++	pmic_typec_pdphy->enabled = false;
++	spin_unlock_irqrestore(&pmic_typec_pdphy->lock, flags);
++
+ 	for (i = 0; i < pmic_typec_pdphy->nr_irqs; i++)
+-		disable_irq(pmic_typec_pdphy->irq_data[i].irq);
++		disable_irq_nosync(pmic_typec_pdphy->irq_data[i].irq);
++	cancel_work(&pmic_typec_pdphy->reset_work);
+ 
+-	qcom_pmic_typec_pdphy_reset_on(pmic_typec_pdphy);
++	spin_lock_irqsave(&pmic_typec_pdphy->lock, flags);
++	ret = qcom_pmic_typec_pdphy_disable(pmic_typec_pdphy);
++	spin_unlock_irqrestore(&pmic_typec_pdphy->lock, flags);
++	if (ret)
++		goto err_restore_pdphy;
+ 
+-	regulator_disable(pmic_typec_pdphy->vdd_pdphy);
++	ret = regulator_disable(pmic_typec_pdphy->vdd_pdphy);
++	if (ret)
++		goto err_restore_pdphy;
++
++	cleanup_ret = regulator_set_voltage(pmic_typec_pdphy->vdd_pdphy,
++					    0, VDD_PDPHY_VOL_MAX);
++	if (cleanup_ret)
++		dev_err(pmic_typec_pdphy->dev,
++			"failed to release PD PHY voltage request: %d\n", cleanup_ret);
++	ret = regulator_set_load(pmic_typec_pdphy->vdd_pdphy, 0);
++	if (ret)
++		dev_err(pmic_typec_pdphy->dev,
++			"failed to release PD PHY load request: %d\n", ret);
++	else
++		ret = cleanup_ret;
++
++	dev_dbg(pmic_typec_pdphy->dev, "PD PHY powered off while Type-C is unattached\n");
++	goto done;
++
++err_restore_pdphy:
++	if (pmic_typec_pdphy_reset(pmic_typec_pdphy))
++		dev_err(pmic_typec_pdphy->dev, "failed to restore PD PHY after power-off error\n");
++	spin_lock_irqsave(&pmic_typec_pdphy->lock, flags);
++	pmic_typec_pdphy->enabled = true;
++	spin_unlock_irqrestore(&pmic_typec_pdphy->lock, flags);
++	for (i = 0; i < pmic_typec_pdphy->nr_irqs; i++)
++		enable_irq(pmic_typec_pdphy->irq_data[i].irq);
++done:
++	mutex_unlock(&pmic_typec_pdphy->state_lock);
++
++	return ret;
+ }
+ 
++static int qcom_pmic_typec_pdphy_start(struct pmic_typec *tcpm,
++				       struct tcpm_port *tcpm_port)
++{
++	struct pmic_typec_pdphy *pmic_typec_pdphy = tcpm->pmic_typec_pdphy;
++
++	pmic_typec_pdphy->tcpm_port = tcpm_port;
++	dev_dbg(pmic_typec_pdphy->dev, "PD PHY left off until Type-C attachment\n");
++
++	return 0;
++}
++
++static void qcom_pmic_typec_pdphy_stop(struct pmic_typec *tcpm)
++{
++	struct pmic_typec_pdphy *pmic_typec_pdphy = tcpm->pmic_typec_pdphy;
++
++	if (qcom_pmic_typec_pdphy_power_off(pmic_typec_pdphy))
++		dev_err(pmic_typec_pdphy->dev, "failed to power off PD PHY\n");
++}
++
+ int qcom_pmic_typec_pdphy_probe(struct platform_device *pdev,
+ 				struct pmic_typec *tcpm,
+ 				const struct pmic_typec_pdphy_resources *res,
+@@ -580,6 +734,7 @@
+ 	pmic_typec_pdphy->regmap = regmap;
+ 	pmic_typec_pdphy->nr_irqs = res->nr_irqs;
+ 	pmic_typec_pdphy->irq_data = irq_data;
++	mutex_init(&pmic_typec_pdphy->state_lock);
+ 	spin_lock_init(&pmic_typec_pdphy->lock);
+ 	INIT_WORK(&pmic_typec_pdphy->reset_work, qcom_pmic_typec_pdphy_sig_reset_work);
+ 
+
