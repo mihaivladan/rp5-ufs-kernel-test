@@ -189,7 +189,7 @@ def apply_patches(repo, source, fix, profile):
         qca_fast = Path(__file__).resolve().parent / "qcom-qca6390-mhi-fast-suspend.patch"
         require(qca_fast.is_file(), "Missing QCA6390 host-only MHI suspend patch")
         require(hashlib.sha256(qca_fast.read_bytes()).hexdigest() ==
-                "cc4c3ccd2139183981f4c29e8384f1137f40809bd7b20e43044d767f441a3323",
+                "ec7fc11648bafc0b50bdc920f1ea5576b246445a986dc548e918ab86be842ac4",
                 "QCA6390 host-only MHI suspend patch checksum mismatch")
         extra_patches.append(qca_fast)
     if profile == "lpm-platform":
