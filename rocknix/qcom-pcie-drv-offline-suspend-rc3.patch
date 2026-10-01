@@ -1,0 +1,117 @@
+--- a/drivers/pci/controller/dwc/pcie-qcom.c
++++ b/drivers/pci/controller/dwc/pcie-qcom.c
+@@ -295,6 +295,7 @@
+ 	bool use_pm_opp;
+ 	bool drv_supported;
+ 	bool drv_armed;
++	bool drv_offline;
+ 	bool drv_resources_suspended;
+ 	bool drv_clocks_disabled;
+ 	bool drv_supplies_disabled;
+@@ -2218,8 +2219,32 @@
+ 	pm_runtime_disable(dev);
+ 
+ 	return ret;
++}
++
++static int qcom_pcie_find_downstream_device(struct pci_dev *pdev, void *data)
++{
++	bool *present = data;
++
++	if (!pci_is_root_bus(pdev->bus)) {
++		*present = true;
++		return 1;
++	}
++
++	return 0;
+ }
+ 
++static bool qcom_pcie_has_downstream_device(struct qcom_pcie *pcie)
++{
++	struct pci_host_bridge *bridge = pcie->pci->pp.bridge;
++	bool present = false;
++
++	if (!bridge || !bridge->bus)
++		return true;
++
++	pci_walk_bus(bridge->bus, qcom_pcie_find_downstream_device, &present);
++	return present;
++}
++
+ static int qcom_pcie_suspend_late(struct device *dev)
+ {
+ 	struct qcom_pcie *pcie = dev_get_drvdata(dev);
+@@ -2230,12 +2255,21 @@
+ 	     pm_suspend_target_state != PM_SUSPEND_MEM))
+ 		return 0;
+ 
+-	if (pcie->drv_armed)
++	if (pcie->drv_armed || pcie->drv_offline)
+ 		return -EBUSY;
+ 
+ 	if (!dw_pcie_link_up(pcie->pci)) {
+-		dev_err(dev, "refusing pcie_drv handoff while link is down\n");
+-		return -ENOLINK;
++		if (qcom_pcie_has_downstream_device(pcie)) {
++			dev_err(dev,
++				"refusing pcie_drv offline suspend with a downstream device\n");
++			return -ENOLINK;
++		}
++
++		pcie->drv_offline = true;
++		dev_info(dev,
++			 "PCIe RC%u endpoint absent; skipping ADSP handoff\n",
++			 pcie->drv_dev_id);
++		return 0;
+ 	}
+ 
+ 	ret = qcom_pcie_drv_handoff(pcie->drv_dev_id,
+@@ -2355,8 +2389,8 @@
+ 	if (pcie->drv_supported &&
+ 	    (pm_suspend_target_state == PM_SUSPEND_TO_IDLE ||
+ 	     pm_suspend_target_state == PM_SUSPEND_MEM)) {
+-		if (!pcie->drv_armed) {
+-			dev_err(dev, "pcie_drv noirq reached without an ACKed handoff\n");
++		if (!pcie->drv_armed && !pcie->drv_offline) {
++			dev_err(dev, "pcie_drv noirq reached without a selected suspend path\n");
+ 			return -EIO;
+ 		}
+ 
+@@ -2420,7 +2454,7 @@
+ 	pcie = dev_get_drvdata(dev);
+ 	if (!pcie)
+ 		return 0;
+-	if (pcie->drv_armed) {
++	if (pcie->drv_armed || pcie->drv_offline) {
+ 		if (!pcie->drv_resources_suspended &&
+ 		    !pcie->drv_clocks_disabled && !pcie->drv_supplies_disabled &&
+ 		    !pcie->drv_icc_mem_disabled && !pcie->drv_icc_cpu_disabled &&
+@@ -2493,9 +2527,27 @@
+ 	struct qcom_pcie *pcie = dev_get_drvdata(dev);
+ 	int ret;
+ 
+-	if (!pcie || !pcie->drv_armed)
++	if (!pcie)
++		return 0;
++
++	if (pcie->drv_offline) {
++		if (pcie->drv_resources_suspended || pcie->drv_clocks_disabled ||
++		    pcie->drv_supplies_disabled || pcie->drv_icc_mem_disabled ||
++		    pcie->drv_icc_cpu_disabled || pcie->drv_opp_disabled) {
++			dev_err(dev, "refusing offline completion before resources are restored\n");
++			return -EIO;
++		}
++
++		pcie->drv_offline = false;
++		qcom_pcie_icc_opp_update(pcie);
++		dev_info(dev, "PCIe RC%u offline suspend completed\n",
++			 pcie->drv_dev_id);
+ 		return 0;
++	}
+ 
++	if (!pcie->drv_armed)
++		return 0;
++
+ 	if (pcie->drv_resources_suspended || pcie->drv_clocks_disabled ||
+ 	    pcie->drv_supplies_disabled || pcie->drv_icc_mem_disabled ||
+ 	    pcie->drv_icc_cpu_disabled || pcie->drv_opp_disabled) {

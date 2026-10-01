@@ -1,0 +1,377 @@
+--- a/drivers/pci/controller/dwc/pcie-qcom.c
++++ b/drivers/pci/controller/dwc/pcie-qcom.c
+@@ -9,6 +9,7 @@
+  */
+ 
+ #include <linux/clk.h>
++#include <linux/clk-provider.h>
+ #include <linux/crc8.h>
+ #include <linux/debugfs.h>
+ #include <linux/delay.h>
+@@ -33,7 +34,9 @@
+ #include <linux/phy/phy.h>
+ #include <linux/regulator/consumer.h>
+ #include <linux/reset.h>
++#include <linux/spinlock.h>
+ #include <linux/slab.h>
++#include <linux/timekeeping.h>
+ #include <linux/types.h>
+ #include <linux/units.h>
+ 
+@@ -79,6 +82,19 @@
+ #define AXI_MSTR_RESP_COMP_CTRL0		0x818
+ #define AXI_MSTR_RESP_COMP_CTRL1		0x81c
+ 
++/* DesignWare DBI diagnostic registers */
++#define QCOM_PCIE_PORT_DEBUG0			0x728
++#define QCOM_PCIE_PORT_DEBUG1			0x72c
++#define QCOM_PCIE_PORT_DEBUG0_LTSSM_MASK	GENMASK(5, 0)
++#define QCOM_PCIE_PORT_DEBUG1_LINK_UP		BIT(4)
++#define QCOM_PCIE_PORT_DEBUG1_TRAINING		BIT(29)
++
++/* Downstream Qualcomm PCIe registers used only by the diagnostic recorder */
++#define PARF_PM_STTS				0x24
++#define PARF_CLKREQ_OVERRIDE			0x2b0
++#define PARF_CLKREQ_IN_ENABLE			BIT(1)
++#define PARF_CLKREQ_IN_VALUE			BIT(3)
++
+ /* MHI registers */
+ #define PARF_DEBUG_CNT_PM_LINKST_IN_L2		0xc04
+ #define PARF_DEBUG_CNT_PM_LINKST_IN_L1		0xc0c
+@@ -282,6 +298,44 @@
+ 	struct list_head perst;
+ };
+ 
++#define QCOM_PCIE_DRV_CLOCK_COUNT	6
++#define QCOM_PCIE_DIAG_SNAPSHOT_COUNT	16
++#define QCOM_PCIE_DIAG_STAGE_LEN		32
++
++struct qcom_pcie_diag_snapshot {
++	u64 timestamp_ns;
++	u32 sequence;
++	char stage[QCOM_PCIE_DIAG_STAGE_LEN];
++	bool mmio_valid;
++	bool drv_armed;
++	bool drv_offline;
++	bool resources_suspended;
++	bool clocks_disabled;
++	bool supplies_disabled;
++	bool icc_mem_disabled;
++	bool icc_cpu_disabled;
++	bool opp_disabled;
++	u32 dbi_debug0;
++	u32 dbi_debug1;
++	u32 dbi_link_control_status;
++	u32 parf_sys_ctrl;
++	u32 parf_pm_ctrl;
++	u32 parf_pm_stts;
++	u32 parf_phy_ctrl;
++	u32 parf_phy_refclk;
++	u32 parf_mhi_clock_reset_ctrl;
++	u32 parf_ltssm;
++	u32 parf_clkreq_override;
++	u32 link_count_l0s;
++	u32 link_count_l1;
++	u32 link_count_l11;
++	u32 link_count_l12;
++	u32 link_count_l2;
++	unsigned long clock_rate[QCOM_PCIE_DRV_CLOCK_COUNT];
++	bool clock_prepared[QCOM_PCIE_DRV_CLOCK_COUNT];
++	bool clock_enabled[QCOM_PCIE_DRV_CLOCK_COUNT];
++};
++
+ struct qcom_pcie {
+ 	struct dw_pcie *pci;
+ 	void __iomem *parf;			/* DT parf */
+@@ -305,7 +359,11 @@
+ 	bool drv_opp_disabled;
+ 	u32 drv_dev_id;
+ 	u32 drv_l1ss_timeout_ms;
+-	struct clk_bulk_data drv_clks[6];
++	struct clk_bulk_data drv_clks[QCOM_PCIE_DRV_CLOCK_COUNT];
++	bool diag_enabled;
++	spinlock_t diag_lock;
++	u32 diag_sequence;
++	struct qcom_pcie_diag_snapshot diag_snapshots[QCOM_PCIE_DIAG_SNAPSHOT_COUNT];
+ };
+ 
+ static const char * const qcom_pcie_drv_clock_names[] = {
+@@ -1752,6 +1810,174 @@
+ 	return ret;
+ }
+ 
++static void qcom_pcie_diag_fill(struct qcom_pcie *pcie,
++				struct qcom_pcie_diag_snapshot *snapshot,
++				const char *stage, bool mmio_valid)
++{
++	struct dw_pcie *pci = pcie->pci;
++	u16 cap;
++	int i;
++
++	memset(snapshot, 0, sizeof(*snapshot));
++	snapshot->timestamp_ns = ktime_get_mono_fast_ns();
++	strscpy(snapshot->stage, stage, sizeof(snapshot->stage));
++	snapshot->mmio_valid = mmio_valid;
++	snapshot->drv_armed = READ_ONCE(pcie->drv_armed);
++	snapshot->drv_offline = READ_ONCE(pcie->drv_offline);
++	snapshot->resources_suspended = READ_ONCE(pcie->drv_resources_suspended);
++	snapshot->clocks_disabled = READ_ONCE(pcie->drv_clocks_disabled);
++	snapshot->supplies_disabled = READ_ONCE(pcie->drv_supplies_disabled);
++	snapshot->icc_mem_disabled = READ_ONCE(pcie->drv_icc_mem_disabled);
++	snapshot->icc_cpu_disabled = READ_ONCE(pcie->drv_icc_cpu_disabled);
++	snapshot->opp_disabled = READ_ONCE(pcie->drv_opp_disabled);
++
++	if (!mmio_valid)
++		return;
++
++	snapshot->dbi_debug0 = readl_relaxed(pci->dbi_base + QCOM_PCIE_PORT_DEBUG0);
++	snapshot->dbi_debug1 = readl_relaxed(pci->dbi_base + QCOM_PCIE_PORT_DEBUG1);
++	cap = dw_pcie_find_capability(pci, PCI_CAP_ID_EXP);
++	if (cap)
++		snapshot->dbi_link_control_status =
++			readl_relaxed(pci->dbi_base + cap + PCI_EXP_LNKCTL);
++
++	snapshot->parf_sys_ctrl = readl_relaxed(pcie->parf + PARF_SYS_CTRL);
++	snapshot->parf_pm_ctrl = readl_relaxed(pcie->parf + PARF_PM_CTRL);
++	snapshot->parf_pm_stts = readl_relaxed(pcie->parf + PARF_PM_STTS);
++	snapshot->parf_phy_ctrl = readl_relaxed(pcie->parf + PARF_PHY_CTRL);
++	snapshot->parf_phy_refclk = readl_relaxed(pcie->parf + PARF_PHY_REFCLK);
++	snapshot->parf_mhi_clock_reset_ctrl =
++		readl_relaxed(pcie->parf + PARF_MHI_CLOCK_RESET_CTRL);
++	snapshot->parf_ltssm = readl_relaxed(pcie->parf + PARF_LTSSM);
++	snapshot->parf_clkreq_override =
++		readl_relaxed(pcie->parf + PARF_CLKREQ_OVERRIDE);
++
++	if (pcie->mhi) {
++		snapshot->link_count_l0s = readl_relaxed(pcie->mhi +
++						PARF_DEBUG_CNT_PM_LINKST_IN_L0S);
++		snapshot->link_count_l1 = readl_relaxed(pcie->mhi +
++						PARF_DEBUG_CNT_PM_LINKST_IN_L1);
++		snapshot->link_count_l11 = readl_relaxed(pcie->mhi +
++						PARF_DEBUG_CNT_AUX_CLK_IN_L1SUB_L1);
++		snapshot->link_count_l12 = readl_relaxed(pcie->mhi +
++						PARF_DEBUG_CNT_AUX_CLK_IN_L1SUB_L2);
++		snapshot->link_count_l2 = readl_relaxed(pcie->mhi +
++						PARF_DEBUG_CNT_PM_LINKST_IN_L2);
++	}
++
++	if (!pcie->drv_supported)
++		return;
++
++	for (i = 0; i < ARRAY_SIZE(pcie->drv_clks); i++) {
++		struct clk_hw *hw = __clk_get_hw(pcie->drv_clks[i].clk);
++
++		snapshot->clock_rate[i] = clk_get_rate(pcie->drv_clks[i].clk);
++		snapshot->clock_prepared[i] = hw && clk_hw_is_prepared(hw);
++		snapshot->clock_enabled[i] = __clk_is_enabled(pcie->drv_clks[i].clk);
++	}
++}
++
++static void qcom_pcie_diag_snapshot(struct qcom_pcie *pcie, const char *stage,
++				    bool mmio_valid)
++{
++	struct qcom_pcie_diag_snapshot snapshot;
++	unsigned long flags;
++	u32 sequence;
++
++	if (!READ_ONCE(pcie->diag_enabled))
++		return;
++
++	qcom_pcie_diag_fill(pcie, &snapshot, stage, mmio_valid);
++
++	spin_lock_irqsave(&pcie->diag_lock, flags);
++	sequence = pcie->diag_sequence++;
++	snapshot.sequence = sequence;
++	pcie->diag_snapshots[sequence % QCOM_PCIE_DIAG_SNAPSHOT_COUNT] = snapshot;
++	spin_unlock_irqrestore(&pcie->diag_lock, flags);
++}
++
++static void qcom_pcie_diag_print_snapshot(struct seq_file *s,
++					 const struct qcom_pcie_diag_snapshot *snapshot)
++{
++	int i;
++
++	seq_printf(s,
++		   "seq=%u time_ns=%llu stage=%s mmio_valid=%u drv_armed=%u drv_offline=%u resources_suspended=%u clocks_disabled=%u supplies_disabled=%u icc_mem_disabled=%u icc_cpu_disabled=%u opp_disabled=%u\n",
++		   snapshot->sequence, snapshot->timestamp_ns, snapshot->stage,
++		   snapshot->mmio_valid, snapshot->drv_armed, snapshot->drv_offline,
++		   snapshot->resources_suspended, snapshot->clocks_disabled,
++		   snapshot->supplies_disabled, snapshot->icc_mem_disabled,
++		   snapshot->icc_cpu_disabled, snapshot->opp_disabled);
++
++	if (!snapshot->mmio_valid)
++		return;
++
++	seq_printf(s,
++		   " dbi_debug0=%#010x ltssm=%#x dbi_debug1=%#010x link_up=%u training=%u lnkctlsta=%#010x\n",
++		   snapshot->dbi_debug0,
++		   snapshot->dbi_debug0 & (u32)QCOM_PCIE_PORT_DEBUG0_LTSSM_MASK,
++		   snapshot->dbi_debug1,
++		   !!(snapshot->dbi_debug1 & QCOM_PCIE_PORT_DEBUG1_LINK_UP),
++		   !!(snapshot->dbi_debug1 & QCOM_PCIE_PORT_DEBUG1_TRAINING),
++		   snapshot->dbi_link_control_status);
++	seq_printf(s,
++		   " parf_sys_ctrl=%#010x parf_pm_ctrl=%#010x parf_pm_stts=%#010x parf_phy_ctrl=%#010x parf_phy_refclk=%#010x\n",
++		   snapshot->parf_sys_ctrl, snapshot->parf_pm_ctrl,
++		   snapshot->parf_pm_stts, snapshot->parf_phy_ctrl,
++		   snapshot->parf_phy_refclk);
++	seq_printf(s,
++		   " parf_mhi_clock_reset_ctrl=%#010x parf_ltssm=%#010x parf_clkreq_override=%#010x clkreq_enable=%u clkreq_value=%u\n",
++		   snapshot->parf_mhi_clock_reset_ctrl, snapshot->parf_ltssm,
++		   snapshot->parf_clkreq_override,
++		   !!(snapshot->parf_clkreq_override & PARF_CLKREQ_IN_ENABLE),
++		   !!(snapshot->parf_clkreq_override & PARF_CLKREQ_IN_VALUE));
++	seq_printf(s, " counters_l0s=%u l1=%u l1_1=%u l1_2=%u l2=%u\n",
++		   snapshot->link_count_l0s, snapshot->link_count_l1,
++		   snapshot->link_count_l11, snapshot->link_count_l12,
++		   snapshot->link_count_l2);
++
++	for (i = 0; i < QCOM_PCIE_DRV_CLOCK_COUNT; i++)
++		seq_printf(s, " clock_%s_rate=%lu prepared=%u enabled=%u\n",
++			   qcom_pcie_drv_clock_names[i], snapshot->clock_rate[i],
++			   snapshot->clock_prepared[i], snapshot->clock_enabled[i]);
++}
++
++static int qcom_pcie_diag_state_show(struct seq_file *s, void *data)
++{
++	struct qcom_pcie *pcie = dev_get_drvdata(s->private);
++	struct qcom_pcie_diag_snapshot snapshot;
++
++	if (READ_ONCE(pcie->drv_resources_suspended) ||
++	    READ_ONCE(pcie->drv_clocks_disabled) ||
++	    READ_ONCE(pcie->drv_supplies_disabled))
++		return -EBUSY;
++
++	qcom_pcie_diag_fill(pcie, &snapshot, "live", true);
++	qcom_pcie_diag_print_snapshot(s, &snapshot);
++	return 0;
++}
++
++static int qcom_pcie_diag_snapshots_show(struct seq_file *s, void *data)
++{
++	struct qcom_pcie *pcie = dev_get_drvdata(s->private);
++	struct qcom_pcie_diag_snapshot snapshots[QCOM_PCIE_DIAG_SNAPSHOT_COUNT];
++	unsigned long flags;
++	u32 count, first, i;
++
++	spin_lock_irqsave(&pcie->diag_lock, flags);
++	count = min_t(u32, pcie->diag_sequence, QCOM_PCIE_DIAG_SNAPSHOT_COUNT);
++	first = pcie->diag_sequence - count;
++	for (i = 0; i < count; i++)
++		snapshots[i] = pcie->diag_snapshots[(first + i) %
++							 QCOM_PCIE_DIAG_SNAPSHOT_COUNT];
++	spin_unlock_irqrestore(&pcie->diag_lock, flags);
++
++	for (i = 0; i < count; i++)
++		qcom_pcie_diag_print_snapshot(s, &snapshots[i]);
++
++	return 0;
++}
++
+ static int qcom_pcie_link_transition_count(struct seq_file *s, void *data)
+ {
+ 	struct qcom_pcie *pcie = (struct qcom_pcie *)dev_get_drvdata(s->private);
+@@ -1787,6 +2013,12 @@
+ 	pcie->debugfs = debugfs_create_dir(name, NULL);
+ 	debugfs_create_devm_seqfile(dev, "link_transition_count", pcie->debugfs,
+ 				    qcom_pcie_link_transition_count);
++	debugfs_create_bool("diag_enable", 0600, pcie->debugfs,
++			    &pcie->diag_enabled);
++	debugfs_create_devm_seqfile(dev, "rc_state", pcie->debugfs,
++				    qcom_pcie_diag_state_show);
++	debugfs_create_devm_seqfile(dev, "diag_snapshots", pcie->debugfs,
++				    qcom_pcie_diag_snapshots_show);
+ }
+ 
+ static void qcom_pci_free_msi(void *ptr)
+@@ -2068,6 +2300,7 @@
+ 	}
+ 
+ 	INIT_LIST_HEAD(&pcie->ports);
++	spin_lock_init(&pcie->diag_lock);
+ 
+ 	pci->dev = dev;
+ 	pci->ops = &dw_pcie_ops;
+@@ -2259,6 +2492,8 @@
+ 	if (pcie->drv_armed || pcie->drv_offline)
+ 		return -EBUSY;
+ 
++	qcom_pcie_diag_snapshot(pcie, "suspend_late_entry", true);
++
+ 	if (!dw_pcie_link_up(pcie->pci)) {
+ 		if (qcom_pcie_has_downstream_device(pcie)) {
+ 			dev_err(dev,
+@@ -2276,6 +2511,7 @@
+ 			 pcie->drv_dev_id);
+ 
+ 		pcie->drv_offline = true;
++		qcom_pcie_diag_snapshot(pcie, "offline_path_selected", true);
+ 		dev_info(dev,
+ 			 "PCIe RC%u endpoint absent; skipping ADSP handoff\n",
+ 			 pcie->drv_dev_id);
+@@ -2290,6 +2526,7 @@
+ 	}
+ 
+ 	pcie->drv_armed = true;
++	qcom_pcie_diag_snapshot(pcie, "adsp_handoff_complete", true);
+ 	dev_info(dev, "PCIe RC%u handed to ADSP\n", pcie->drv_dev_id);
+ 	return 0;
+ }
+@@ -2404,7 +2641,11 @@
+ 			return -EIO;
+ 		}
+ 
+-		return qcom_pcie_drv_suspend_resources(pcie);
++		qcom_pcie_diag_snapshot(pcie, "suspend_noirq_pre", true);
++		ret = qcom_pcie_drv_suspend_resources(pcie);
++		qcom_pcie_diag_snapshot(pcie, ret ? "suspend_noirq_failed" :
++					"suspend_noirq_released", false);
++		return ret;
+ 	}
+ 
+ 	ret = dw_pcie_suspend_noirq(pcie->pci);
+@@ -2465,13 +2706,17 @@
+ 	if (!pcie)
+ 		return 0;
+ 	if (pcie->drv_armed || pcie->drv_offline) {
++		qcom_pcie_diag_snapshot(pcie, "resume_noirq_pre_restore", false);
+ 		if (!pcie->drv_resources_suspended &&
+ 		    !pcie->drv_clocks_disabled && !pcie->drv_supplies_disabled &&
+ 		    !pcie->drv_icc_mem_disabled && !pcie->drv_icc_cpu_disabled &&
+ 		    !pcie->drv_opp_disabled)
+ 			return 0;
+ 
+-		return qcom_pcie_drv_restore_resources(pcie);
++		ret = qcom_pcie_drv_restore_resources(pcie);
++		qcom_pcie_diag_snapshot(pcie, ret ? "resume_noirq_failed" :
++					"resume_noirq_restored", !ret);
++		return ret;
+ 	}
+ 
+ 	if (pcie->pci->suspended) {
+@@ -2540,6 +2785,8 @@
+ 	if (!pcie)
+ 		return 0;
+ 
++	qcom_pcie_diag_snapshot(pcie, "resume_early_entry", true);
++
+ 	if (pcie->drv_offline) {
+ 		if (pcie->drv_resources_suspended || pcie->drv_clocks_disabled ||
+ 		    pcie->drv_supplies_disabled || pcie->drv_icc_mem_disabled ||
+@@ -2559,6 +2806,7 @@
+ 
+ 		pcie->drv_offline = false;
+ 		qcom_pcie_icc_opp_update(pcie);
++		qcom_pcie_diag_snapshot(pcie, "offline_resume_complete", true);
+ 		dev_info(dev, "PCIe RC%u offline suspend completed\n",
+ 			 pcie->drv_dev_id);
+ 		return 0;
+@@ -2582,6 +2830,7 @@
+ 
+ 	pcie->drv_armed = false;
+ 	qcom_pcie_icc_opp_update(pcie);
++	qcom_pcie_diag_snapshot(pcie, "adsp_reclaim_complete", true);
+ 	dev_info(dev, "PCIe RC%u reclaimed from ADSP\n", pcie->drv_dev_id);
+ 	return 0;
+ }
+

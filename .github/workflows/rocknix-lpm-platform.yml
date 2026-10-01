@@ -1,4 +1,4 @@
-name: ConsoleOS RP5 downstream-order PCIe D3cold candidate
+name: ConsoleOS RP5 RC3 super-diagnostic kernel
 on:
   workflow_dispatch:
   push:
@@ -8,6 +8,7 @@ on:
       - 'rocknix/build.sh'
       - 'rocknix/prepare.py'
       - 'rocknix/consoleos-rc1.config'
+      - 'rocknix/superdiag.config'
       - 'rocknix/CONSOLEOS-RC1.md'
       - 'rocknix/sm8250-adsp-no-auto-boot.patch'
       - 'rocknix/q6afe-lpass-hw-vote-handle.patch'
@@ -16,6 +17,9 @@ on:
       - 'rocknix/qcom-pcie-drv-offline-suspend.patch'
       - 'rocknix/qcom-pcie-offline-pinctrl.patch'
       - 'rocknix/qcom-pcie-offline-phy-power.patch'
+      - 'rocknix/qcom-pcie-drv-offline-suspend-rc3.patch'
+      - 'rocknix/qcom-pcie-offline-pinctrl-rc3.patch'
+      - 'rocknix/qcom-pcie-superdiag.patch'
       - 'rocknix/qcom-fg-gen4-coulomb-counter.patch'
       - 'rocknix/retroid-gamepad-remove.patch'
       - 'rocknix/rpmh-regulator-suspend-state.patch'
@@ -39,7 +43,7 @@ jobs:
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 150
     env:
-      ROCKNIX_PROFILE: consoleos-rc1
+      ROCKNIX_PROFILE: superdiag
       CCACHE_DIR: ${{ github.workspace }}/.ccache
       CCACHE_MAXSIZE: 6G
       CCACHE_COMPRESS: 'true'
@@ -76,7 +80,7 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
         with:
           path: .ccache
-          key: rp5-linux-7.2-gcc14-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('rocknix/build.sh', 'rocknix/prepare.py', 'rocknix/consoleos-rc1.config', 'rocknix/*.patch', 'rocknix/*.dts', 'rocknix/*.py') }}
+          key: rp5-linux-7.2-gcc14-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('rocknix/build.sh', 'rocknix/prepare.py', 'rocknix/consoleos-rc1.config', 'rocknix/superdiag.config', 'rocknix/*.patch', 'rocknix/*.dts', 'rocknix/*.py') }}
           restore-keys: |
             rp5-linux-7.2-gcc14-${{ runner.os }}-${{ runner.arch }}-
       - name: Configure kernel compiler cache
@@ -85,30 +89,30 @@ jobs:
           ccache --zero-stats
           ccache --show-config
           printf 'cache_restore=%s\n' '${{ steps.kernel-compiler-cache.outputs.cache-hit }}'
-      - name: Prepare ConsoleOS RP5 downstream-order PCIe D3cold source
+      - name: Prepare ConsoleOS RP5 exact-RC3 super-diagnostic source
         run: |
           set -euo pipefail
-          bash rocknix/build.sh prepare 2>&1 | tee rocknix-consoleos-pcied3c4-prepare.log
-      - name: Build ConsoleOS RP5 downstream-order PCIe D3cold kernel and modules
+          bash rocknix/build.sh prepare 2>&1 | tee rocknix-consoleos-rc3diag1-prepare.log
+      - name: Build ConsoleOS RP5 exact-RC3 super-diagnostic kernel and modules
         run: |
           set -euo pipefail
-          bash rocknix/build.sh compile 2>&1 | tee rocknix-consoleos-pcied3c4-compile.log
+          bash rocknix/build.sh compile 2>&1 | tee rocknix-consoleos-rc3diag1-compile.log
       - name: Report kernel compiler cache
         if: always()
         run: |
           if command -v ccache >/dev/null 2>&1; then
-            ccache --show-stats --verbose | tee rocknix-consoleos-pcied3c4-ccache.log
+            ccache --show-stats --verbose | tee rocknix-consoleos-rc3diag1-ccache.log
           fi
       - name: Upload build and evidence
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
-          name: rocknix-rp5-consoleos-pcied3c4
+          name: rocknix-rp5-consoleos-rc3diag1
           retention-days: 14
           compression-level: 0
           if-no-files-found: error
           path: |
             rocknix-out/
-            rocknix-consoleos-pcied3c4-prepare.log
-            rocknix-consoleos-pcied3c4-compile.log
-            rocknix-consoleos-pcied3c4-ccache.log
+            rocknix-consoleos-rc3diag1-prepare.log
+            rocknix-consoleos-rc3diag1-compile.log
+            rocknix-consoleos-rc3diag1-ccache.log

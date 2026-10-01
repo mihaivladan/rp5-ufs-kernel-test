@@ -57,6 +57,12 @@ consoleos-rc1)
     artifact_name="rocknix-${expected_release}.tar.zst"
     dtb_name='sm8250-retroidpocket-rp5-consoleos-rc1'
     ;;
+superdiag)
+    config_fragment="${kit}/rocknix/superdiag.config"
+    expected_release='7.2.0-consoleos-rc3diag1'
+    artifact_name="rocknix-${expected_release}.tar.zst"
+    dtb_name='sm8250-retroidpocket-rp5-consoleos-rc1'
+    ;;
 pcie-drv-handoff)
     config_fragment="${kit}/rocknix/pcie-drv-handoff.config"
     expected_release='7.2.0-consoleos-pciedrv1'
@@ -220,14 +226,14 @@ elif sys.argv[2] == 'sleepstate-handshake':
     absent_driver = sorted(required_driver - set(driver.splitlines()))
     if absent_driver:
         raise SystemExit('Sleep-state driver markers missing: ' + ', '.join(absent_driver))
-elif sys.argv[2] in ('adsp-no-auto-ab', 'lpass-devote-fix', 'lpass-pm-clock', 'audio-pcie-integration', 'fg-coulomb-counter', 'consoleos-rc1'):
+elif sys.argv[2] in ('adsp-no-auto-ab', 'lpass-devote-fix', 'lpass-pm-clock', 'audio-pcie-integration', 'fg-coulomb-counter', 'consoleos-rc1', 'superdiag'):
     pas = Path('drivers/remoteproc/qcom_q6v5_pas.c').read_text()
     start = pas.index('static const struct qcom_pas_data sm8250_adsp_resource = {')
     end = pas.index('\n};', start)
     block = pas[start:end]
     if block.count('.auto_boot = false,') != 1 or '.auto_boot = true,' in block:
         raise SystemExit('SM8250 ADSP auto-boot was not disabled exactly once')
-    if sys.argv[2] in ('lpass-devote-fix', 'lpass-pm-clock', 'audio-pcie-integration', 'fg-coulomb-counter', 'consoleos-rc1'):
+    if sys.argv[2] in ('lpass-devote-fix', 'lpass-pm-clock', 'audio-pcie-integration', 'fg-coulomb-counter', 'consoleos-rc1', 'superdiag'):
         afe = Path('sound/soc/qcom/qdsp6/q6afe.c').read_text()
         required_afe = (
             'u32 lpass_hw_client_handle;',
@@ -239,7 +245,7 @@ elif sys.argv[2] in ('adsp-no-auto-ab', 'lpass-devote-fix', 'lpass-pm-clock', 'a
         )
         if not all(marker in afe for marker in required_afe):
             raise SystemExit('LPASS hardware vote-handle repair markers missing')
-    if sys.argv[2] in ('lpass-pm-clock', 'audio-pcie-integration', 'fg-coulomb-counter', 'consoleos-rc1'):
+    if sys.argv[2] in ('lpass-pm-clock', 'audio-pcie-integration', 'fg-coulomb-counter', 'consoleos-rc1', 'superdiag'):
         macro_sources = {
             'sound/soc/codecs/lpass-wsa-macro.c': 'wsa',
             'sound/soc/codecs/lpass-va-macro.c': 'va',
@@ -261,7 +267,7 @@ elif sys.argv[2] in ('adsp-no-auto-ab', 'lpass-devote-fix', 'lpass-pm-clock', 'a
             if f'clk_prepare_enable({name}->macro)' in source or \
                f'clk_prepare_enable({name}->dcodec)' in source:
                 raise SystemExit(f'LPASS {name.upper()} still directly enables vote clocks')
-    if sys.argv[2] in ('audio-pcie-integration', 'fg-coulomb-counter', 'consoleos-rc1'):
+    if sys.argv[2] in ('audio-pcie-integration', 'fg-coulomb-counter', 'consoleos-rc1', 'superdiag'):
         required = {
             'CONFIG_PCIE_QCOM=y', 'CONFIG_PCIE_QCOM_DRV=y', 'CONFIG_RPMSG=y',
             'CONFIG_PM_SLEEP=y', 'CONFIG_PM=y',
@@ -290,7 +296,7 @@ elif sys.argv[2] in ('adsp-no-auto-ab', 'lpass-devote-fix', 'lpass-pm-clock', 'a
             raise SystemExit('PCIe DRV PM ordering markers missing')
         if not all(marker in transport for marker in required_transport):
             raise SystemExit('PCIe DRV wire-protocol markers missing')
-    if sys.argv[2] in ('fg-coulomb-counter', 'consoleos-rc1'):
+    if sys.argv[2] in ('fg-coulomb-counter', 'consoleos-rc1', 'superdiag'):
         fg = Path('drivers/power/supply/qcom_fg.c').read_text()
         required_fg = (
             'POWER_SUPPLY_PROP_CHARGE_COUNTER,',
@@ -303,30 +309,46 @@ elif sys.argv[2] in ('adsp-no-auto-ab', 'lpass-devote-fix', 'lpass-pm-clock', 'a
         )
         if not all(marker in fg for marker in required_fg):
             raise SystemExit('PM8150B Gen4 coulomb diagnostic markers missing')
-    if sys.argv[2] == 'consoleos-rc1':
+    if sys.argv[2] in ('consoleos-rc1', 'superdiag'):
         pcie = Path('drivers/pci/controller/dwc/pcie-qcom.c').read_text()
         required_pcie_offline = (
             'bool drv_offline;',
             'static bool qcom_pcie_has_downstream_device(',
-            'pinctrl_pm_select_sleep_state(pci->dev);',
-            'pinctrl_pm_select_default_state(pci->dev);',
-            'PCIe RC%u offline sleep pins selected after L23',
-            'PCIe RC%u offline PHY/clocks down before QCA power-off',
-            'PCIe RC%u offline QCA powered off last',
-            'PCIe RC%u offline default pins restored before QCA power-on',
-            'PCIe RC%u endpoint absent with link %s; skipping ADSP handoff',
-            'PCIe RC%u offline using D3cold host teardown',
-            'PCIe RC%u offline forcing D3cold for empty bus',
-            'PCIe RC%u offline D3cold host teardown completed',
-            'PCIe RC%u offline D3cold host restored',
             'PCIe RC%u offline suspend completed',
         )
         if not all(marker in pcie for marker in required_pcie_offline):
-            raise SystemExit('PCIe offline pinctrl markers missing')
-        dw_host = Path('drivers/pci/controller/dwc/pcie-designware-host.c').read_text()
-        dw_header = Path('drivers/pci/controller/dwc/pcie-designware.h').read_text()
-        if 'bool\t\t\tforce_d3cold;' not in dw_header or 'if (!pci->force_d3cold &&' not in dw_host:
-            raise SystemExit('DesignWare empty-bus D3cold override missing')
+            raise SystemExit('PCIe offline lifecycle markers missing')
+        if sys.argv[2] == 'consoleos-rc1':
+            required_d3cold = (
+                'pinctrl_pm_select_sleep_state(pci->dev);',
+                'pinctrl_pm_select_default_state(pci->dev);',
+                'PCIe RC%u offline sleep pins selected after L23',
+                'PCIe RC%u offline PHY/clocks down before QCA power-off',
+                'PCIe RC%u offline QCA powered off last',
+                'PCIe RC%u offline default pins restored before QCA power-on',
+                'PCIe RC%u endpoint absent with link %s; skipping ADSP handoff',
+                'PCIe RC%u offline using D3cold host teardown',
+                'PCIe RC%u offline forcing D3cold for empty bus',
+                'PCIe RC%u offline D3cold host teardown completed',
+                'PCIe RC%u offline D3cold host restored',
+            )
+            if not all(marker in pcie for marker in required_d3cold):
+                raise SystemExit('PCIe D3cold markers missing')
+            dw_host = Path('drivers/pci/controller/dwc/pcie-designware-host.c').read_text()
+            dw_header = Path('drivers/pci/controller/dwc/pcie-designware.h').read_text()
+            if 'bool\t\t\tforce_d3cold;' not in dw_header or 'if (!pci->force_d3cold &&' not in dw_host:
+                raise SystemExit('DesignWare empty-bus D3cold override missing')
+        else:
+            required_diag = (
+                'QCOM_PCIE_DIAG_SNAPSHOT_COUNT',
+                'qcom_pcie_diag_snapshot(pcie, "suspend_noirq_pre", true);',
+                'qcom_pcie_diag_snapshot(pcie, "resume_noirq_pre_restore", false);',
+                'debugfs_create_bool("diag_enable"',
+                '"diag_snapshots"',
+                '"rc_state"',
+            )
+            if not all(marker in pcie for marker in required_diag):
+                raise SystemExit('PCIe super-diagnostic recorder markers missing')
         gamepad = Path('drivers/input/joystick/retroid.c').read_text()
         required_gamepad = (
             'static void gamepad_mcu_uart_remove(struct serdev_device *serdev)',
@@ -547,7 +569,7 @@ elif [[ "${profile}" == pcie-drv-handoff || "${profile}" == audio-pcie-integrati
         'RP5 PCIe DRV candidate passed: exact Phase 4 wireless tree, running ADSP and opt-in RC0 handoff. Not installed or boot-tested.' \
         > BUILD-SUCCESS.txt
     cd "${source_dir}"
-elif [[ "${profile}" == consoleos-rc1 ]]; then
+elif [[ "${profile}" == consoleos-rc1 || "${profile}" == superdiag ]]; then
     phase4_name='sm8250-retroidpocket-rp5-reenable-display-gpu-gamepad-active-only-ufs-wireless'
     make "${make_args[@]}" -j"$(nproc)" DTC_FLAGS=-@ "qcom/${phase4_name}.dtb"
     python3 "${kit}/rocknix/verify-consoleos-rc1-dtb.py" \
@@ -557,9 +579,15 @@ elif [[ "${profile}" == consoleos-rc1 ]]; then
     cp "arch/arm64/boot/dts/qcom/${dtb_name}.dtb" "${out}/"
     cd "${out}"
     sha256sum "${dtb_name}.dtb" > CONSOLEOS-RC1-DTB-SHA256SUMS
-    printf '%s\n' \
-        'ConsoleOS downstream-order PCIe D3cold candidate passed: endpoint absence forces the empty-bus host teardown; after L23, sleep pins and controller/PHY shutdown precede QCA power-off, and default pins return before QCA power-on. No L1SS or PARF override. Not installed or boot-tested.' \
-        > BUILD-SUCCESS.txt
+    if [[ "${profile}" == superdiag ]]; then
+        printf '%s\n' \
+            'ConsoleOS exact-RC3 super-diagnostic kernel passed: behavior is RC3 plus an opt-in read-only PCIe snapshot recorder. Generic tracing remains runtime-disabled. Not installed or boot-tested.' \
+            > BUILD-SUCCESS.txt
+    else
+        printf '%s\n' \
+            'ConsoleOS downstream-order PCIe D3cold candidate passed: endpoint absence forces the empty-bus host teardown; after L23, sleep pins and controller/PHY shutdown precede QCA power-off, and default pins return before QCA power-on. No L1SS or PARF override. Not installed or boot-tested.' \
+            > BUILD-SUCCESS.txt
+    fi
     cd "${source_dir}"
 elif [[ "${profile}" == slpi-integrated ]]; then
     phase6d_name='sm8250-retroidpocket-rp5-reenable-display-gpu-gamepad-active-only-ufs-wireless-usb-typec-dp-adsp'
@@ -608,7 +636,7 @@ source_dir="${work}/linux-7.2"
 cd "${source_dir}"
 release=$(make "${make_args[@]}" -s kernelrelease)
 test "${release}" = "${expected_release}"
-if [[ "${profile}" == diagnostic || "${profile}" == gpu-rpmh-fix || "${profile}" == sleepstate-handshake || "${profile}" == adsp-no-auto-ab || "${profile}" == lpass-devote-fix || "${profile}" == lpass-pm-clock || "${profile}" == audio-pcie-integration || "${profile}" == fg-coulomb-counter || "${profile}" == consoleos-rc1 || "${profile}" == pcie-drv-handoff || "${profile}" == slpi-integrated || "${profile}" == lpm-platform ]]; then
+if [[ "${profile}" == diagnostic || "${profile}" == gpu-rpmh-fix || "${profile}" == sleepstate-handshake || "${profile}" == adsp-no-auto-ab || "${profile}" == lpass-devote-fix || "${profile}" == lpass-pm-clock || "${profile}" == audio-pcie-integration || "${profile}" == fg-coulomb-counter || "${profile}" == consoleos-rc1 || "${profile}" == superdiag || "${profile}" == pcie-drv-handoff || "${profile}" == slpi-integrated || "${profile}" == lpm-platform ]]; then
     # The previous build exposed an uninitialized cstate pointer in this file.
     printf '\nCFLAGS_dpu_crtc.o += -Werror=uninitialized -Werror=maybe-uninitialized\n' >> drivers/gpu/drm/msm/disp/dpu1/Makefile
 fi
@@ -622,21 +650,21 @@ rm -f "${stage}/lib/modules/${release}/build" "${stage}/lib/modules/${release}/s
 depmod -b "${stage}" "${release}"
 cp System.map Module.symvers "${out}/"
 cp drivers/ufs/host/ufs-qcom.c drivers/ufs/host/ufs-qcom.h "${out}/"
-if [[ "${profile}" == gpu-rpmh-fix || "${profile}" == sleepstate-handshake || "${profile}" == adsp-no-auto-ab || "${profile}" == lpass-devote-fix || "${profile}" == lpass-pm-clock || "${profile}" == audio-pcie-integration || "${profile}" == fg-coulomb-counter || "${profile}" == consoleos-rc1 || "${profile}" == pcie-drv-handoff || "${profile}" == slpi-integrated || "${profile}" == lpm-platform ]]; then
+if [[ "${profile}" == gpu-rpmh-fix || "${profile}" == sleepstate-handshake || "${profile}" == adsp-no-auto-ab || "${profile}" == lpass-devote-fix || "${profile}" == lpass-pm-clock || "${profile}" == audio-pcie-integration || "${profile}" == fg-coulomb-counter || "${profile}" == consoleos-rc1 || "${profile}" == superdiag || "${profile}" == pcie-drv-handoff || "${profile}" == slpi-integrated || "${profile}" == lpm-platform ]]; then
     cp drivers/gpu/drm/msm/adreno/a6xx_gmu.c "${out}/"
 fi
 if [[ "${profile}" == sleepstate-handshake || "${profile}" == slpi-integrated || "${profile}" == lpm-platform ]]; then
     cp drivers/soc/qcom/smp2p_sleepstate.c "${out}/"
     cp "arch/arm64/boot/dts/qcom/${dtb_name}.dts" "${out}/"
 fi
-if [[ "${profile}" == adsp-no-auto-ab || "${profile}" == lpass-devote-fix || "${profile}" == lpass-pm-clock || "${profile}" == audio-pcie-integration || "${profile}" == fg-coulomb-counter || "${profile}" == consoleos-rc1 || "${profile}" == pcie-drv-handoff || "${profile}" == slpi-integrated || "${profile}" == lpm-platform ]]; then
+if [[ "${profile}" == adsp-no-auto-ab || "${profile}" == lpass-devote-fix || "${profile}" == lpass-pm-clock || "${profile}" == audio-pcie-integration || "${profile}" == fg-coulomb-counter || "${profile}" == consoleos-rc1 || "${profile}" == superdiag || "${profile}" == pcie-drv-handoff || "${profile}" == slpi-integrated || "${profile}" == lpm-platform ]]; then
     cp drivers/remoteproc/qcom_q6v5_pas.c "${out}/"
 fi
-if [[ "${profile}" == lpass-devote-fix || "${profile}" == lpass-pm-clock || "${profile}" == audio-pcie-integration || "${profile}" == fg-coulomb-counter || "${profile}" == consoleos-rc1 ]]; then
+if [[ "${profile}" == lpass-devote-fix || "${profile}" == lpass-pm-clock || "${profile}" == audio-pcie-integration || "${profile}" == fg-coulomb-counter || "${profile}" == consoleos-rc1 || "${profile}" == superdiag ]]; then
     cp sound/soc/qcom/qdsp6/q6afe.c "${out}/"
     objdump -drS sound/soc/qcom/qdsp6/q6afe.o > "${out}/q6afe-disassembly.txt"
 fi
-if [[ "${profile}" == lpass-pm-clock || "${profile}" == audio-pcie-integration || "${profile}" == fg-coulomb-counter || "${profile}" == consoleos-rc1 ]]; then
+if [[ "${profile}" == lpass-pm-clock || "${profile}" == audio-pcie-integration || "${profile}" == fg-coulomb-counter || "${profile}" == consoleos-rc1 || "${profile}" == superdiag ]]; then
     for macro in wsa va rx tx; do
         cp "sound/soc/codecs/lpass-${macro}-macro.c" "${out}/"
         objdump -drS "sound/soc/codecs/lpass-${macro}-macro.o" \
@@ -646,7 +674,7 @@ fi
 if [[ "${profile}" == lpm-platform ]]; then
     cp drivers/soc/qcom/qcom_lpm_platform_suspend.c "${out}/"
 fi
-if [[ "${profile}" == pcie-drv-handoff || "${profile}" == audio-pcie-integration || "${profile}" == fg-coulomb-counter || "${profile}" == consoleos-rc1 ]]; then
+if [[ "${profile}" == pcie-drv-handoff || "${profile}" == audio-pcie-integration || "${profile}" == fg-coulomb-counter || "${profile}" == consoleos-rc1 || "${profile}" == superdiag ]]; then
     cp drivers/pci/controller/dwc/pcie-qcom.c \
         drivers/pci/controller/dwc/pcie-qcom-drv.c \
         drivers/pci/controller/dwc/pcie-qcom-drv.h "${out}/"
@@ -654,11 +682,11 @@ if [[ "${profile}" == pcie-drv-handoff || "${profile}" == audio-pcie-integration
     objdump -drS drivers/pci/controller/dwc/pcie-qcom.o > "${out}/pcie-qcom-disassembly.txt"
     objdump -drS drivers/pci/controller/dwc/pcie-qcom-drv.o > "${out}/pcie-qcom-drv-disassembly.txt"
 fi
-if [[ "${profile}" == fg-coulomb-counter || "${profile}" == consoleos-rc1 ]]; then
+if [[ "${profile}" == fg-coulomb-counter || "${profile}" == consoleos-rc1 || "${profile}" == superdiag ]]; then
     cp drivers/power/supply/qcom_fg.c drivers/power/supply/qcom_fg.o "${out}/"
     objdump -drS drivers/power/supply/qcom_fg.o > "${out}/qcom-fg-disassembly.txt"
 fi
-if [[ "${profile}" == consoleos-rc1 ]]; then
+if [[ "${profile}" == consoleos-rc1 || "${profile}" == superdiag ]]; then
     cp drivers/input/joystick/retroid.c drivers/input/joystick/retroid.o "${out}/"
     cp drivers/regulator/qcom-rpmh-regulator.c drivers/regulator/qcom-rpmh-regulator.o \
         drivers/regulator/core.c "${out}/"
@@ -666,7 +694,7 @@ if [[ "${profile}" == consoleos-rc1 ]]; then
     objdump -drS drivers/regulator/qcom-rpmh-regulator.o \
         > "${out}/qcom-rpmh-regulator-disassembly.txt"
 fi
-if [[ "${profile}" == diagnostic || "${profile}" == gpu-rpmh-fix || "${profile}" == sleepstate-handshake || "${profile}" == adsp-no-auto-ab || "${profile}" == lpass-devote-fix || "${profile}" == lpass-pm-clock || "${profile}" == audio-pcie-integration || "${profile}" == fg-coulomb-counter || "${profile}" == consoleos-rc1 || "${profile}" == pcie-drv-handoff || "${profile}" == slpi-integrated || "${profile}" == lpm-platform ]]; then
+if [[ "${profile}" == diagnostic || "${profile}" == gpu-rpmh-fix || "${profile}" == sleepstate-handshake || "${profile}" == adsp-no-auto-ab || "${profile}" == lpass-devote-fix || "${profile}" == lpass-pm-clock || "${profile}" == audio-pcie-integration || "${profile}" == fg-coulomb-counter || "${profile}" == consoleos-rc1 || "${profile}" == superdiag || "${profile}" == pcie-drv-handoff || "${profile}" == slpi-integrated || "${profile}" == lpm-platform ]]; then
     objcopy --dump-section .BTF="${out}/vmlinux.btf" vmlinux
     cp drivers/gpu/drm/msm/disp/dpu1/dpu_crtc.c drivers/gpu/drm/msm/disp/dpu1/dpu_crtc.o "${out}/"
     objdump -drS drivers/gpu/drm/msm/disp/dpu1/dpu_crtc.o > "${out}/dpu_crtc-disassembly.txt"
@@ -675,7 +703,7 @@ elif [[ "${profile}" == gmu-clock-reset ]]; then
 fi
 test -s "${stage}/boot/KERNEL"
 test -s "${stage}/lib/modules/${release}/modules.dep"
-if [[ "${profile}" == diagnostic || "${profile}" == gpu-rpmh-fix || "${profile}" == sleepstate-handshake || "${profile}" == adsp-no-auto-ab || "${profile}" == lpass-devote-fix || "${profile}" == lpass-pm-clock || "${profile}" == audio-pcie-integration || "${profile}" == fg-coulomb-counter || "${profile}" == consoleos-rc1 || "${profile}" == pcie-drv-handoff || "${profile}" == slpi-integrated || "${profile}" == lpm-platform ]]; then
+if [[ "${profile}" == diagnostic || "${profile}" == gpu-rpmh-fix || "${profile}" == sleepstate-handshake || "${profile}" == adsp-no-auto-ab || "${profile}" == lpass-devote-fix || "${profile}" == lpass-pm-clock || "${profile}" == audio-pcie-integration || "${profile}" == fg-coulomb-counter || "${profile}" == consoleos-rc1 || "${profile}" == superdiag || "${profile}" == pcie-drv-handoff || "${profile}" == slpi-integrated || "${profile}" == lpm-platform ]]; then
     test -s "${out}/vmlinux.btf"
 fi
 tar -C "${stage}" -cf - boot lib | zstd -T0 -10 -o "${out}/${artifact_name}"

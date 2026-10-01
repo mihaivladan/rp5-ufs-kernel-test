@@ -1,0 +1,42 @@
+--- a/drivers/pci/controller/dwc/pcie-qcom.c
++++ b/drivers/pci/controller/dwc/pcie-qcom.c
+@@ -24,6 +24,7 @@
+ #include <linux/pci-ecam.h>
+ #include <linux/pci-pwrctrl.h>
+ #include <linux/pm_opp.h>
++#include <linux/pinctrl/consumer.h>
+ #include <linux/pm_runtime.h>
+ #include <linux/platform_device.h>
+ #include <linux/phy/pcie.h>
+@@ -2265,6 +2266,15 @@ static int qcom_pcie_suspend_late(struct device *dev)
+ 			return -ENOLINK;
+ 		}
+ 
++		ret = pinctrl_pm_select_sleep_state(dev);
++		if (ret) {
++			dev_err(dev, "failed to select PCIe offline sleep pins: %d\n",
++				ret);
++			return ret;
++		}
++		dev_info(dev, "PCIe RC%u offline sleep pins selected\n",
++			 pcie->drv_dev_id);
++
+ 		pcie->drv_offline = true;
+ 		dev_info(dev,
+ 			 "PCIe RC%u endpoint absent; skipping ADSP handoff\n",
+@@ -2540,6 +2550,15 @@ static int qcom_pcie_resume_early(struct device *dev)
+ 			return -EIO;
+ 		}
+ 
++		ret = pinctrl_pm_select_default_state(dev);
++		if (ret) {
++			dev_err(dev, "failed to restore PCIe offline default pins: %d\n",
++				ret);
++			return ret;
++		}
++		dev_info(dev, "PCIe RC%u offline default pins restored\n",
++			 pcie->drv_dev_id);
++
+ 		pcie->drv_offline = false;
+ 		qcom_pcie_icc_opp_update(pcie);
+ 		dev_info(dev, "PCIe RC%u offline suspend completed\n",
