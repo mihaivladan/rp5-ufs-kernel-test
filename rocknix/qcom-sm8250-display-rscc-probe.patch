@@ -1,0 +1,177 @@
+diff --git a/drivers/gpu/drm/msm/msm_mdss.c b/drivers/gpu/drm/msm/msm_mdss.c
+index 8a4d266ec7be..c1d6590f75e4 100644
+--- a/drivers/gpu/drm/msm/msm_mdss.c
++++ b/drivers/gpu/drm/msm/msm_mdss.c
+@@ -6,11 +6,13 @@
+ #include <linux/bitfield.h>
+ #include <linux/clk.h>
+ #include <linux/delay.h>
++#include <linux/io.h>
+ #include <linux/interconnect.h>
+ #include <linux/irq.h>
+ #include <linux/irqchip.h>
+ #include <linux/irqdesc.h>
+ #include <linux/irqchip/chained_irq.h>
++#include <linux/of_clk.h>
+ #include <linux/of_platform.h>
+ #include <linux/platform_device.h>
+ #include <linux/pm_runtime.h>
+@@ -21,6 +23,30 @@
+ 
+ #define MIN_IB_BW	400000000UL /* Min ib vote 400MB */
+ 
++/*
++ * Read-only ConsoleOS diagnostic for the display RSC that downstream Android
++ * owns but upstream Linux does not model on SM8250.  The offsets below are
++ * the exact register set used by Qualcomm's downstream sde_rsc_debug_show().
++ */
++#define SM8250_RSCC_DRV_PHYS		0x0af20000
++#define SM8250_RSCC_DRV_SIZE		0x00003c50
++#define SM8250_RSCC_WRAPPER_PHYS	0x0af30000
++#define SM8250_RSCC_WRAPPER_SIZE	0x00003fd4
++
++#define RSCC_ERROR_IRQ_STATUS		0x0d0
++#define RSCC_SEQ_BUSY			0x404
++#define RSCC_SEQ_PROGRAM_COUNTER	0x408
++#define RSCC_SOLVER_OVERRIDE_CTRL	0xc14
++#define RSCC_SOLVER_MODES_ENABLED	0xc20
++#define RSCC_SOLVER_STATUS0		0xc24
++#define RSCC_SOLVER_STATUS1		0xc28
++#define RSCC_SOLVER_STATUS2		0xc2c
++#define RSCC_AMC_TCS_MODE_IRQ_STATUS	0x1c00
++
++#define RSCC_WRAPPER_CTRL		0x000
++#define RSCC_WRAPPER_OVERRIDE_CTRL	0x004
++#define RSCC_WRAPPER_POWER_CTRL		0x024
++
+ struct msm_mdss_data {
+ 	u32 reg_bus_bw;
+ };
+@@ -42,6 +67,11 @@ struct msm_mdss {
+ 	struct icc_path *mdp_path[2];
+ 	u32 num_mdp_paths;
+ 	struct icc_path *reg_bus_path;
++
++	struct clk *rscc_ahb_clk;
++	void __iomem *rscc_drv;
++	void __iomem *rscc_wrapper;
++	u32 rscc_probe_count;
+ };
+ 
+ static int msm_mdss_parse_data_bus_icc_path(struct device *dev,
+@@ -271,6 +302,91 @@ static int msm_mdss_enable(struct msm_mdss *msm_mdss)
+ 	return ret;
+ }
+ 
++static void msm_mdss_clk_put(void *data)
++{
++	clk_put(data);
++}
++
++static int msm_mdss_rscc_probe_init(struct msm_mdss *msm_mdss)
++{
++	struct of_phandle_args clkspec;
++	struct device *dev = msm_mdss->dev;
++	int ret;
++
++	if (!of_property_present(dev->of_node,
++				 "consoleos,display-rscc-ahb-clock"))
++		return 0;
++
++	ret = of_parse_phandle_with_args(dev->of_node,
++					 "consoleos,display-rscc-ahb-clock",
++					 "#clock-cells", 0, &clkspec);
++	if (ret)
++		return dev_err_probe(dev, ret,
++				     "failed to parse display RSCC AHB clock\n");
++
++	msm_mdss->rscc_ahb_clk = of_clk_get_from_provider(&clkspec);
++	of_node_put(clkspec.np);
++	if (IS_ERR(msm_mdss->rscc_ahb_clk))
++		return dev_err_probe(dev, PTR_ERR(msm_mdss->rscc_ahb_clk),
++				     "failed to acquire display RSCC AHB clock\n");
++
++	ret = devm_add_action_or_reset(dev, msm_mdss_clk_put,
++				       msm_mdss->rscc_ahb_clk);
++	if (ret)
++		return ret;
++
++	msm_mdss->rscc_drv = devm_ioremap(dev, SM8250_RSCC_DRV_PHYS,
++					  SM8250_RSCC_DRV_SIZE);
++	if (!msm_mdss->rscc_drv)
++		return -ENOMEM;
++
++	msm_mdss->rscc_wrapper = devm_ioremap(dev, SM8250_RSCC_WRAPPER_PHYS,
++					      SM8250_RSCC_WRAPPER_SIZE);
++	if (!msm_mdss->rscc_wrapper)
++		return -ENOMEM;
++
++	dev_info(dev, "consoleos-rscc-probe: guarded read-only probe armed\n");
++	return 0;
++}
++
++static void msm_mdss_rscc_probe(struct msm_mdss *msm_mdss)
++{
++	struct device *dev = msm_mdss->dev;
++	int ret;
++
++	if (!msm_mdss->rscc_ahb_clk)
++		return;
++
++	ret = clk_prepare_enable(msm_mdss->rscc_ahb_clk);
++	if (ret) {
++		dev_err(dev, "consoleos-rscc-probe: clock-enable failed: %d\n",
++			ret);
++		return;
++	}
++
++	msm_mdss->rscc_probe_count++;
++	dev_info(dev,
++		 "consoleos-rscc-probe: sample=%u drv error=%#010x busy=%#010x pc=%#010x override=%#010x modes=%#010x status0=%#010x status1=%#010x status2=%#010x amc=%#010x\n",
++		 msm_mdss->rscc_probe_count,
++		 readl(msm_mdss->rscc_drv + RSCC_ERROR_IRQ_STATUS),
++		 readl(msm_mdss->rscc_drv + RSCC_SEQ_BUSY),
++		 readl(msm_mdss->rscc_drv + RSCC_SEQ_PROGRAM_COUNTER),
++		 readl(msm_mdss->rscc_drv + RSCC_SOLVER_OVERRIDE_CTRL),
++		 readl(msm_mdss->rscc_drv + RSCC_SOLVER_MODES_ENABLED),
++		 readl(msm_mdss->rscc_drv + RSCC_SOLVER_STATUS0),
++		 readl(msm_mdss->rscc_drv + RSCC_SOLVER_STATUS1),
++		 readl(msm_mdss->rscc_drv + RSCC_SOLVER_STATUS2),
++		 readl(msm_mdss->rscc_drv + RSCC_AMC_TCS_MODE_IRQ_STATUS));
++	dev_info(dev,
++		 "consoleos-rscc-probe: sample=%u wrapper ctrl=%#010x override=%#010x power=%#010x\n",
++		 msm_mdss->rscc_probe_count,
++		 readl(msm_mdss->rscc_wrapper + RSCC_WRAPPER_CTRL),
++		 readl(msm_mdss->rscc_wrapper + RSCC_WRAPPER_OVERRIDE_CTRL),
++		 readl(msm_mdss->rscc_wrapper + RSCC_WRAPPER_POWER_CTRL));
++
++	clk_disable_unprepare(msm_mdss->rscc_ahb_clk);
++}
++
+ static int msm_mdss_disable(struct msm_mdss *msm_mdss)
+ {
+ 	int i;
+@@ -411,3 +527,7 @@ static struct msm_mdss *msm_mdss_init(struct platform_device *pdev, bool is_mdp5
+ 	msm_mdss->dev = &pdev->dev;
++	ret = msm_mdss_rscc_probe_init(msm_mdss);
++	if (ret)
++		return ERR_PTR(ret);
++
+ 
+ 	irq = platform_get_irq(pdev, 0);
+@@ -429,9 +549,14 @@ static int __maybe_unused mdss_runtime_suspend(struct device *dev)
+ {
+ 	struct msm_mdss *mdss = dev_get_drvdata(dev);
++	int ret;
+ 
+ 	DBG("");
+ 
+-	return msm_mdss_disable(mdss);
++	ret = msm_mdss_disable(mdss);
++	if (!ret)
++		msm_mdss_rscc_probe(mdss);
++
++	return ret;
+ }
+ 
+ static int __maybe_unused mdss_runtime_resume(struct device *dev)
