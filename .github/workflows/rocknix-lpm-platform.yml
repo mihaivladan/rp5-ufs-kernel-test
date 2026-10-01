@@ -73,10 +73,10 @@ jobs:
           sudo apt-get install -y build-essential gcc-14 g++-14 ccache bc bison flex libssl-dev libelf-dev dwarves zstd xz-utils cpio kmod rsync squashfs-tools device-tree-compiler
       - name: Restore kernel compiler cache
         id: kernel-compiler-cache
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
         with:
           path: .ccache
-          key: rp5-linux-7.2-gcc14-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('rocknix/build.sh', 'rocknix/prepare.py', 'rocknix/consoleos-rc1.config', 'rocknix/*.patch', 'rocknix/*.dts', 'rocknix/*.py') }}
+          key: rp5-linux-7.2-gcc14-${{ runner.os }}-${{ runner.arch }}-${{ github.run_id }}
           restore-keys: |
             rp5-linux-7.2-gcc14-${{ runner.os }}-${{ runner.arch }}-
       - name: Configure kernel compiler cache
@@ -99,6 +99,12 @@ jobs:
           if command -v ccache >/dev/null 2>&1; then
             ccache --show-stats --verbose | tee rocknix-consoleos-rc6-ccache.log
           fi
+      - name: Save successful kernel compiler cache
+        if: success()
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+        with:
+          path: .ccache
+          key: rp5-linux-7.2-gcc14-${{ runner.os }}-${{ runner.arch }}-${{ github.run_id }}
       - name: Upload build and evidence
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
