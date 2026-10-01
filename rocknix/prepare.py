@@ -183,7 +183,7 @@ def apply_patches(repo, source, fix, profile):
         pdphy_gating = Path(__file__).resolve().parent / "qcom-pmic-typec-pdphy-attach-gating.patch"
         require(pdphy_gating.is_file(), "Missing PM8150B PD-PHY attach-gating patch")
         require(hashlib.sha256(pdphy_gating.read_bytes()).hexdigest() ==
-                "d5ebc031055adfa45a24f3b7df9454071d6d1b84575b0f076e4d854471a6f105",
+                "a5eb215c6a2477407882e345bfff4b0a7f5864196c7773456507fd7ad4de8c59",
                 "PM8150B PD-PHY attach-gating patch checksum mismatch")
         extra_patches.append(pdphy_gating)
     if profile == "lpm-platform":
@@ -301,6 +301,14 @@ def apply_patches(repo, source, fix, profile):
         stop = pdphy.index("qcom_pmic_typec_pdphy_stop(", start)
         require("regulator_enable(" not in pdphy[start:stop],
                 "PM8150B PD PHY is still powered at driver start")
+        tx_signal = pdphy.index("qcom_pmic_typec_pdphy_pd_transmit_signal(")
+        tx_payload = pdphy.index("qcom_pmic_typec_pdphy_pd_transmit_payload(", tx_signal)
+        receive = pdphy.index("qcom_pmic_typec_pdphy_pd_receive(", tx_payload)
+        isr = pdphy.index("qcom_pmic_typec_pdphy_isr(", receive)
+        require("state_lock" not in pdphy[tx_signal:tx_payload],
+                "PD signal transmit has an unbalanced state mutex")
+        require("state_lock" not in pdphy[receive:isr],
+                "PD receive has an unbalanced state mutex")
         port = (source / "drivers/usb/typec/tcpm/qcom/qcom_pmic_typec_port.c").read_text()
         require("int qcom_pmic_typec_port_is_attached(struct pmic_typec *tcpm)" in port and
                 "return !!(misc & CC_ATTACHED);" in port,

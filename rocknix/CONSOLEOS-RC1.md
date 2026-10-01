@@ -1,10 +1,10 @@
-# ConsoleOS RP5 kernel RC5
+# ConsoleOS RP5 kernel RC6
 
 This profile consolidates the device-tested native Linux fixes on the ROCKNIX
 20260901 / Linux 7.2 baseline. It deliberately excludes diagnostic changes
 that failed, had no measurable effect, or widened the test matrix.
 
-RC5 keeps the exact device-proven RC3 base and adds one product-facing change:
+RC6 keeps the exact device-proven RC3 base and adds one product-facing change:
 the PM8150B PD PHY and its L2A regulator request remain off while USB-C is
 unplugged. The CC/Type-C port stays active for cable detection. TCPM powers the
 PD PHY before an attached session and powers it back down after disconnect.
@@ -18,7 +18,12 @@ The RC3 base is RC2 plus the exact three RPMh regulator suspend patches used
 by the device-tested `pcieoff1` baseline. They mirror ACTIVE regulator requests
 into the RPMh SLEEP cache, provide SLEEP/WAKE regulator operations, map existing
 `regulator-state-mem` constraints onto s2idle, and retain the diagnostic mode
-marker. RC5 adds no new DT rail policy.
+marker. RC6 adds no new DT rail policy.
+
+RC6 corrects the attached-session locking audit finding in the first RC5
+build: PD signal transmission no longer leaves `state_lock` held, and the
+threaded receive IRQ no longer unlocks a mutex it did not acquire. The
+unplugged power-gating behavior measured by Phase 4CT is otherwise unchanged.
 
 RC2 was RC1 plus the Phase 4BL-proven QCA-off PCIe lifecycle: an absent
 endpoint uses the validated offline resource-suspend path, GPIO80 changes from
@@ -52,6 +57,6 @@ the PCIe0 sleep pinctrl state proven by Phase 4BL. It does not enable
 QCE, Venus, CDSP, or SLPI. It does not include speculative RPMh rail policies,
 PCIe PHY power-off, or the failed exact-PSCI-state platform driver.
 
-RC5 retains BTF, ftrace, kprobes, PM diagnostics, and the fuel-gauge interface
+RC6 retains BTF, ftrace, kprobes, PM diagnostics, and the fuel-gauge interface
 so the one-shot qualification boot can prove residency and recovery. These can
 be stripped only after the RC passes the product validation matrix.
