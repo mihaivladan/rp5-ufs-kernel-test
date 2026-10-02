@@ -189,7 +189,7 @@ def apply_patches(repo, source, fix, profile):
         qca_runtime_pm = Path(__file__).resolve().parent / "qcom-ath11k-qca6390-runtime-pm.patch"
         require(qca_runtime_pm.is_file(), "Missing QCA6390 dynamic runtime-PM patch")
         require(hashlib.sha256(qca_runtime_pm.read_bytes()).hexdigest() ==
-                "32128d522a08c79a917b10282ab72bbf96e9815481f97b5857ec04bb21e22c36",
+                "233150e4a8aaa8909116a0da3934720365fc7ce6ef3c9bfcd720287b789a9132",
                 "QCA6390 dynamic runtime-PM patch checksum mismatch")
         extra_patches.append(qca_runtime_pm)
     if profile == "lpm-platform":
