@@ -53,7 +53,7 @@ fg-coulomb-counter)
     ;;
 consoleos-rc1)
     config_fragment="${kit}/rocknix/consoleos-rc1.config"
-    expected_release='7.2.0-consoleos-rc10'
+    expected_release='7.2.0-consoleos-rc11'
     artifact_name="rocknix-${expected_release}.tar.zst"
     dtb_name='sm8250-retroidpocket-rp5-consoleos-rc1'
     ;;
@@ -338,10 +338,12 @@ elif sys.argv[2] in ('adsp-no-auto-ab', 'lpass-devote-fix', 'lpass-pm-clock', 'a
         required_ath_pci = (
             'module_param_named(qca6390_runtime_pm, qca6390_runtime_pm, bool, 0644);',
             'pm_runtime_set_autosuspend_delay(dev, 500);',
+            'pm_runtime_allow(dev);',
             'ret = mhi_pm_suspend(ab_pci->mhi_ctrl);',
+            'pci_save_state(pdev);',
             'ret = mhi_pm_resume(ab_pci->mhi_ctrl);',
-            'QCA6390 runtime suspend complete:',
-            'QCA6390 runtime resume complete:',
+            'QCA6390 runtime suspend complete: count=%u MHI=%u endpoint=D0',
+            'QCA6390 runtime resume complete: count=%u MHI=%u endpoint=D0',
             'SET_RUNTIME_PM_OPS(ath11k_pci_runtime_suspend,',
         )
         if not all(marker in ath_pci for marker in required_ath_pci):
@@ -354,7 +356,7 @@ elif sys.argv[2] in ('adsp-no-auto-ab', 'lpass-devote-fix', 'lpass-pm-clock', 'a
         if not all(marker in ath_pci_h for marker in required_ath_pci_h):
             raise SystemExit('ath11k runtime-PM state markers missing')
         if 'mhi_pm_fast_suspend(' in ath_mhi or 'mhi_pm_fast_resume(' in ath_mhi:
-            raise SystemExit('RC9 host-only fast-MHI experiment leaked into RC10')
+            raise SystemExit('RC9 host-only fast-MHI experiment leaked into RC11')
 elif sys.argv[2] == 'pcie-drv-handoff':
     required = {
         'CONFIG_PCIE_QCOM=y', 'CONFIG_PCIE_QCOM_DRV=y', 'CONFIG_RPMSG=y',
@@ -577,7 +579,7 @@ elif [[ "${profile}" == consoleos-rc1 ]]; then
     cd "${out}"
     sha256sum "${dtb_name}.dtb" > CONSOLEOS-RC1-DTB-SHA256SUMS
     printf '%s\n' \
-        'ConsoleOS RC10 diagnostic built: exact RC6 product base plus opt-in QCA6390 dynamic MHI/PCI runtime PM with a 500 ms autosuspend delay. Not installed or boot-tested.' \
+        'ConsoleOS RC11 diagnostic built: exact RC6 product base plus opt-in QCA6390 dynamic MHI runtime PM with a 500 ms autosuspend delay and the PCIe-DRV-compatible endpoint retained in D0. Not installed or boot-tested.' \
         > BUILD-SUCCESS.txt
     cd "${source_dir}"
 elif [[ "${profile}" == slpi-integrated ]]; then

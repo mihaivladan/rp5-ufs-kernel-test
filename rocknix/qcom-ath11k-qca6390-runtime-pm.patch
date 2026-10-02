@@ -57,7 +57,7 @@ index a163168..6240dd0 100644
 +static bool qca6390_runtime_pm;
 +module_param_named(qca6390_runtime_pm, qca6390_runtime_pm, bool, 0644);
 +MODULE_PARM_DESC(qca6390_runtime_pm,
-+		 "Enable opt-in QCA6390 MHI/PCI runtime PM with 500 ms autosuspend");
++		 "Enable opt-in QCA6390 MHI/D0 runtime PM with 500 ms autosuspend");
 +
 +bool ath11k_pci_runtime_pm_enabled(struct ath11k_pci *ab_pci)
 +{
@@ -85,7 +85,7 @@ index a163168..6240dd0 100644
  }
  
  static void ath11k_pci_bus_release(struct ath11k_base *ab)
-@@ -54,6 +77,33 @@ static void ath11k_pci_bus_release(struct ath11k_base *ab)
+@@ -54,6 +77,28 @@ static void ath11k_pci_bus_release(struct ath11k_base *ab)
  	struct ath11k_pci *ab_pci = ath11k_pci_priv(ab);
  
  	mhi_device_put(ab_pci->mhi_ctrl->mhi_dev);
@@ -103,23 +103,18 @@ index a163168..6240dd0 100644
 +	if (!ath11k_pci_runtime_pm_enabled(ab_pci))
 +		return;
 +
-+	if (!pci_pme_capable(ab_pci->pdev, PCI_D3hot)) {
-+		ath11k_warn(ab_pci->ab,
-+			   "QCA6390 runtime PM requires PME from D3hot\n");
-+		return;
-+	}
-+
 +	pm_runtime_set_autosuspend_delay(dev, 500);
 +	pm_runtime_use_autosuspend(dev);
++	ab_pci->runtime_pm_configured = true;
 +	pm_runtime_mark_last_busy(dev);
 +	pm_runtime_put_noidle(dev);
-+	ab_pci->runtime_pm_configured = true;
++	pm_runtime_allow(dev);
 +	ath11k_info(ab_pci->ab,
-+		    "QCA6390 dynamic runtime PM enabled: autosuspend=500 ms\n");
++		    "QCA6390 dynamic runtime PM enabled: autosuspend=500 ms endpoint=D0\n");
  }
  
  static u32 ath11k_pci_get_window_start(struct ath11k_base *ab, u32 offset)
-@@ -1142,6 +1192,9 @@ unsupported_wcn6855_soc:
+@@ -1142,6 +1187,9 @@ unsupported_wcn6855_soc:
  		ath11k_err(ab, "failed to init core: %d\n", ret);
  		goto err_free_irq;
  	}
@@ -129,7 +124,7 @@ index a163168..6240dd0 100644
  	ath11k_qmi_fwreset_from_cold_boot(ab);
  	return 0;
  
-@@ -1179,6 +1232,9 @@ static void ath11k_pci_remove(struct pci_dev *pdev)
+@@ -1179,6 +1227,9 @@ static void ath11k_pci_remove(struct pci_dev *pdev)
  	struct ath11k_base *ab = pci_get_drvdata(pdev);
  	struct ath11k_pci *ab_pci = ath11k_pci_priv(ab);
  
@@ -139,7 +134,7 @@ index a163168..6240dd0 100644
  	ath11k_pci_set_irq_affinity_hint(ab_pci, NULL);
  
  	if (test_bit(ATH11K_FLAG_QMI_FAIL, &ab->dev_flags)) {
-@@ -1205,6 +1261,9 @@ qmi_fail:
+@@ -1205,6 +1256,9 @@ qmi_fail:
  
  	ath11k_hal_srng_deinit(ab);
  	ath11k_ce_free_pipes(ab);
@@ -149,7 +144,7 @@ index a163168..6240dd0 100644
  	ath11k_core_free(ab);
  }
  
-@@ -1213,6 +1272,9 @@ static void ath11k_pci_shutdown(struct pci_dev *pdev)
+@@ -1213,6 +1267,9 @@ static void ath11k_pci_shutdown(struct pci_dev *pdev)
  	struct ath11k_base *ab = pci_get_drvdata(pdev);
  	struct ath11k_pci *ab_pci = ath11k_pci_priv(ab);
  
@@ -159,7 +154,7 @@ index a163168..6240dd0 100644
  	ath11k_pci_set_irq_affinity_hint(ab_pci, NULL);
  
  	spin_lock_bh(&ab->base_lock);
-@@ -1225,9 +1287,79 @@ static void ath11k_pci_shutdown(struct pci_dev *pdev)
+@@ -1225,9 +1282,86 @@ static void ath11k_pci_shutdown(struct pci_dev *pdev)
  	ath11k_pci_power_down(ab, false);
  }
  
@@ -189,12 +184,23 @@ index a163168..6240dd0 100644
 +		return -EBUSY;
 +	}
 +
-+	pci_disable_device(pdev);
-+	pci_wake_from_d3(pdev, true);
++	/*
++	 * QCA6390 with PCIe DRV ownership does not use the generic MHI PCI
++	 * D3hot sequence.  The target enters M3 while the endpoint remains in
++	 * D0, then the root complex/DRV side is allowed to idle the link.  In
++	 * particular, MHI resume rings event doorbells before normal traffic
++	 * restarts; putting the endpoint in D3hot makes those writes Unsupported
++	 * Requests on this device.
++	 *
++	 * Mark the PCI state saved so the PCI runtime-PM wrapper does not call
++	 * pci_finish_runtime_suspend() and force the endpoint into D3hot after
++	 * this callback returns.
++	 */
++	pci_save_state(pdev);
 +	ab_pci->runtime_suspended = true;
 +	ab_pci->runtime_suspend_count++;
 +	ath11k_info(ab,
-+		    "QCA6390 runtime suspend complete: count=%u MHI=%u\n",
++		    "QCA6390 runtime suspend complete: count=%u MHI=%u endpoint=D0\n",
 +		    ab_pci->runtime_suspend_count, ab_pci->mhi_ctrl->dev_state);
 +
 +	return 0;
@@ -210,12 +216,8 @@ index a163168..6240dd0 100644
 +	if (!ab_pci->runtime_suspended)
 +		return 0;
 +
-+	ret = pci_enable_device(pdev);
-+	if (ret)
-+		return ret;
-+
++	/* The PCI core restored the saved D0 configuration before this hook. */
 +	pci_set_master(pdev);
-+	pci_wake_from_d3(pdev, false);
 +
 +	ret = mhi_pm_resume(ab_pci->mhi_ctrl);
 +	if (ret) {
@@ -226,7 +228,7 @@ index a163168..6240dd0 100644
 +	ab_pci->runtime_suspended = false;
 +	pm_runtime_mark_last_busy(dev);
 +	ath11k_info(ab,
-+		    "QCA6390 runtime resume complete: count=%u MHI=%u\n",
++		    "QCA6390 runtime resume complete: count=%u MHI=%u endpoint=D0\n",
 +		    ab_pci->runtime_suspend_count, ab_pci->mhi_ctrl->dev_state);
 +
 +	return 0;
@@ -239,7 +241,7 @@ index a163168..6240dd0 100644
  	int ret;
  
  	if (test_bit(ATH11K_FLAG_QMI_FAIL, &ab->dev_flags)) {
-@@ -1235,6 +1367,18 @@ static __maybe_unused int ath11k_pci_pm_suspend(struct device *dev)
+@@ -1235,6 +1369,18 @@ static __maybe_unused int ath11k_pci_pm_suspend(struct device *dev)
  		return 0;
  	}
  
@@ -258,14 +260,14 @@ index a163168..6240dd0 100644
  	ret = ath11k_core_suspend(ab);
  	if (ret)
  		ath11k_warn(ab, "failed to suspend core: %d\n", ret);
-@@ -1245,5 +1389,6 @@ static __maybe_unused int ath11k_pci_pm_resume(struct device *dev)
+@@ -1245,5 +1391,6 @@ static __maybe_unused int ath11k_pci_pm_resume(struct device *dev)
  {
  	struct ath11k_base *ab = dev_get_drvdata(dev);
 +	struct ath11k_pci *ab_pci = ath11k_pci_priv(ab);
  	int ret;
  
  	if (test_bit(ATH11K_FLAG_QMI_FAIL, &ab->dev_flags)) {
-@@ -1256,6 +1401,13 @@ static __maybe_unused int ath11k_pci_pm_resume(struct device *dev)
+@@ -1256,6 +1403,13 @@ static __maybe_unused int ath11k_pci_pm_resume(struct device *dev)
  	if (ret)
  		ath11k_warn(ab, "failed to resume core: %d\n", ret);
  
@@ -279,7 +281,7 @@ index a163168..6240dd0 100644
  	return ret;
  }
  
-@@ -1291,6 +1443,8 @@ static const struct dev_pm_ops __maybe_unused ath11k_pci_pm_ops = {
+@@ -1291,6 +1445,8 @@ static const struct dev_pm_ops __maybe_unused ath11k_pci_pm_ops = {
  				ath11k_pci_pm_resume)
  	SET_LATE_SYSTEM_SLEEP_PM_OPS(ath11k_pci_pm_suspend_late,
  				     ath11k_pci_pm_resume_early)
