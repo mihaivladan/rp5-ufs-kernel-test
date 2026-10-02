@@ -186,12 +186,12 @@ def apply_patches(repo, source, fix, profile):
                 "a5eb215c6a2477407882e345bfff4b0a7f5864196c7773456507fd7ad4de8c59",
                 "PM8150B PD-PHY attach-gating patch checksum mismatch")
         extra_patches.append(pdphy_gating)
-        rscc_probe = Path(__file__).resolve().parent / "qcom-sm8250-display-rscc-probe.patch"
-        require(rscc_probe.is_file(), "Missing guarded SM8250 display-RSCC probe patch")
-        require(hashlib.sha256(rscc_probe.read_bytes()).hexdigest() ==
-                "e1d8ad70446e22ffcddaa2b4e64f6dad60bbd53aea7eaa800979887d101c2e6d",
-                "Guarded SM8250 display-RSCC probe patch checksum mismatch")
-        extra_patches.append(rscc_probe)
+        orderly_qca = Path(__file__).resolve().parent / "qca6390-orderly-poweroff.patch"
+        require(orderly_qca.is_file(), "Missing guarded QCA6390 orderly power-off patch")
+        require(hashlib.sha256(orderly_qca.read_bytes()).hexdigest() ==
+                "18e97bb4edfe67f7215d9312b5a58edd3d533e2cc3db72f128a8bcadddf65145",
+                "QCA6390 orderly power-off patch checksum mismatch")
+        extra_patches.append(orderly_qca)
     if profile == "lpm-platform":
         lpm_fix = Path(__file__).resolve().parent / "qcom-lpm-platform-suspend.patch"
         require(lpm_fix.is_file(), "Missing exact-state platform suspend patch")
@@ -319,16 +319,16 @@ def apply_patches(repo, source, fix, profile):
         require("int qcom_pmic_typec_port_is_attached(struct pmic_typec *tcpm)" in port and
                 "return !!(misc & CC_ATTACHED);" in port,
                 "PM8150B physical CC-attachment guard missing")
-        mdss = (source / "drivers/gpu/drm/msm/msm_mdss.c").read_text()
-        required_rscc_probe = (
-            "consoleos,display-rscc-ahb-clock",
-            "clk_prepare_enable(msm_mdss->rscc_ahb_clk)",
-            "consoleos-rscc-probe: sample=%u drv",
-            "consoleos-rscc-probe: sample=%u wrapper",
-            "clk_disable_unprepare(msm_mdss->rscc_ahb_clk)",
-        )
-        require(all(marker in mdss for marker in required_rscc_probe),
-                "Guarded SM8250 display-RSCC probe markers missing")
+        ath11k_pci = (source / "drivers/net/wireless/ath/ath11k/pci.c").read_text()
+        qcom_pcie = (source / "drivers/pci/controller/dwc/pcie-qcom.c").read_text()
+        require("module_param(orderly_qca_poweroff, bool, 0644);" in ath11k_pci and
+                "QFPROM_PWR_CTRL_SHUTDOWN_EN_MASK" in ath11k_pci and
+                "qcom_pcie_orderly_poweroff_arm(ab_pci->pdev)" in ath11k_pci,
+                "Guarded ath11k orderly power-off markers missing")
+        require("orderly QCA power-off: L23 acknowledged" in qcom_pcie and
+                "qcom_pcie_orderly_poweroff_arm" in qcom_pcie and
+                "pci_pwrctrl_power_off_devices(pci->dev);" in qcom_pcie,
+                "Guarded Qualcomm PCIe orderly power-off markers missing")
     if profile == "lpm-platform":
         lpm_source = (source / "drivers/soc/qcom/qcom_lpm_platform_suspend.c").read_text()
         require("#define CONSOLEOS_SM8250_SUSPEND_STATE\t0x4100c244" in lpm_source and
@@ -515,8 +515,8 @@ def main():
             "Keep CC detection active; power PD PHY and L2A only during an attached session"
             if profile == "consoleos-rc1" else None
         ),
-        "sm8250_display_rscc_probe": (
-            "Read pinned Qualcomm SDE-RSC status registers only after enabling the exact RSCC AHB clock"
+        "qca6390_orderly_poweroff": (
+            "Opt-in firmware OFF, WLAON shutdown, MHI down, PCIe L23, host resources and endpoint rails"
             if profile == "consoleos-rc1" else None
         ),
         "platform_suspend": (

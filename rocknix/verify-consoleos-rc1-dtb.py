@@ -32,8 +32,6 @@ PCIE = "/soc@0/pcie@1c00000"
 MCU_ALWAYS_ON = "/vreg-mcu-3v3-regulator/regulator-always-on"
 PCIE_SLEEP = "/soc@0/pinctrl@f100000/pcie0-sleep-state"
 PCIE_SLEEP_CLKREQ = f"{PCIE_SLEEP}/clkreq-pins"
-MDSS_RSCC_CLOCK = "/soc@0/display-subsystem@ae00000/consoleos,display-rscc-ahb-clock"
-DISPCC_PHANDLE = "/soc@0/clock-controller@af00000/phandle"
 EXPECTED = {f"{node}/status" for node in STATUS_NODES} | {
     f"{PCIE}/qcom,drv-supported", f"{PCIE}/qcom,drv-dev-id",
     f"{PCIE}/qcom,drv-l1ss-timeout-us", f"{PCIE}/pinctrl-names",
@@ -41,7 +39,6 @@ EXPECTED = {f"{node}/status" for node in STATUS_NODES} | {
     f"{PCIE_SLEEP}/phandle", f"{PCIE_SLEEP_CLKREQ}/pins",
     f"{PCIE_SLEEP_CLKREQ}/function", f"{PCIE_SLEEP_CLKREQ}/drive-strength",
     f"{PCIE_SLEEP_CLKREQ}/bias-pull-up",
-    MDSS_RSCC_CLOCK,
 }
 
 
@@ -126,16 +123,13 @@ def main() -> None:
         raise SystemExit("PCIe default CLKREQ mux was altered")
     if MCU_ALWAYS_ON not in base or MCU_ALWAYS_ON in candidate:
         raise SystemExit("MCU/RGB rail was not changed from always-on to controllable")
-    expected_rscc_clock = candidate[DISPCC_PHANDLE] + struct.pack(">I", 42)
-    if candidate[MDSS_RSCC_CLOCK] != expected_rscc_clock:
-        raise SystemExit("display RSCC diagnostic clock does not reference DISP_CC_MDSS_RSCC_AHB_CLK")
     for node in (
         "/soc@0/crypto@1dfa000", "/soc@0/remoteproc@5c00000",
         "/soc@0/remoteproc@8300000", "/soc@0/video-codec@aa00000",
     ):
         if status(candidate[f"{node}/status"]) != b"disabled":
             raise SystemExit(f"unvalidated subsystem enabled: {node}")
-    print("VERIFIED: RC1 full stack plus controllable MCU/RGB rail, exact GPIO80 pinctrl, and guarded display RSCC clock")
+    print("VERIFIED: RC1 full stack plus controllable MCU/RGB rail and exact GPIO80 sleep/default pinctrl")
 
 
 if __name__ == "__main__":
