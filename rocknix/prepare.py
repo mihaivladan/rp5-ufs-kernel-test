@@ -186,12 +186,12 @@ def apply_patches(repo, source, fix, profile):
                 "a5eb215c6a2477407882e345bfff4b0a7f5864196c7773456507fd7ad4de8c59",
                 "PM8150B PD-PHY attach-gating patch checksum mismatch")
         extra_patches.append(pdphy_gating)
-        qca_fast = Path(__file__).resolve().parent / "qcom-qca6390-mhi-fast-suspend.patch"
-        require(qca_fast.is_file(), "Missing QCA6390 host-only MHI suspend patch")
-        require(hashlib.sha256(qca_fast.read_bytes()).hexdigest() ==
-                "ec7fc11648bafc0b50bdc920f1ea5576b246445a986dc548e918ab86be842ac4",
-                "QCA6390 host-only MHI suspend patch checksum mismatch")
-        extra_patches.append(qca_fast)
+        qca_runtime_pm = Path(__file__).resolve().parent / "qcom-ath11k-qca6390-runtime-pm.patch"
+        require(qca_runtime_pm.is_file(), "Missing QCA6390 dynamic runtime-PM patch")
+        require(hashlib.sha256(qca_runtime_pm.read_bytes()).hexdigest() ==
+                "f0376712d8f79155aa1a58d023ff8228ff70a1b6d18d71f9bcabfe2ae810fec1",
+                "QCA6390 dynamic runtime-PM patch checksum mismatch")
+        extra_patches.append(qca_runtime_pm)
     if profile == "lpm-platform":
         lpm_fix = Path(__file__).resolve().parent / "qcom-lpm-platform-suspend.patch"
         require(lpm_fix.is_file(), "Missing exact-state platform suspend patch")
@@ -503,6 +503,11 @@ def main():
         ),
         "pm8150b_pdphy_attach_gating": (
             "Keep CC detection active; power PD PHY and L2A only during an attached session"
+            if profile == "consoleos-rc1" else None
+        ),
+        "qca6390_dynamic_runtime_pm": (
+            "Opt-in ath11k/MHI/PCI runtime suspend with a 500 ms idle delay; "
+            "normal RC6 behavior retained unless ath11k_pci.qca6390_runtime_pm=1"
             if profile == "consoleos-rc1" else None
         ),
         "platform_suspend": (

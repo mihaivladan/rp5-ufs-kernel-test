@@ -53,7 +53,7 @@ fg-coulomb-counter)
     ;;
 consoleos-rc1)
     config_fragment="${kit}/rocknix/consoleos-rc1.config"
-    expected_release='7.2.0-consoleos-rc9'
+    expected_release='7.2.0-consoleos-rc10'
     artifact_name="rocknix-${expected_release}.tar.zst"
     dtb_name='sm8250-retroidpocket-rp5-consoleos-rc1'
     ;;
@@ -326,52 +326,35 @@ elif sys.argv[2] in ('adsp-no-auto-ab', 'lpass-devote-fix', 'lpass-pm-clock', 'a
         )
         if not all(marker in gamepad for marker in required_gamepad):
             raise SystemExit('Retroid gamepad unbind cleanup markers missing')
-        mhi_api = Path('include/linux/mhi.h').read_text()
-        mhi_pm = Path('drivers/bus/mhi/host/pm.c').read_text()
         ath_mhi = Path('drivers/net/wireless/ath/ath11k/mhi.c').read_text()
         ath_pci = Path('drivers/net/wireless/ath/ath11k/pci.c').read_text()
-        required_fast = (
-            'int mhi_pm_fast_suspend(struct mhi_controller *mhi_cntrl);',
-            'int mhi_pm_fast_resume(struct mhi_controller *mhi_cntrl);',
-            'bool mhi_pm_is_fast_suspended(struct mhi_controller *mhi_cntrl);',
-            'bool fast_suspended;',
+        ath_pci_h = Path('drivers/net/wireless/ath/ath11k/pci.h').read_text()
+        required_ath_mhi = (
+            'return pm_runtime_get(mhi_cntrl->cntrl_dev);',
+            'pm_runtime_put(mhi_cntrl->cntrl_dev);',
         )
-        if not all(marker in mhi_api for marker in required_fast):
-            raise SystemExit('MHI fast-suspend public API markers missing')
-        required_mhi_pm = (
-            'int mhi_pm_fast_suspend(struct mhi_controller *mhi_cntrl)',
-            'Deliberately do not write MHICTRL',
-            'mhi_cntrl->dev_state = MHI_STATE_M3_FAST;',
-            'bool mhi_pm_is_fast_suspended(struct mhi_controller *mhi_cntrl)',
-            'EXPORT_SYMBOL_GPL(mhi_pm_is_fast_suspended);',
-            'int mhi_pm_fast_resume(struct mhi_controller *mhi_cntrl)',
-            'fast resume found firmware in RDDM',
+        if not all(marker in ath_mhi for marker in required_ath_mhi):
+            raise SystemExit('ath11k MHI runtime-reference markers missing')
+        required_ath_pci = (
+            'module_param_named(qca6390_runtime_pm, qca6390_runtime_pm, bool, 0644);',
+            'pm_runtime_set_autosuspend_delay(dev, 500);',
+            'ret = mhi_pm_suspend(ab_pci->mhi_ctrl);',
+            'ret = mhi_pm_resume(ab_pci->mhi_ctrl);',
+            'QCA6390 runtime suspend complete:',
+            'QCA6390 runtime resume complete:',
+            'SET_RUNTIME_PM_OPS(ath11k_pci_runtime_suspend,',
         )
-        if not all(marker in mhi_pm for marker in required_mhi_pm):
-            raise SystemExit('MHI host-only suspend implementation markers missing')
-        required_ath = (
-            'module_param_named(fast_mhi_suspend, fast_mhi_suspend, bool, 0644);',
-            'ret = mhi_pm_fast_suspend(ab_pci->mhi_ctrl);',
-            'ret = mhi_pm_fast_resume(ab_pci->mhi_ctrl);',
+        if not all(marker in ath_pci for marker in required_ath_pci):
+            raise SystemExit('ath11k QCA6390 dynamic runtime-PM markers missing')
+        required_ath_pci_h = (
+            'bool runtime_pm_configured;',
+            'bool runtime_suspended;',
+            'u32 runtime_suspend_count;',
         )
-        if not all(marker in ath_mhi for marker in required_ath):
-            raise SystemExit('ath11k MHI fast-suspend selection markers missing')
-        required_pci_d0 = (
-            'pci_save_state(pdev);',
-            'pdev->skip_bus_pm = true;',
-            'fast suspend endpoint retained in D0:',
-            'fast resume endpoint after ADSP reclaim:',
-        )
-        if not all(marker in ath_pci for marker in required_pci_d0):
-            raise SystemExit('ath11k endpoint-D0 retention markers missing')
-        qrtr = Path('net/qrtr/mhi.c').read_text()
-        required_qrtr = (
-            'mhi_pm_is_fast_suspended(mhi_dev->mhi_cntrl)',
-            'retaining prepared IPCR channels across host-only MHI fast suspend',
-            'reusing retained IPCR channels after host-only MHI fast suspend',
-        )
-        if not all(marker in qrtr for marker in required_qrtr):
-            raise SystemExit('QRTR fast-suspend channel-retention markers missing')
+        if not all(marker in ath_pci_h for marker in required_ath_pci_h):
+            raise SystemExit('ath11k runtime-PM state markers missing')
+        if 'mhi_pm_fast_suspend(' in ath_mhi or 'mhi_pm_fast_resume(' in ath_mhi:
+            raise SystemExit('RC9 host-only fast-MHI experiment leaked into RC10')
 elif sys.argv[2] == 'pcie-drv-handoff':
     required = {
         'CONFIG_PCIE_QCOM=y', 'CONFIG_PCIE_QCOM_DRV=y', 'CONFIG_RPMSG=y',
@@ -594,7 +577,7 @@ elif [[ "${profile}" == consoleos-rc1 ]]; then
     cd "${out}"
     sha256sum "${dtb_name}.dtb" > CONSOLEOS-RC1-DTB-SHA256SUMS
     printf '%s\n' \
-        'ConsoleOS RC8 diagnostic built: exact RC6 product base plus opt-in QCA6390 host-only MHI suspend and endpoint-D0 retention for Android-firmware WoW qualification. Not installed or boot-tested.' \
+        'ConsoleOS RC10 diagnostic built: exact RC6 product base plus opt-in QCA6390 dynamic MHI/PCI runtime PM with a 500 ms autosuspend delay. Not installed or boot-tested.' \
         > BUILD-SUCCESS.txt
     cd "${source_dir}"
 elif [[ "${profile}" == slpi-integrated ]]; then
@@ -709,11 +692,9 @@ if [[ "${profile}" == consoleos-rc1 ]]; then
         > "${out}/qcom-pmic-typec-pdphy-disassembly.txt"
     objdump -drS drivers/usb/typec/tcpm/qcom/qcom_pmic_typec_port.o \
         > "${out}/qcom-pmic-typec-port-disassembly.txt"
-    cp include/linux/mhi.h drivers/bus/mhi/host/pm.c \
-        drivers/net/wireless/ath/ath11k/mhi.c \
+    cp drivers/net/wireless/ath/ath11k/mhi.c \
         drivers/net/wireless/ath/ath11k/pci.c \
         drivers/net/wireless/ath/ath11k/pci.h "${out}/"
-    objdump -drS drivers/bus/mhi/host/pm.o > "${out}/mhi-pm-disassembly.txt"
     objdump -drS drivers/net/wireless/ath/ath11k/ath11k_pci.o \
         > "${out}/ath11k-pci-disassembly.txt"
 fi
