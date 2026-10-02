@@ -1,4 +1,4 @@
-name: ConsoleOS RP5 kernel RC11 QCA6390 D0 runtime PM
+name: ConsoleOS RP5 kernel RC12 QCA6390 D0 runtime PM
 on:
   workflow_dispatch:
   push:
