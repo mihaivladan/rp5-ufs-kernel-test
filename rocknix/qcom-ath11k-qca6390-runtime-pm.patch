@@ -85,7 +85,7 @@ index a163168..6240dd0 100644
  }
  
  static void ath11k_pci_bus_release(struct ath11k_base *ab)
-@@ -54,6 +77,28 @@ static void ath11k_pci_bus_release(struct ath11k_base *ab)
+@@ -54,6 +77,27 @@ static void ath11k_pci_bus_release(struct ath11k_base *ab)
  	struct ath11k_pci *ab_pci = ath11k_pci_priv(ab);
  
  	mhi_device_put(ab_pci->mhi_ctrl->mhi_dev);
