@@ -108,9 +108,8 @@ index a163168..6240dd0 100644
 +	ab_pci->runtime_pm_configured = true;
 +	pm_runtime_mark_last_busy(dev);
 +	pm_runtime_put_noidle(dev);
-+	pm_runtime_allow(dev);
 +	ath11k_info(ab_pci->ab,
-+		    "QCA6390 dynamic runtime PM enabled: autosuspend=500 ms endpoint=D0\n");
++		    "QCA6390 runtime PM ready: autosuspend=500 ms endpoint=D0 policy=forbidden\n");
  }
  
  static u32 ath11k_pci_get_window_start(struct ath11k_base *ab, u32 offset)

@@ -86,19 +86,19 @@ jobs:
           ccache --zero-stats
           ccache --show-config
           printf 'cache_restore=%s\n' '${{ steps.kernel-compiler-cache.outputs.cache-hit }}'
-      - name: Prepare ConsoleOS RP5 RC11 source
+      - name: Prepare ConsoleOS RP5 RC12 source
         run: |
           set -euo pipefail
-          bash rocknix/build.sh prepare 2>&1 | tee rocknix-consoleos-rc11-prepare.log
-      - name: Build ConsoleOS RP5 RC11 kernel and modules
+          bash rocknix/build.sh prepare 2>&1 | tee rocknix-consoleos-rc12-prepare.log
+      - name: Build ConsoleOS RP5 RC12 kernel and modules
         run: |
           set -euo pipefail
-          bash rocknix/build.sh compile 2>&1 | tee rocknix-consoleos-rc11-compile.log
+          bash rocknix/build.sh compile 2>&1 | tee rocknix-consoleos-rc12-compile.log
       - name: Report kernel compiler cache
         if: always()
         run: |
           if command -v ccache >/dev/null 2>&1; then
-            ccache --show-stats --verbose | tee rocknix-consoleos-rc11-ccache.log
+            ccache --show-stats --verbose | tee rocknix-consoleos-rc12-ccache.log
           fi
       - name: Save successful kernel compiler cache
         if: success()
@@ -110,12 +110,12 @@ jobs:
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
-          name: rocknix-rp5-consoleos-rc11-qca-d0-runtime-pm
+          name: rocknix-rp5-consoleos-rc12-qca-d0-runtime-pm
           retention-days: 14
           compression-level: 0
           if-no-files-found: error
           path: |
             rocknix-out/
-            rocknix-consoleos-rc11-prepare.log
-            rocknix-consoleos-rc11-compile.log
-            rocknix-consoleos-rc11-ccache.log
+            rocknix-consoleos-rc12-prepare.log
+            rocknix-consoleos-rc12-compile.log
+            rocknix-consoleos-rc12-ccache.log

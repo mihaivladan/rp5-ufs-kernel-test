@@ -53,7 +53,7 @@ fg-coulomb-counter)
     ;;
 consoleos-rc1)
     config_fragment="${kit}/rocknix/consoleos-rc1.config"
-    expected_release='7.2.0-consoleos-rc11'
+    expected_release='7.2.0-consoleos-rc12'
     artifact_name="rocknix-${expected_release}.tar.zst"
     dtb_name='sm8250-retroidpocket-rp5-consoleos-rc1'
     ;;
@@ -338,7 +338,7 @@ elif sys.argv[2] in ('adsp-no-auto-ab', 'lpass-devote-fix', 'lpass-pm-clock', 'a
         required_ath_pci = (
             'module_param_named(qca6390_runtime_pm, qca6390_runtime_pm, bool, 0644);',
             'pm_runtime_set_autosuspend_delay(dev, 500);',
-            'pm_runtime_allow(dev);',
+            'QCA6390 runtime PM ready: autosuspend=500 ms endpoint=D0 policy=forbidden',
             'ret = mhi_pm_suspend(ab_pci->mhi_ctrl);',
             'pci_save_state(pdev);',
             'ret = mhi_pm_resume(ab_pci->mhi_ctrl);',
