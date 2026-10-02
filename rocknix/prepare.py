@@ -192,6 +192,12 @@ def apply_patches(repo, source, fix, profile):
                 "8fdacde833ac82356c3ffbe8a564beaf23bea79469c5418c52e5ea3225c91384",
                 "QCA6390 orderly power-off patch checksum mismatch")
         extra_patches.append(orderly_qca)
+        orderly_icc = Path(__file__).resolve().parent / "qcom-pcie-orderly-icc-release.patch"
+        require(orderly_icc.is_file(), "Missing orderly PCIe ICC release patch")
+        require(hashlib.sha256(orderly_icc.read_bytes()).hexdigest() ==
+                "abdbd431d328d0efcd1acc29aff128f5b8a67163ba51cb1838fedb491bbcf961",
+                "Orderly PCIe ICC release patch checksum mismatch")
+        extra_patches.append(orderly_icc)
     if profile == "lpm-platform":
         lpm_fix = Path(__file__).resolve().parent / "qcom-lpm-platform-suspend.patch"
         require(lpm_fix.is_file(), "Missing exact-state platform suspend patch")
@@ -332,7 +338,9 @@ def apply_patches(repo, source, fix, profile):
                 "Orderly QCA QRTR channel-lifetime markers missing")
         require("orderly QCA power-off: L23 acknowledged" in qcom_pcie and
                 "qcom_pcie_orderly_poweroff_arm" in qcom_pcie and
-                "pci_pwrctrl_power_off_devices(pci->dev);" in qcom_pcie,
+                "pci_pwrctrl_power_off_devices(pci->dev);" in qcom_pcie and
+                "orderly QCA power-off: root complex suspended, ICC votes zero" in qcom_pcie and
+                "orderly QCA power-off: ICC votes, root complex and endpoint rails restored" in qcom_pcie,
                 "Guarded Qualcomm PCIe orderly power-off markers missing")
     if profile == "lpm-platform":
         lpm_source = (source / "drivers/soc/qcom/qcom_lpm_platform_suspend.c").read_text()
@@ -521,7 +529,7 @@ def main():
             if profile == "consoleos-rc1" else None
         ),
         "qca6390_orderly_poweroff": (
-            "Opt-in firmware OFF, WLAON shutdown, MHI down, PCIe L23, host resources and endpoint rails"
+            "Opt-in firmware OFF, WLAON shutdown, MHI down, PCIe L23, true-zero ICC release, host resources and endpoint rails"
             if profile == "consoleos-rc1" else None
         ),
         "platform_suspend": (

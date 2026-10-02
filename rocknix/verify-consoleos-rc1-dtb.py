@@ -35,7 +35,8 @@ PCIE_SLEEP_CLKREQ = f"{PCIE_SLEEP}/clkreq-pins"
 EXPECTED = {f"{node}/status" for node in STATUS_NODES} | {
     f"{PCIE}/qcom,drv-supported", f"{PCIE}/qcom,drv-dev-id",
     f"{PCIE}/qcom,drv-l1ss-timeout-us", f"{PCIE}/pinctrl-names",
-    f"{PCIE}/pinctrl-1", MCU_ALWAYS_ON,
+    f"{PCIE}/pinctrl-1", f"{PCIE}/interconnects",
+    f"{PCIE}/interconnect-names", MCU_ALWAYS_ON,
     f"{PCIE_SLEEP}/phandle", f"{PCIE_SLEEP_CLKREQ}/pins",
     f"{PCIE_SLEEP_CLKREQ}/function", f"{PCIE_SLEEP_CLKREQ}/drive-strength",
     f"{PCIE_SLEEP_CLKREQ}/bias-pull-up",
@@ -103,6 +104,20 @@ def main() -> None:
         raise SystemExit("wrong PCIe DRV device ID")
     if candidate[f"{PCIE}/qcom,drv-l1ss-timeout-us"] != struct.pack(">I", 10000):
         raise SystemExit("wrong PCIe DRV L1SS timeout")
+    if candidate[f"{PCIE}/interconnect-names"] != b"pcie-mem\0cpu-pcie\0":
+        raise SystemExit("wrong PCIe interconnect names")
+    providers = (
+        ("/soc@0/interconnect@1700000", 6, 7),
+        ("/soc@0/interconnect@163d000", 1, 7),
+        ("/soc@0/interconnect@9100000", 2, 3),
+        ("/soc@0/interconnect@1620000", 14, 3),
+    )
+    expected_icc = b"".join(
+        candidate[f"{node}/phandle"] + struct.pack(">II", endpoint, tag)
+        for node, endpoint, tag in providers
+    )
+    if candidate[f"{PCIE}/interconnects"] != expected_icc:
+        raise SystemExit("wrong PCIe interconnect providers, endpoints or tags")
     if candidate[f"{PCIE}/pinctrl-names"] != b"default\0sleep\0":
         raise SystemExit("wrong PCIe pinctrl state names")
     sleep_phandle = candidate[f"{PCIE_SLEEP}/phandle"]

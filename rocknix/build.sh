@@ -53,7 +53,7 @@ fg-coulomb-counter)
     ;;
 consoleos-rc1)
     config_fragment="${kit}/rocknix/consoleos-rc1.config"
-    expected_release='7.2.0-consoleos-rc16-qcaoff'
+    expected_release='7.2.0-consoleos-rc17-pcieicc'
     artifact_name="rocknix-${expected_release}.tar.zst"
     dtb_name='sm8250-retroidpocket-rp5-consoleos-rc1'
     ;;
@@ -548,7 +548,7 @@ elif [[ "${profile}" == consoleos-rc1 ]]; then
     cd "${out}"
     sha256sum "${dtb_name}.dtb" > CONSOLEOS-RC1-DTB-SHA256SUMS
     printf '%s\n' \
-        'ConsoleOS RC16 built: RC15 orderly QCA power-off plus guarded DesignWare host shutdown past generic D3cold policy. Not installed or boot-tested.' \
+        'ConsoleOS RC17 built: RC16 orderly QCA host shutdown plus validated SM8250 PCIe ICC paths and true-zero orderly suspend release. Not installed or boot-tested.' \
         > BUILD-SUCCESS.txt
     cd "${source_dir}"
 elif [[ "${profile}" == slpi-integrated ]]; then

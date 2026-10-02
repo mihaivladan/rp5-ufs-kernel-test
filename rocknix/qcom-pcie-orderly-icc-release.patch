@@ -1,0 +1,64 @@
+--- a/drivers/pci/controller/dwc/pcie-qcom.c
++++ b/drivers/pci/controller/dwc/pcie-qcom.c
+@@ -2527,7 +2527,24 @@
+ 			return -EIO;
+ 		}
+ 
+-		dev_info(dev, "orderly QCA power-off: root complex suspended\n");
++		ret = icc_disable(pcie->icc_mem);
++		if (ret) {
++			dev_err(dev,
++				"orderly QCA power-off: failed to release PCIe-MEM vote: %d\n",
++				ret);
++			return ret;
++		}
++
++		ret = icc_disable(pcie->icc_cpu);
++		if (ret) {
++			dev_err(dev,
++				"orderly QCA power-off: failed to release CPU-PCIe vote: %d\n",
++				ret);
++			return ret;
++		}
++
++		dev_info(dev,
++			 "orderly QCA power-off: root complex suspended, ICC votes zero\n");
+ 		return 0;
+ 	}
+ 	if (pcie->drv_supported &&
+@@ -2610,12 +2627,32 @@
+ 			return ret;
+ 		}
+ 
+-		ret = dw_pcie_resume_noirq(pcie->pci);
+-		if (ret)
++		ret = icc_enable(pcie->icc_cpu);
++		if (ret) {
++			dev_err(dev,
++				"orderly QCA power-off: failed to restore CPU-PCIe vote: %d\n",
++				ret);
+ 			return ret;
++		}
+ 
++		ret = icc_enable(pcie->icc_mem);
++		if (ret) {
++			dev_err(dev,
++				"orderly QCA power-off: failed to restore PCIe-MEM vote: %d\n",
++				ret);
++			icc_disable(pcie->icc_cpu);
++			return ret;
++		}
++
++		ret = dw_pcie_resume_noirq(pcie->pci);
++		if (ret) {
++			icc_disable(pcie->icc_mem);
++			icc_disable(pcie->icc_cpu);
++			return ret;
++		}
++
+ 		dev_info(dev,
+-			 "orderly QCA power-off: root complex and endpoint rails restored\n");
++			 "orderly QCA power-off: ICC votes, root complex and endpoint rails restored\n");
+ 		return 0;
+ 	}
+ 	if (pcie->drv_armed || pcie->drv_offline) {
