@@ -708,3 +708,77 @@ index 0000000..a6a7c72
  
  	rc = mhi_prepare_for_transfer(mhi_dev);
  	if (rc) {
+--- a/drivers/pci/controller/dwc/pcie-designware-host.c
++++ b/drivers/pci/controller/dwc/pcie-designware-host.c
+@@ -1220,7 +1220,7 @@
+ 	return 0;
+ }
+ 
+-int dw_pcie_suspend_noirq(struct dw_pcie *pci)
++static int __dw_pcie_suspend_noirq(struct dw_pcie *pci, bool force)
+ {
+ 	bool pme_capable = false;
+ 	int ret = 0;
+@@ -1229,7 +1229,8 @@
+ 	if (!dw_pcie_link_up(pci))
+ 		goto stop_link;
+ 
+-	if (!pci_host_common_d3cold_possible(pci->pp.bridge, &pme_capable))
++	if (!force &&
++	    !pci_host_common_d3cold_possible(pci->pp.bridge, &pme_capable))
+ 		return 0;
+ 
+ 	if (pci->pp.ops->pme_turn_off) {
+@@ -1296,7 +1297,17 @@
+ 	return ret;
+ }
++int dw_pcie_suspend_noirq(struct dw_pcie *pci)
++{
++	return __dw_pcie_suspend_noirq(pci, false);
++}
+ EXPORT_SYMBOL_GPL(dw_pcie_suspend_noirq);
+ 
++int dw_pcie_suspend_noirq_force(struct dw_pcie *pci)
++{
++	return __dw_pcie_suspend_noirq(pci, true);
++}
++EXPORT_SYMBOL_GPL(dw_pcie_suspend_noirq_force);
++
+ int dw_pcie_resume_noirq(struct dw_pcie *pci)
+ {
+ 	int ret;
+--- a/drivers/pci/controller/dwc/pcie-designware.h
++++ b/drivers/pci/controller/dwc/pcie-designware.h
+@@ -860,6 +860,7 @@
+ 
+ #ifdef CONFIG_PCIE_DW_HOST
+ int dw_pcie_suspend_noirq(struct dw_pcie *pci);
++int dw_pcie_suspend_noirq_force(struct dw_pcie *pci);
+ int dw_pcie_resume_noirq(struct dw_pcie *pci);
+ void dw_handle_msi_irq(struct dw_pcie_rp *pp);
+ void dw_pcie_msi_init(struct dw_pcie_rp *pp);
+@@ -877,6 +878,11 @@
+ 	return 0;
+ }
+ 
++static inline int dw_pcie_suspend_noirq_force(struct dw_pcie *pci)
++{
++	return 0;
++}
++
+ static inline int dw_pcie_resume_noirq(struct dw_pcie *pci)
+ {
+ 	return 0;
+--- a/drivers/pci/controller/dwc/pcie-qcom.c
++++ b/drivers/pci/controller/dwc/pcie-qcom.c
+@@ -2516,7 +2516,9 @@
+ 			return -ENOLINK;
+ 		}
+ 
+-		ret = dw_pcie_suspend_noirq(pcie->pci);
++		dev_info(dev,
++			 "orderly QCA power-off: forcing host shutdown past generic D3cold policy\n");
++		ret = dw_pcie_suspend_noirq_force(pcie->pci);
+ 		if (ret)
+ 			return ret;
+ 		if (!pcie->pci->suspended) {
