@@ -53,7 +53,7 @@ fg-coulomb-counter)
     ;;
 consoleos-rc1)
     config_fragment="${kit}/rocknix/consoleos-rc1.config"
-    expected_release='7.2.0-consoleos-rc12'
+    expected_release='7.2.0-consoleos-rc13'
     artifact_name="rocknix-${expected_release}.tar.zst"
     dtb_name='sm8250-retroidpocket-rp5-consoleos-rc1'
     ;;
@@ -327,6 +327,8 @@ elif sys.argv[2] in ('adsp-no-auto-ab', 'lpass-devote-fix', 'lpass-pm-clock', 'a
         if not all(marker in gamepad for marker in required_gamepad):
             raise SystemExit('Retroid gamepad unbind cleanup markers missing')
         ath_mhi = Path('drivers/net/wireless/ath/ath11k/mhi.c').read_text()
+        ath_hif = Path('drivers/net/wireless/ath/ath11k/hif.h').read_text()
+        ath_mac = Path('drivers/net/wireless/ath/ath11k/mac.c').read_text()
         ath_pci = Path('drivers/net/wireless/ath/ath11k/pci.c').read_text()
         ath_pci_h = Path('drivers/net/wireless/ath/ath11k/pci.h').read_text()
         required_ath_mhi = (
@@ -348,6 +350,18 @@ elif sys.argv[2] in ('adsp-no-auto-ab', 'lpass-devote-fix', 'lpass-pm-clock', 'a
         )
         if not all(marker in ath_pci for marker in required_ath_pci):
             raise SystemExit('ath11k QCA6390 dynamic runtime-PM markers missing')
+        required_ath_datapath_pm = (
+            'int (*runtime_get)(struct ath11k_base *ab);',
+            'void (*runtime_put)(struct ath11k_base *ab);',
+            'ret = ath11k_hif_runtime_get(ar->ab);',
+            'ath11k_hif_runtime_put(ar->ab);',
+            'ret = pm_runtime_get_if_active(ab->dev);',
+            'ret = pm_request_resume(ab->dev);',
+            'QCA6390 datapath requested runtime resume:',
+        )
+        ath_datapath_pm = ath_hif + ath_mac + ath_pci
+        if not all(marker in ath_datapath_pm for marker in required_ath_datapath_pm):
+            raise SystemExit('ath11k QCA6390 datapath runtime-wake markers missing')
         required_ath_pci_h = (
             'bool runtime_pm_configured;',
             'bool runtime_suspended;',
@@ -579,7 +593,7 @@ elif [[ "${profile}" == consoleos-rc1 ]]; then
     cd "${out}"
     sha256sum "${dtb_name}.dtb" > CONSOLEOS-RC1-DTB-SHA256SUMS
     printf '%s\n' \
-        'ConsoleOS RC11 diagnostic built: exact RC6 product base plus opt-in QCA6390 dynamic MHI runtime PM with a 500 ms autosuspend delay and the PCIe-DRV-compatible endpoint retained in D0. Not installed or boot-tested.' \
+        'ConsoleOS RC13 diagnostic built: exact RC6 product base plus opt-in QCA6390 dynamic MHI runtime PM, endpoint D0 retention and asynchronous data-path wake. Not installed or boot-tested.' \
         > BUILD-SUCCESS.txt
     cd "${source_dir}"
 elif [[ "${profile}" == slpi-integrated ]]; then

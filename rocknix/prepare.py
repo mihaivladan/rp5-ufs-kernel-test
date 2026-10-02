@@ -189,7 +189,7 @@ def apply_patches(repo, source, fix, profile):
         qca_runtime_pm = Path(__file__).resolve().parent / "qcom-ath11k-qca6390-runtime-pm.patch"
         require(qca_runtime_pm.is_file(), "Missing QCA6390 dynamic runtime-PM patch")
         require(hashlib.sha256(qca_runtime_pm.read_bytes()).hexdigest() ==
-                "8a3cb06fd27147119c15d0b38c1f76cfbd9e1858cc23f9d559a45869d3307ab5",
+                "40ee32a17f1c3a3c5c80c5755c097ea2155cb7fcfa2ac962ffe9613f9ac10c7c",
                 "QCA6390 dynamic runtime-PM patch checksum mismatch")
         extra_patches.append(qca_runtime_pm)
     if profile == "lpm-platform":
@@ -508,6 +508,7 @@ def main():
         "qca6390_dynamic_runtime_pm": (
             "Opt-in ath11k/MHI runtime suspend with a 500 ms idle delay and "
             "the PCIe-DRV-compatible endpoint retained in D0; "
+            "the non-sleeping mac80211 data path requests asynchronous resume; "
             "normal RC6 behavior retained unless ath11k_pci.qca6390_runtime_pm=1"
             if profile == "consoleos-rc1" else None
         ),

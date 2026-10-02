@@ -1,3 +1,60 @@
+diff --git a/drivers/net/wireless/ath/ath11k/hif.h b/drivers/net/wireless/ath/ath11k/hif.h
+index 017fed1..c5b1230 100644
+--- a/drivers/net/wireless/ath/ath11k/hif.h
++++ b/drivers/net/wireless/ath/ath11k/hif.h
+@@ -32,6 +32,8 @@ struct ath11k_hif_ops {
+ 	void (*ce_irq_disable)(struct ath11k_base *ab);
+ 	void (*get_ce_msi_idx)(struct ath11k_base *ab, u32 ce_id, u32 *msi_idx);
+ 	void (*coredump_download)(struct ath11k_base *ab);
++	int (*runtime_get)(struct ath11k_base *ab);
++	void (*runtime_put)(struct ath11k_base *ab);
+ };
+ 
+ static inline void ath11k_hif_ce_irq_enable(struct ath11k_base *ab)
+@@ -98,6 +100,20 @@ static inline int ath11k_hif_resume(struct ath11k_base *ab)
+ 	return 0;
+ }
+ 
++static inline int ath11k_hif_runtime_get(struct ath11k_base *ab)
++{
++	if (!ab->hif.ops->runtime_get)
++		return 0;
++
++	return ab->hif.ops->runtime_get(ab);
++}
++
++static inline void ath11k_hif_runtime_put(struct ath11k_base *ab)
++{
++	if (ab->hif.ops->runtime_put)
++		ab->hif.ops->runtime_put(ab);
++}
++
+ static inline u32 ath11k_hif_read32(struct ath11k_base *ab, u32 address)
+ {
+ 	return ab->hif.ops->read32(ab, address);
+diff --git a/drivers/net/wireless/ath/ath11k/mac.c b/drivers/net/wireless/ath/ath11k/mac.c
+index 2d55cdc..53350d1 100644
+--- a/drivers/net/wireless/ath/ath11k/mac.c
++++ b/drivers/net/wireless/ath/ath11k/mac.c
+@@ -6539,7 +6539,18 @@ static void ath11k_mac_op_tx(struct ieee80211_hw *hw,
+ 	if (control->sta)
+ 		arsta = ath11k_sta_to_arsta(control->sta);
+ 
++	ret = ath11k_hif_runtime_get(ar->ab);
++	if (unlikely(ret)) {
++		if (ret != -EAGAIN)
++			ath11k_warn(ar->ab,
++				    "failed to wake runtime-suspended datapath: %d\n",
++				    ret);
++		ieee80211_free_txskb(ar->hw, skb);
++		return;
++	}
++
+ 	ret = ath11k_dp_tx(ar, arvif, arsta, skb);
++	ath11k_hif_runtime_put(ar->ab);
+ 	if (unlikely(ret)) {
+ 		ath11k_warn(ar->ab, "failed to transmit frame %d\n", ret);
+ 		ieee80211_free_txskb(ar->hw, skb);
 diff --git a/drivers/net/wireless/ath/ath11k/mhi.c b/drivers/net/wireless/ath/ath11k/mhi.c
 index a6c9ff1..c82eeac 100644
 --- a/drivers/net/wireless/ath/ath11k/mhi.c
@@ -39,7 +96,7 @@ index a6c9ff1..c82eeac 100644
  
  static char *ath11k_mhi_op_callback_to_str(enum mhi_callback reason)
 diff --git a/drivers/net/wireless/ath/ath11k/pci.c b/drivers/net/wireless/ath/ath11k/pci.c
-index a163168..6240dd0 100644
+index a163168..bf7a8cb 100644
 --- a/drivers/net/wireless/ath/ath11k/pci.c
 +++ b/drivers/net/wireless/ath/ath11k/pci.c
 @@ -7,6 +7,7 @@
@@ -85,7 +142,7 @@ index a163168..6240dd0 100644
  }
  
  static void ath11k_pci_bus_release(struct ath11k_base *ab)
-@@ -54,6 +77,27 @@ static void ath11k_pci_bus_release(struct ath11k_base *ab)
+@@ -54,6 +77,63 @@ static void ath11k_pci_bus_release(struct ath11k_base *ab)
  	struct ath11k_pci *ab_pci = ath11k_pci_priv(ab);
  
  	mhi_device_put(ab_pci->mhi_ctrl->mhi_dev);
@@ -94,6 +151,42 @@ index a163168..6240dd0 100644
 +		pm_runtime_mark_last_busy(ab->dev);
 +		pm_runtime_put_autosuspend(ab->dev);
 +	}
++}
++
++static int ath11k_pci_hif_runtime_get(struct ath11k_base *ab)
++{
++	struct ath11k_pci *ab_pci = ath11k_pci_priv(ab);
++	int ret;
++
++	if (!ab_pci->runtime_pm_configured)
++		return 0;
++
++	/* The mac80211 TX callback cannot sleep.  Take a reference only when
++	 * the endpoint is already active; otherwise request an asynchronous
++	 * resume and let the next packet use the restored datapath.
++	 */
++	ret = pm_runtime_get_if_active(ab->dev);
++	if (ret > 0)
++		return 0;
++	if (ret < 0)
++		return ret;
++
++	ret = pm_request_resume(ab->dev);
++	ath11k_info(ab, "QCA6390 datapath requested runtime resume: ret=%d\n",
++		    ret);
++
++	return ret < 0 ? ret : -EAGAIN;
++}
++
++static void ath11k_pci_hif_runtime_put(struct ath11k_base *ab)
++{
++	struct ath11k_pci *ab_pci = ath11k_pci_priv(ab);
++
++	if (!ab_pci->runtime_pm_configured)
++		return;
++
++	pm_runtime_mark_last_busy(ab->dev);
++	pm_runtime_put_autosuspend(ab->dev);
 +}
 +
 +static void ath11k_pci_runtime_pm_enable(struct ath11k_pci *ab_pci)
@@ -113,7 +206,16 @@ index a163168..6240dd0 100644
  }
  
  static u32 ath11k_pci_get_window_start(struct ath11k_base *ab, u32 offset)
-@@ -1142,6 +1187,9 @@ unsupported_wcn6855_soc:
+@@ -918,6 +998,8 @@ static const struct ath11k_hif_ops ath11k_pci_hif_ops = {
+ 	.ce_irq_enable = ath11k_pci_hif_ce_irq_enable,
+ 	.ce_irq_disable = ath11k_pci_hif_ce_irq_disable,
+ 	.get_ce_msi_idx = ath11k_pcic_get_ce_msi_idx,
++	.runtime_get = ath11k_pci_hif_runtime_get,
++	.runtime_put = ath11k_pci_hif_runtime_put,
+ #ifdef CONFIG_DEV_COREDUMP
+ 	.coredump_download = ath11k_pci_coredump_download,
+ #endif
+@@ -1142,6 +1224,9 @@ unsupported_wcn6855_soc:
  		ath11k_err(ab, "failed to init core: %d\n", ret);
  		goto err_free_irq;
  	}
@@ -123,7 +225,7 @@ index a163168..6240dd0 100644
  	ath11k_qmi_fwreset_from_cold_boot(ab);
  	return 0;
  
-@@ -1179,6 +1227,9 @@ static void ath11k_pci_remove(struct pci_dev *pdev)
+@@ -1179,6 +1264,9 @@ static void ath11k_pci_remove(struct pci_dev *pdev)
  	struct ath11k_base *ab = pci_get_drvdata(pdev);
  	struct ath11k_pci *ab_pci = ath11k_pci_priv(ab);
  
@@ -133,7 +235,7 @@ index a163168..6240dd0 100644
  	ath11k_pci_set_irq_affinity_hint(ab_pci, NULL);
  
  	if (test_bit(ATH11K_FLAG_QMI_FAIL, &ab->dev_flags)) {
-@@ -1205,6 +1256,9 @@ qmi_fail:
+@@ -1205,6 +1293,9 @@ qmi_fail:
  
  	ath11k_hal_srng_deinit(ab);
  	ath11k_ce_free_pipes(ab);
@@ -143,7 +245,7 @@ index a163168..6240dd0 100644
  	ath11k_core_free(ab);
  }
  
-@@ -1213,6 +1267,9 @@ static void ath11k_pci_shutdown(struct pci_dev *pdev)
+@@ -1213,6 +1304,9 @@ static void ath11k_pci_shutdown(struct pci_dev *pdev)
  	struct ath11k_base *ab = pci_get_drvdata(pdev);
  	struct ath11k_pci *ab_pci = ath11k_pci_priv(ab);
  
@@ -153,7 +255,7 @@ index a163168..6240dd0 100644
  	ath11k_pci_set_irq_affinity_hint(ab_pci, NULL);
  
  	spin_lock_bh(&ab->base_lock);
-@@ -1225,9 +1282,86 @@ static void ath11k_pci_shutdown(struct pci_dev *pdev)
+@@ -1225,9 +1319,86 @@ static void ath11k_pci_shutdown(struct pci_dev *pdev)
  	ath11k_pci_power_down(ab, false);
  }
  
@@ -240,7 +342,7 @@ index a163168..6240dd0 100644
  	int ret;
  
  	if (test_bit(ATH11K_FLAG_QMI_FAIL, &ab->dev_flags)) {
-@@ -1235,6 +1369,18 @@ static __maybe_unused int ath11k_pci_pm_suspend(struct device *dev)
+@@ -1235,6 +1406,18 @@ static __maybe_unused int ath11k_pci_pm_suspend(struct device *dev)
  		return 0;
  	}
  
@@ -259,14 +361,15 @@ index a163168..6240dd0 100644
  	ret = ath11k_core_suspend(ab);
  	if (ret)
  		ath11k_warn(ab, "failed to suspend core: %d\n", ret);
-@@ -1245,5 +1391,6 @@ static __maybe_unused int ath11k_pci_pm_resume(struct device *dev)
+@@ -1245,6 +1428,7 @@ static __maybe_unused int ath11k_pci_pm_suspend(struct device *dev)
+ static __maybe_unused int ath11k_pci_pm_resume(struct device *dev)
  {
  	struct ath11k_base *ab = dev_get_drvdata(dev);
 +	struct ath11k_pci *ab_pci = ath11k_pci_priv(ab);
  	int ret;
  
  	if (test_bit(ATH11K_FLAG_QMI_FAIL, &ab->dev_flags)) {
-@@ -1256,6 +1403,13 @@ static __maybe_unused int ath11k_pci_pm_resume(struct device *dev)
+@@ -1256,6 +1440,13 @@ static __maybe_unused int ath11k_pci_pm_resume(struct device *dev)
  	if (ret)
  		ath11k_warn(ab, "failed to resume core: %d\n", ret);
  
@@ -280,7 +383,7 @@ index a163168..6240dd0 100644
  	return ret;
  }
  
-@@ -1291,6 +1445,8 @@ static const struct dev_pm_ops __maybe_unused ath11k_pci_pm_ops = {
+@@ -1291,6 +1482,8 @@ static const struct dev_pm_ops __maybe_unused ath11k_pci_pm_ops = {
  				ath11k_pci_pm_resume)
  	SET_LATE_SYSTEM_SLEEP_PM_OPS(ath11k_pci_pm_suspend_late,
  				     ath11k_pci_pm_resume_early)
