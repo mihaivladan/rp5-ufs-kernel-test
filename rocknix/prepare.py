@@ -189,7 +189,7 @@ def apply_patches(repo, source, fix, profile):
         orderly_qca = Path(__file__).resolve().parent / "qca6390-orderly-poweroff.patch"
         require(orderly_qca.is_file(), "Missing guarded QCA6390 orderly power-off patch")
         require(hashlib.sha256(orderly_qca.read_bytes()).hexdigest() ==
-                "18e97bb4edfe67f7215d9312b5a58edd3d533e2cc3db72f128a8bcadddf65145",
+                "11484766d41ae28c167642353ed2e4ebfdf9be59b1236bb58f8271a2b2b4043e",
                 "QCA6390 orderly power-off patch checksum mismatch")
         extra_patches.append(orderly_qca)
     if profile == "lpm-platform":
@@ -323,8 +323,13 @@ def apply_patches(repo, source, fix, profile):
         qcom_pcie = (source / "drivers/pci/controller/dwc/pcie-qcom.c").read_text()
         require("module_param(orderly_qca_poweroff, bool, 0644);" in ath11k_pci and
                 "QFPROM_PWR_CTRL_SHUTDOWN_EN_MASK" in ath11k_pci and
-                "qcom_pcie_orderly_poweroff_arm(ab_pci->pdev)" in ath11k_pci,
+                "qcom_pcie_orderly_poweroff_arm(ab_pci->pdev)" in ath11k_pci and
+                "MHI_CHANNEL_SUSPEND_RETAINED" in ath11k_pci,
                 "Guarded ath11k orderly power-off markers missing")
+        qrtr = (source / "net/qrtr/mhi.c").read_text()
+        require("retaining IPCR channels for orderly QCA firmware stop" in qrtr and
+                "MHI_CHANNEL_SUSPEND_RESET" in qrtr,
+                "Orderly QCA QRTR channel-lifetime markers missing")
         require("orderly QCA power-off: L23 acknowledged" in qcom_pcie and
                 "qcom_pcie_orderly_poweroff_arm" in qcom_pcie and
                 "pci_pwrctrl_power_off_devices(pci->dev);" in qcom_pcie,

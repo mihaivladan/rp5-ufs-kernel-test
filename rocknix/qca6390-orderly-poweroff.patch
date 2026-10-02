@@ -1,16 +1,18 @@
-error: daemon terminated
 diff --git a/drivers/net/wireless/ath/ath11k/core.c b/drivers/net/wireless/ath/ath11k/core.c
-index 8dacc87..12e6c6d 100644
+index 8dacc87..5febe63 100644
 --- a/drivers/net/wireless/ath/ath11k/core.c
 +++ b/drivers/net/wireless/ath/ath11k/core.c
-@@ -1273,6 +1273,27 @@ int ath11k_core_suspend_late(struct ath11k_base *ab)
+@@ -1273,6 +1273,30 @@ int ath11k_core_suspend_late(struct ath11k_base *ab)
  	if (ab->actual_pm_policy == ATH11K_PM_WOW)
  		return 0;
  
 +	if (ath11k_hif_orderly_poweroff_enabled(ab)) {
++		set_bit(ATH11K_FLAG_ORDERLY_QMI_STOP, &ab->dev_flags);
 +		ret = ath11k_qmi_firmware_stop(ab);
-+		if (ret)
++		if (ret) {
++			clear_bit(ATH11K_FLAG_ORDERLY_QMI_STOP, &ab->dev_flags);
 +			return ret;
++		}
 +
 +		ath11k_hif_irq_disable(ab);
 +		ath11k_hif_ce_irq_disable(ab);
@@ -31,6 +33,18 @@ index 8dacc87..12e6c6d 100644
  	ath11k_hif_irq_disable(ab);
  	ath11k_hif_ce_irq_disable(ab);
  
+diff --git a/drivers/net/wireless/ath/ath11k/core.h b/drivers/net/wireless/ath/ath11k/core.h
+index a0d7259..4872319 100644
+--- a/drivers/net/wireless/ath/ath11k/core.h
++++ b/drivers/net/wireless/ath/ath11k/core.h
+@@ -286,6 +286,7 @@ enum ath11k_dev_flags {
+ 	ATH11K_FLAG_EXT_IRQ_ENABLED,
+ 	ATH11K_FLAG_FIXED_MEM_RGN,
+ 	ATH11K_FLAG_DEVICE_INIT_DONE,
++	ATH11K_FLAG_ORDERLY_QMI_STOP,
+ 	ATH11K_FLAG_MULTI_MSI_VECTORS,
+ 	ATH11K_FLAG_FTM_SEGMENTED,
+ };
 diff --git a/drivers/net/wireless/ath/ath11k/hif.h b/drivers/net/wireless/ath/ath11k/hif.h
 index 017fed1..b7c0f56 100644
 --- a/drivers/net/wireless/ath/ath11k/hif.h
@@ -66,7 +80,7 @@ index 017fed1..b7c0f56 100644
  {
  	if (ab->hif.ops->suspend)
 diff --git a/drivers/net/wireless/ath/ath11k/pci.c b/drivers/net/wireless/ath/ath11k/pci.c
-index a163168..1d16fe5 100644
+index a163168..8f798da 100644
 --- a/drivers/net/wireless/ath/ath11k/pci.c
 +++ b/drivers/net/wireless/ath/ath11k/pci.c
 @@ -8,6 +8,7 @@
@@ -89,7 +103,17 @@ index a163168..1d16fe5 100644
  static const struct pci_device_id ath11k_pci_id_table[] = {
  	{ PCI_VDEVICE(QCOM, QCA6390_DEVICE_ID) },
  	{ PCI_VDEVICE(QCOM, WCN6855_DEVICE_ID) },
-@@ -859,6 +865,55 @@ static void ath11k_pci_power_down(struct ath11k_base *ab, bool is_suspend)
+@@ -853,12 +859,67 @@ static void ath11k_pci_power_down(struct ath11k_base *ab, bool is_suspend)
+ 	ath11k_pci_force_wake(ab_pci->ab);
+ 
+ 	ath11k_pci_msi_disable(ab_pci);
++	if (mhi_pm_get_channel_suspend_state(ab_pci->mhi_ctrl) ==
++	    MHI_CHANNEL_SUSPEND_RETAINED)
++		mhi_pm_set_channel_suspend_state(ab_pci->mhi_ctrl,
++						 MHI_CHANNEL_SUSPEND_RESET);
+ 
+ 	ath11k_mhi_stop(ab_pci, is_suspend);
+ 	clear_bit(ATH11K_FLAG_DEVICE_INIT_DONE, &ab->dev_flags);
  	ath11k_pci_sw_reset(ab_pci->ab, false);
  }
  
@@ -133,6 +157,8 @@ index a163168..1d16fe5 100644
 +
 +	ath11k_pci_aspm_restore(ab_pci);
 +	ath11k_pci_msi_disable(ab_pci);
++	mhi_pm_set_channel_suspend_state(ab_pci->mhi_ctrl,
++					 MHI_CHANNEL_SUSPEND_RESET);
 +	ath11k_mhi_stop(ab_pci, true);
 +	clear_bit(ATH11K_FLAG_DEVICE_INIT_DONE, &ab->dev_flags);
 +
@@ -145,7 +171,7 @@ index a163168..1d16fe5 100644
  static int ath11k_pci_hif_suspend(struct ath11k_base *ab)
  {
  	struct ath11k_pci *ar_pci = ath11k_pci_priv(ab);
-@@ -907,6 +962,8 @@ static const struct ath11k_hif_ops ath11k_pci_hif_ops = {
+@@ -907,6 +968,8 @@ static const struct ath11k_hif_ops ath11k_pci_hif_ops = {
  	.write32 = ath11k_pcic_write32,
  	.read = ath11k_pcic_read,
  	.power_down = ath11k_pci_power_down,
@@ -154,7 +180,31 @@ index a163168..1d16fe5 100644
  	.power_up = ath11k_pci_power_up,
  	.suspend = ath11k_pci_hif_suspend,
  	.resume = ath11k_pci_hif_resume,
-@@ -1262,11 +1319,14 @@ static __maybe_unused int ath11k_pci_pm_resume(struct device *dev)
+@@ -1228,6 +1291,8 @@ static void ath11k_pci_shutdown(struct pci_dev *pdev)
+ static __maybe_unused int ath11k_pci_pm_suspend(struct device *dev)
+ {
+ 	struct ath11k_base *ab = dev_get_drvdata(dev);
++	struct ath11k_pci *ab_pci = ath11k_pci_priv(ab);
++	bool orderly = ath11k_hif_orderly_poweroff_enabled(ab);
+ 	int ret;
+ 
+ 	if (test_bit(ATH11K_FLAG_QMI_FAIL, &ab->dev_flags)) {
+@@ -1238,6 +1303,14 @@ static __maybe_unused int ath11k_pci_pm_suspend(struct device *dev)
+ 	ret = ath11k_core_suspend(ab);
+ 	if (ret)
+ 		ath11k_warn(ab, "failed to suspend core: %d\n", ret);
++	if (ret && orderly)
++		return ret;
++	if (orderly) {
++		mhi_pm_set_channel_suspend_state(ab_pci->mhi_ctrl,
++						 MHI_CHANNEL_SUSPEND_RETAINED);
++		ath11k_info(ab,
++			    "orderly QCA power-off: preserving QMI transport for late firmware stop\n");
++	}
+ 
+ 	return 0;
+ }
+@@ -1262,11 +1335,14 @@ static __maybe_unused int ath11k_pci_pm_resume(struct device *dev)
  static __maybe_unused int ath11k_pci_pm_suspend_late(struct device *dev)
  {
  	struct ath11k_base *ab = dev_get_drvdata(dev);
@@ -182,7 +232,7 @@ index 1e3005a..5230b9b 100644
  enum ath11k_pci_flags {
  	ATH11K_PCI_ASPM_RESTORE,
 diff --git a/drivers/net/wireless/ath/ath11k/qmi.c b/drivers/net/wireless/ath/ath11k/qmi.c
-index 7dc0733..61ca4c3 100644
+index 7dc0733..ebd6a53 100644
 --- a/drivers/net/wireless/ath/ath11k/qmi.c
 +++ b/drivers/net/wireless/ath/ath11k/qmi.c
 @@ -2825,7 +2825,7 @@ static int ath11k_qmi_wlanfw_wlan_ini_send(struct ath11k_base *ab, bool enable)
@@ -206,6 +256,25 @@ index 7dc0733..61ca4c3 100644
  }
  
  int ath11k_qmi_firmware_start(struct ath11k_base *ab,
+@@ -3226,11 +3228,18 @@ static void ath11k_qmi_driver_event_work(struct work_struct *work)
+ 
+ 		switch (event->type) {
+ 		case ATH11K_QMI_EVENT_SERVER_ARRIVE:
++			clear_bit(ATH11K_FLAG_ORDERLY_QMI_STOP, &ab->dev_flags);
+ 			ret = ath11k_qmi_event_server_arrive(qmi);
+ 			if (ret < 0)
+ 				set_bit(ATH11K_FLAG_QMI_FAIL, &ab->dev_flags);
+ 			break;
+ 		case ATH11K_QMI_EVENT_SERVER_EXIT:
++			if (test_bit(ATH11K_FLAG_ORDERLY_QMI_STOP,
++				     &ab->dev_flags)) {
++				ath11k_info(ab,
++					    "orderly QCA power-off: expected WLFW server exit\n");
++				break;
++			}
+ 			set_bit(ATH11K_FLAG_CRASH_FLUSH, &ab->dev_flags);
+ 			set_bit(ATH11K_FLAG_RECOVERY, &ab->dev_flags);
+ 
 diff --git a/drivers/net/wireless/ath/ath11k/qmi.h b/drivers/net/wireless/ath/ath11k/qmi.h
 index 350816c..323794f 100644
 --- a/drivers/net/wireless/ath/ath11k/qmi.h
@@ -249,7 +318,7 @@ index de4b245..c643fdc 100644
  	void (*pme_turn_off)(struct dw_pcie_rp *pp);
  };
 diff --git a/drivers/pci/controller/dwc/pcie-qcom.c b/drivers/pci/controller/dwc/pcie-qcom.c
-index 3df5149..4b5ee29 100644
+index 3df5149..4fd1d6c 100644
 --- a/drivers/pci/controller/dwc/pcie-qcom.c
 +++ b/drivers/pci/controller/dwc/pcie-qcom.c
 @@ -23,6 +23,7 @@
@@ -447,7 +516,7 @@ index 3df5149..4b5ee29 100644
  	if (pcie->drv_supported &&
  	    (pm_suspend_target_state == PM_SUSPEND_TO_IDLE ||
  	     pm_suspend_target_state == PM_SUSPEND_MEM)) {
-@@ -2464,6 +2591,26 @@ static int qcom_pcie_resume_noirq(struct device *dev)
+@@ -2464,6 +2596,26 @@ static int qcom_pcie_resume_noirq(struct device *dev)
  	pcie = dev_get_drvdata(dev);
  	if (!pcie)
  		return 0;
@@ -474,7 +543,7 @@ index 3df5149..4b5ee29 100644
  	if (pcie->drv_armed || pcie->drv_offline) {
  		if (!pcie->drv_resources_suspended &&
  		    !pcie->drv_clocks_disabled && !pcie->drv_supplies_disabled &&
-@@ -2540,6 +2687,18 @@ static int qcom_pcie_resume_early(struct device *dev)
+@@ -2540,6 +2692,18 @@ static int qcom_pcie_resume_early(struct device *dev)
  	if (!pcie)
  		return 0;
  
@@ -493,6 +562,43 @@ index 3df5149..4b5ee29 100644
  	if (pcie->drv_offline) {
  		if (pcie->drv_resources_suspended || pcie->drv_clocks_disabled ||
  		    pcie->drv_supplies_disabled || pcie->drv_icc_mem_disabled ||
+diff --git a/include/linux/mhi.h b/include/linux/mhi.h
+index 4b86ae6..9310103 100644
+--- a/include/linux/mhi.h
++++ b/include/linux/mhi.h
+@@ -303,6 +303,12 @@ struct mhi_controller_config {
+ 	bool m2_no_db;
+ };
+ 
++enum mhi_channel_suspend_state {
++	MHI_CHANNEL_SUSPEND_DEFAULT,
++	MHI_CHANNEL_SUSPEND_RETAINED,
++	MHI_CHANNEL_SUSPEND_RESET,
++};
++
+ /**
+  * struct mhi_controller - Master MHI controller structure
+  * @name: Device name of the MHI controller
+@@ -462,6 +468,7 @@ struct mhi_controller {
+ 	bool wake_set;
+ 	unsigned long irq_flags;
+ 	u32 mru;
++	enum mhi_channel_suspend_state channel_suspend_state;
+ };
+ 
+ /**
+@@ -686,6 +693,11 @@ int mhi_pm_resume(struct mhi_controller *mhi_cntrl);
+  */
+ int mhi_pm_resume_force(struct mhi_controller *mhi_cntrl);
+ 
++void mhi_pm_set_channel_suspend_state(struct mhi_controller *mhi_cntrl,
++				      enum mhi_channel_suspend_state state);
++enum mhi_channel_suspend_state
++mhi_pm_get_channel_suspend_state(struct mhi_controller *mhi_cntrl);
++
+ /**
+  * mhi_download_rddm_image - Download ramdump image from device for
+  *                           debugging purpose.
 diff --git a/include/linux/pci-qcom.h b/include/linux/pci-qcom.h
 new file mode 100644
 index 0000000..a6a7c72
@@ -523,3 +629,82 @@ index 0000000..a6a7c72
 +#endif
 +
 +#endif /* _LINUX_PCI_QCOM_H */
+--- a/drivers/bus/mhi/host/pm.c
++++ b/drivers/bus/mhi/host/pm.c
+@@ -1027,6 +1027,20 @@
+ 	return __mhi_pm_resume(mhi_cntrl, true);
+ }
+ EXPORT_SYMBOL_GPL(mhi_pm_resume_force);
++
++void mhi_pm_set_channel_suspend_state(struct mhi_controller *mhi_cntrl,
++				      enum mhi_channel_suspend_state state)
++{
++	WRITE_ONCE(mhi_cntrl->channel_suspend_state, state);
++}
++EXPORT_SYMBOL_GPL(mhi_pm_set_channel_suspend_state);
++
++enum mhi_channel_suspend_state
++mhi_pm_get_channel_suspend_state(struct mhi_controller *mhi_cntrl)
++{
++	return READ_ONCE(mhi_cntrl->channel_suspend_state);
++}
++EXPORT_SYMBOL_GPL(mhi_pm_get_channel_suspend_state);
+ 
+ int __mhi_device_get_sync(struct mhi_controller *mhi_cntrl)
+ {
+--- a/net/qrtr/mhi.c
++++ b/net/qrtr/mhi.c
+@@ -166,14 +166,21 @@
+ {
+ 	struct mhi_device *mhi_dev = container_of(dev, struct mhi_device, dev);
+ 	enum mhi_state state;
++	enum mhi_channel_suspend_state channel_state;
+ 
+ 	state = mhi_get_mhi_state(mhi_dev->mhi_cntrl);
++	channel_state = mhi_pm_get_channel_suspend_state(mhi_dev->mhi_cntrl);
+ 	/*
+ 	 * If the device is in suspend state, then no need for the
+ 	 * client driver to unprepare the channels.
+ 	 */
+ 	if (state == MHI_STATE_M3)
+ 		return 0;
++	if (channel_state == MHI_CHANNEL_SUSPEND_RETAINED) {
++		dev_info(dev,
++			 "retaining IPCR channels for orderly QCA firmware stop\n");
++		return 0;
++	}
+ 
+ 	mhi_unprepare_from_transfer(mhi_dev);
+ 
+@@ -183,10 +190,13 @@
+ static int __maybe_unused qcom_mhi_qrtr_pm_resume_early(struct device *dev)
+ {
+ 	struct mhi_device *mhi_dev = container_of(dev, struct mhi_device, dev);
++	struct mhi_controller *mhi_cntrl = mhi_dev->mhi_cntrl;
++	enum mhi_channel_suspend_state channel_state;
+ 	enum mhi_state state;
+ 	int rc;
+ 
+-	state = mhi_get_mhi_state(mhi_dev->mhi_cntrl);
++	state = mhi_get_mhi_state(mhi_cntrl);
++	channel_state = mhi_pm_get_channel_suspend_state(mhi_cntrl);
+ 	/*
+ 	 * If the device is in suspend state, we won't unprepare channels
+ 	 * in suspend callback, therefore no need to prepare channels when
+@@ -194,6 +204,16 @@
+ 	 */
+ 	if (state == MHI_STATE_M3)
+ 		return 0;
++	if (channel_state == MHI_CHANNEL_SUSPEND_RETAINED) {
++		mhi_pm_set_channel_suspend_state(mhi_cntrl,
++						 MHI_CHANNEL_SUSPEND_DEFAULT);
++		dev_info(dev,
++			 "reusing retained IPCR channels after aborted orderly QCA power-off\n");
++		return 0;
++	}
++	if (channel_state == MHI_CHANNEL_SUSPEND_RESET)
++		mhi_pm_set_channel_suspend_state(mhi_cntrl,
++						 MHI_CHANNEL_SUSPEND_DEFAULT);
+ 
+ 	rc = mhi_prepare_for_transfer(mhi_dev);
+ 	if (rc) {
