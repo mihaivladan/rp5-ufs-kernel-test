@@ -1,4 +1,4 @@
-name: ConsoleOS RP5 kernel RC17 PCIe ICC release
+name: ConsoleOS RP5 kernel RC18 ADSP proxy all-state votes
 on:
   workflow_dispatch:
   push:
@@ -20,6 +20,7 @@ on:
       - 'rocknix/qcom-pmic-typec-pdphy-attach-gating.patch'
       - 'rocknix/qca6390-orderly-poweroff.patch'
       - 'rocknix/qcom-pcie-orderly-icc-release.patch'
+      - 'rocknix/qcom-rpmhpd-sm8250-lcx-lmx-all-states.patch'
       - 'rocknix/rpmh-regulator-suspend-state.patch'
       - 'rocknix/regulator-core-s2idle-state-mem.patch'
       - 'rocknix/rpmh-regulator-suspend-trace.patch'
@@ -87,19 +88,19 @@ jobs:
           ccache --zero-stats
           ccache --show-config
           printf 'cache_restore=%s\n' '${{ steps.kernel-compiler-cache.outputs.cache-hit }}'
-      - name: Prepare ConsoleOS RP5 RC17 PCIe ICC source
+      - name: Prepare ConsoleOS RP5 RC18 ADSP proxy source
         run: |
           set -euo pipefail
-          bash rocknix/build.sh prepare 2>&1 | tee rocknix-consoleos-rc17-prepare.log
-      - name: Build ConsoleOS RP5 RC17 kernel and modules
+          bash rocknix/build.sh prepare 2>&1 | tee rocknix-consoleos-rc18-prepare.log
+      - name: Build ConsoleOS RP5 RC18 kernel and modules
         run: |
           set -euo pipefail
-          bash rocknix/build.sh compile 2>&1 | tee rocknix-consoleos-rc17-compile.log
+          bash rocknix/build.sh compile 2>&1 | tee rocknix-consoleos-rc18-compile.log
       - name: Report kernel compiler cache
         if: always()
         run: |
           if command -v ccache >/dev/null 2>&1; then
-            ccache --show-stats --verbose | tee rocknix-consoleos-rc17-ccache.log
+            ccache --show-stats --verbose | tee rocknix-consoleos-rc18-ccache.log
           fi
       - name: Save successful kernel compiler cache
         if: success()
@@ -111,12 +112,12 @@ jobs:
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
-          name: rocknix-rp5-consoleos-rc17-pcie-icc-release
+          name: rocknix-rp5-consoleos-rc18-adsp-proxy-allsets
           retention-days: 14
           compression-level: 0
           if-no-files-found: error
           path: |
             rocknix-out/
-            rocknix-consoleos-rc17-prepare.log
-            rocknix-consoleos-rc17-compile.log
-            rocknix-consoleos-rc17-ccache.log
+            rocknix-consoleos-rc18-prepare.log
+            rocknix-consoleos-rc18-compile.log
+            rocknix-consoleos-rc18-ccache.log

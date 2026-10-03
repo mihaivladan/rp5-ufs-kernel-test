@@ -198,6 +198,13 @@ def apply_patches(repo, source, fix, profile):
                 "abdbd431d328d0efcd1acc29aff128f5b8a67163ba51cb1838fedb491bbcf961",
                 "Orderly PCIe ICC release patch checksum mismatch")
         extra_patches.append(orderly_icc)
+        adsp_proxy_allsets = Path(__file__).resolve().parent / "qcom-rpmhpd-sm8250-lcx-lmx-all-states.patch"
+        require(adsp_proxy_allsets.is_file(),
+                "Missing SM8250 ADSP proxy all-state RPMh patch")
+        require(hashlib.sha256(adsp_proxy_allsets.read_bytes()).hexdigest() ==
+                "648bb8bed59c4aaae43c48e43543a85314ffcd698ea7ec79ebacbec62980f449",
+                "SM8250 ADSP proxy all-state RPMh patch checksum mismatch")
+        extra_patches.append(adsp_proxy_allsets)
     if profile == "lpm-platform":
         lpm_fix = Path(__file__).resolve().parent / "qcom-lpm-platform-suspend.patch"
         require(lpm_fix.is_file(), "Missing exact-state platform suspend patch")
@@ -342,6 +349,17 @@ def apply_patches(repo, source, fix, profile):
                 "orderly QCA power-off: root complex suspended, ICC votes zero" in qcom_pcie and
                 "orderly QCA power-off: ICC votes, root complex and endpoint rails restored" in qcom_pcie,
                 "Guarded Qualcomm PCIe orderly power-off markers missing")
+        rpmhpd = (source / "drivers/pmdomain/qcom/rpmhpd.c").read_text()
+        required_adsp_proxy_votes = (
+            "const bool\tall_state_votes;",
+            "static struct rpmhpd sm8250_lcx = {",
+            "static struct rpmhpd sm8250_lmx = {",
+            "[RPMHPD_LCX] = &sm8250_lcx,",
+            "[RPMHPD_LMX] = &sm8250_lmx,",
+            "if (peer || pd->all_state_votes) {",
+        )
+        require(all(marker in rpmhpd for marker in required_adsp_proxy_votes),
+                "SM8250 LCX/LMX all-state RPMh vote markers missing")
     if profile == "lpm-platform":
         lpm_source = (source / "drivers/soc/qcom/qcom_lpm_platform_suspend.c").read_text()
         require("#define CONSOLEOS_SM8250_SUSPEND_STATE\t0x4100c244" in lpm_source and
