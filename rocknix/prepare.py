@@ -376,7 +376,8 @@ def apply_patches(repo, source, fix, profile):
                 "orderly QCA awake-off: system suspend found root already off" in qcom_pcie and
                 "pci_pwrctrl_power_off_devices(pci->dev);" in qcom_pcie and
                 "orderly QCA awake-off: root, PHY, clocks, package rails and ICC off" in qcom_pcie and
-                "orderly QCA awake-off: genpd, ICC, root and endpoint rails restored" in qcom_pcie,
+                "orderly QCA awake-off: GDSC, ICC, root and endpoint rails restored" in qcom_pcie and
+                '"tracked-on"' in qcom_pcie,
                 "Guarded Qualcomm PCIe orderly power-off markers missing")
     if profile == "lpm-platform":
         lpm_source = (source / "drivers/soc/qcom/qcom_lpm_platform_suspend.c").read_text()
