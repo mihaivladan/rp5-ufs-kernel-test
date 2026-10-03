@@ -17,23 +17,25 @@
  
  /* PARF_PCS_DEEMPH register fields */
  #define PCS_DEEMPH_TX_DEEMPH_GEN1(x)		FIELD_PREP(GENMASK(21, 16), x)
-@@ -312,6 +315,7 @@
+@@ -311,7 +314,7 @@
+ 	bool drv_offline;
  	bool orderly_poweroff;
  	bool orderly_awake_offline;
- 	bool orderly_awake_gdsc_suspended;
+-	bool orderly_awake_gdsc_suspended;
 +	bool orderly_awake_gdsc_collapsed;
  	bool drv_resources_suspended;
  	bool drv_clocks_disabled;
  	bool drv_supplies_disabled;
-@@ -2307,6 +2311,7 @@
+@@ -2306,7 +2309,7 @@
+ 	pcie->orderly_endpoint = NULL;
  	pcie->orderly_poweroff = false;
  	pcie->orderly_awake_offline = false;
- 	pcie->orderly_awake_gdsc_suspended = false;
+-	pcie->orderly_awake_gdsc_suspended = false;
 +	pcie->orderly_awake_gdsc_collapsed = false;
  	if (pdev)
  		pci_dev_put(pdev);
  }
-@@ -2414,7 +2419,56 @@
+@@ -2414,7 +2417,58 @@
  	return 0;
  }
  EXPORT_SYMBOL_GPL(qcom_pcie_orderly_poweroff_arm);
@@ -66,40 +68,47 @@
 +	return ret;
 +}
 +
-+static int qcom_pcie_orderly_verify_gdsc_on(struct qcom_pcie *pcie)
++static int qcom_pcie_orderly_restore_gdsc_on(struct qcom_pcie *pcie)
 +{
 +	void __iomem *gdscr;
-+	u32 value;
-+	int ret = 0;
- 
++	u32 before, after;
++	int ret;
++
 +	gdscr = ioremap(PCIE0_GDSCR_PHYS, sizeof(u32));
 +	if (!gdscr)
 +		return -ENOMEM;
 +
-+	value = readl_relaxed(gdscr);
-+	if ((value & GDSCR_SW_COLLAPSE) || !(value & GDSCR_PWR_ON))
-+		ret = -EIO;
++	before = readl_relaxed(gdscr);
++	writel_relaxed(before & ~GDSCR_SW_COLLAPSE, gdscr);
++	udelay(1);
++	ret = readl_poll_timeout(gdscr, after, after & GDSCR_PWR_ON,
++				 1, 2000);
 +	dev_info(pcie->pci->dev,
-+		 "orderly QCA awake-off: PCIe0 GDSCR restore value=%#x ret=%d\n",
-+		 value, ret);
++		 "orderly QCA awake-off: PCIe0 GDSCR restore before=%#x after=%#x ret=%d\n",
++		 before, after, ret);
 +	iounmap(gdscr);
-+
+ 
 +	return ret;
 +}
 +
  int qcom_pcie_orderly_poweroff_awake(struct pci_dev *pdev)
  {
  	struct pci_host_bridge *bridge;
-@@ -2474,12 +2528,20 @@
- 			goto err_icc_cpu;
- 		}
- 		pcie->orderly_awake_gdsc_suspended = true;
+@@ -2468,18 +2522,21 @@
+ 		goto err_icc_mem;
+ 
+ 	if (orderly_awake_gdsc_off) {
+-		ret = pm_runtime_put_sync_suspend(dev);
+-		if (ret < 0) {
+-			pm_runtime_get_noresume(dev);
 +		ret = qcom_pcie_orderly_force_gdsc_collapse(pcie);
 +		if (ret) {
-+			pm_runtime_get_sync(dev);
-+			pcie->orderly_awake_gdsc_suspended = false;
-+			goto err_icc_cpu;
-+		}
++			/* Never touch the powered-down host until its domain is on. */
++			if (qcom_pcie_orderly_restore_gdsc_on(pcie))
++				return ret;
+ 			goto err_icc_cpu;
+ 		}
+-		pcie->orderly_awake_gdsc_suspended = true;
 +		pcie->orderly_awake_gdsc_collapsed = true;
  	}
  
@@ -108,21 +117,38 @@
 -		 "orderly QCA awake-off: root, PHY, clocks, package rails and ICC off; genpd=%s\n",
 -		 pcie->orderly_awake_gdsc_suspended ? "off" : "retained");
 +		 "orderly QCA awake-off: root, PHY, clocks, package rails and ICC off; genpd=%s physical=%s\n",
-+		 pcie->orderly_awake_gdsc_suspended ? "off" : "retained",
++		 "tracked-on",
 +		 pcie->orderly_awake_gdsc_collapsed ? "collapsed" : "on");
  	return 0;
  
  err_icc_cpu:
-@@ -2526,6 +2588,12 @@
+@@ -2516,16 +2573,11 @@
+ 	if (!pcie->pci->suspended)
+ 		return 0;
+ 
+-	if (pcie->orderly_awake_gdsc_suspended) {
+-		ret = pm_runtime_get_sync(dev);
+-		if (ret < 0) {
+-			pm_runtime_put_noidle(dev);
+-			dev_err(dev,
+-				"orderly QCA awake-off: failed to restore PCIe genpd: %d\n",
+-				ret);
++	if (pcie->orderly_awake_gdsc_collapsed) {
++		ret = qcom_pcie_orderly_restore_gdsc_on(pcie);
++		if (ret)
  			return ret;
- 		}
- 		pcie->orderly_awake_gdsc_suspended = false;
-+		if (pcie->orderly_awake_gdsc_collapsed) {
-+			ret = qcom_pcie_orderly_verify_gdsc_on(pcie);
-+			if (ret)
-+				return ret;
-+			pcie->orderly_awake_gdsc_collapsed = false;
-+		}
+-		}
+-		pcie->orderly_awake_gdsc_suspended = false;
++		pcie->orderly_awake_gdsc_collapsed = false;
  	}
  
  	ret = pinctrl_pm_select_default_state(dev);
+@@ -2542,7 +2594,7 @@
+ 		goto err_disable_icc_mem;
+ 
+ 	dev_info(dev,
+-		 "orderly QCA awake-off: genpd, ICC, root and endpoint rails restored\n");
++		 "orderly QCA awake-off: GDSC, ICC, root and endpoint rails restored\n");
+ 	return 0;
+ 
+ err_disable_icc_mem:

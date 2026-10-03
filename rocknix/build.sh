@@ -53,7 +53,7 @@ fg-coulomb-counter)
     ;;
 consoleos-rc1)
     config_fragment="${kit}/rocknix/consoleos-rc1.config"
-    expected_release='7.2.0-consoleos-rc21-awakeqca-parity'
+    expected_release='7.2.0-consoleos-rc22-direct-gdsc'
     artifact_name="rocknix-${expected_release}.tar.zst"
     dtb_name='sm8250-retroidpocket-rp5-consoleos-rc1'
     ;;
