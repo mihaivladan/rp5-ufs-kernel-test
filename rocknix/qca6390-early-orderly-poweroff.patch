@@ -88,11 +88,12 @@
  static inline struct ath11k_pci *ath11k_pci_priv(struct ath11k_base *ab)
 --- a/drivers/net/wireless/ath/ath11k/pci.c
 +++ b/drivers/net/wireless/ath/ath11k/pci.c
-@@ -1298,7 +1298,17 @@
- 	if (test_bit(ATH11K_FLAG_QMI_FAIL, &ab->dev_flags)) {
- 		ath11k_dbg(ab, ATH11K_DBG_BOOT, "boot skipping pci suspend as qmi is not initialised\n");
- 		return 0;
-+	}
+@@ -1298,8 +1298,18 @@
+	if (test_bit(ATH11K_FLAG_QMI_FAIL, &ab->dev_flags)) {
+		ath11k_dbg(ab, ATH11K_DBG_BOOT, "boot skipping pci suspend as qmi is not initialised\n");
+		return 0;
+ 	}
+ 
 +	if (orderly) {
 +		ret = qcom_pcie_orderly_poweroff_prepare(ab_pci->pdev);
 +		if (ret) {
@@ -101,7 +102,7 @@
 +				    ret);
 +			return ret;
 +		}
- 	}
++	}
 +
  	ret = ath11k_core_suspend(ab);
  	if (ret)

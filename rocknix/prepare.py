@@ -202,7 +202,7 @@ def apply_patches(repo, source, fix, profile):
         require(early_orderly.is_file(),
                 "Missing QCA6390 early orderly power-off patch")
         require(hashlib.sha256(early_orderly.read_bytes()).hexdigest() ==
-                "de5ba631791097c160b7c5cc0cfe3be1f8bc45fa4b1c42b56a063140400f712d",
+                "11506019a79f93b3afe0b63011ad28e5c019edf23669b33dd0dcc5753b1b19d5",
                 "QCA6390 early orderly power-off patch checksum mismatch")
         extra_patches.append(early_orderly)
     if profile == "lpm-platform":
