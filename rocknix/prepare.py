@@ -205,6 +205,13 @@ def apply_patches(repo, source, fix, profile):
                 "21f2cb30d3e857c34b9d1fb88abd680cc212697f0dfd9ca8245f0f1a0c286001",
                 "QCA6390 early orderly power-off patch checksum mismatch")
         extra_patches.append(early_orderly)
+        awake_orderly = Path(__file__).resolve().parent / "qca6390-awake-orderly-poweroff.patch"
+        require(awake_orderly.is_file(),
+                "Missing QCA6390 awake orderly power-off patch")
+        require(hashlib.sha256(awake_orderly.read_bytes()).hexdigest() ==
+                "34cda72a49647471e0270c451fbc875185c47e2251040b0bfb35481c9cab8a99",
+                "QCA6390 awake orderly power-off patch checksum mismatch")
+        extra_patches.append(awake_orderly)
     if profile == "lpm-platform":
         lpm_fix = Path(__file__).resolve().parent / "qcom-lpm-platform-suspend.patch"
         require(lpm_fix.is_file(), "Missing exact-state platform suspend patch")

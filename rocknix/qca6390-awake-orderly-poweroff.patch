@@ -1,0 +1,568 @@
+--- a/include/linux/pci-qcom.h
++++ b/include/linux/pci-qcom.h
+@@ -10,6 +10,8 @@
+ #if IS_ENABLED(CONFIG_PCIE_QCOM)
+ int qcom_pcie_orderly_poweroff_prepare(struct pci_dev *pdev);
+ int qcom_pcie_orderly_poweroff_arm(struct pci_dev *pdev);
++int qcom_pcie_orderly_poweroff_awake(struct pci_dev *pdev);
++int qcom_pcie_orderly_poweroff_resume(struct pci_dev *pdev);
+ void qcom_pcie_orderly_poweroff_disarm(struct pci_dev *pdev);
+ #else
+ static inline int qcom_pcie_orderly_poweroff_prepare(struct pci_dev *pdev)
+@@ -22,6 +24,16 @@
+ 	return -EOPNOTSUPP;
+ }
+ 
++static inline int qcom_pcie_orderly_poweroff_awake(struct pci_dev *pdev)
++{
++	return -EOPNOTSUPP;
++}
++
++static inline int qcom_pcie_orderly_poweroff_resume(struct pci_dev *pdev)
++{
++	return -EOPNOTSUPP;
++}
++
+ static inline void qcom_pcie_orderly_poweroff_disarm(struct pci_dev *pdev)
+ {
+ }
+--- a/drivers/pci/controller/dwc/pcie-qcom.c
++++ b/drivers/pci/controller/dwc/pcie-qcom.c
+@@ -20,6 +20,7 @@
+ #include <linux/kernel.h>
+ #include <linux/limits.h>
+ #include <linux/init.h>
++#include <linux/moduleparam.h>
+ #include <linux/of.h>
+ #include <linux/of_pci.h>
+ #include <linux/pci.h>
+@@ -44,9 +45,15 @@
+ #include "pcie-qcom-common.h"
+ #include "pcie-qcom-drv.h"
+ 
++static bool orderly_awake_gdsc_off = true;
++module_param(orderly_awake_gdsc_off, bool, 0644);
++MODULE_PARM_DESC(orderly_awake_gdsc_off,
++		 "Power the PCIe0 genpd off during an armed awake QCA shutdown");
++
+ /* PARF registers */
+ #define PARF_SYS_CTRL				0x00
+ #define PARF_PM_CTRL				0x20
++#define PARF_CLKREQ_OVERRIDE			0x2b0
+ #define PARF_PCS_DEEMPH				0x34
+ #define PARF_PCS_SWING				0x38
+ #define PARF_PHY_CTRL				0x40
+@@ -101,6 +108,10 @@
+ /* PARF_PM_CTRL register fields */
+ #define REQ_NOT_ENTR_L1				BIT(5)
+ 
++/* PARF_CLKREQ_OVERRIDE register fields */
++#define PARF_CLKREQ_IN_ENABLE			BIT(1)
++#define PARF_CLKREQ_IN_VALUE			BIT(3)
++
+ /* PARF_PCS_DEEMPH register fields */
+ #define PCS_DEEMPH_TX_DEEMPH_GEN1(x)		FIELD_PREP(GENMASK(21, 16), x)
+ #define PCS_DEEMPH_TX_DEEMPH_GEN2_3_5DB(x)	FIELD_PREP(GENMASK(13, 8), x)
+@@ -299,6 +310,8 @@
+ 	bool drv_armed;
+ 	bool drv_offline;
+ 	bool orderly_poweroff;
++	bool orderly_awake_offline;
++	bool orderly_awake_gdsc_suspended;
+ 	bool drv_resources_suspended;
+ 	bool drv_clocks_disabled;
+ 	bool drv_supplies_disabled;
+@@ -2292,6 +2305,8 @@
+ 
+ 	pcie->orderly_endpoint = NULL;
+ 	pcie->orderly_poweroff = false;
++	pcie->orderly_awake_offline = false;
++	pcie->orderly_awake_gdsc_suspended = false;
+ 	if (pdev)
+ 		pci_dev_put(pdev);
+ }
+@@ -2300,6 +2315,7 @@
+ {
+ 	struct pci_host_bridge *bridge;
+ 	struct qcom_pcie *pcie;
++	u32 clkreq_before, clkreq_reclaimed, clkreq_cleared;
+ 	int ret;
+ 
+ 	if (!pdev || pdev->vendor != PCI_VENDOR_ID_QCOM ||
+@@ -2318,6 +2334,8 @@
+ 	if (!dw_pcie_link_up(pcie->pci))
+ 		return -ENOLINK;
+ 
++	clkreq_before = readl_relaxed(pcie->parf + PARF_CLKREQ_OVERRIDE);
++
+ 	/* Android runtime-resumes the link from PCIe-DRV immediately before
+ 	 * its final radio shutdown.  Exercise the equivalent ENABLE/DISABLE
+ 	 * transaction here while the endpoint is still responsive, without
+@@ -2340,8 +2358,29 @@
+ 		return ret;
+ 	}
+ 
++	/* Qualcomm's downstream DRV resume path clears both CLKREQ override
++	 * fields after ownership returns from the ADSP.  Do the same before
++	 * shutting down the still-powered controller, and verify the write.
++	 */
++	clkreq_reclaimed = readl_relaxed(pcie->parf +
++					 PARF_CLKREQ_OVERRIDE);
++	clkreq_cleared = clkreq_reclaimed &
++		~(PARF_CLKREQ_IN_ENABLE | PARF_CLKREQ_IN_VALUE);
++	writel_relaxed(clkreq_cleared,
++		       pcie->parf + PARF_CLKREQ_OVERRIDE);
++	clkreq_cleared = readl_relaxed(pcie->parf +
++					 PARF_CLKREQ_OVERRIDE);
++	if (clkreq_cleared &
++	    (PARF_CLKREQ_IN_ENABLE | PARF_CLKREQ_IN_VALUE)) {
++		dev_err(pcie->pci->dev,
++			"orderly QCA power-off: CLKREQ override clear failed: %#x\n",
++			clkreq_cleared);
++		return -EIO;
++	}
++
+ 	dev_info(pcie->pci->dev,
+-		 "orderly QCA power-off: pre-shutdown ADSP handoff/reclaim complete\n");
++		 "orderly QCA power-off: pre-shutdown ADSP handoff/reclaim complete; CLKREQ override before=%#x reclaimed=%#x cleared=%#x\n",
++		 clkreq_before, clkreq_reclaimed, clkreq_cleared);
+ 	return 0;
+ }
+ EXPORT_SYMBOL_GPL(qcom_pcie_orderly_poweroff_prepare);
+@@ -2375,7 +2414,145 @@
+ 	return 0;
+ }
+ EXPORT_SYMBOL_GPL(qcom_pcie_orderly_poweroff_arm);
++
++int qcom_pcie_orderly_poweroff_awake(struct pci_dev *pdev)
++{
++	struct pci_host_bridge *bridge;
++	struct qcom_pcie *pcie;
++	struct device *dev;
++	int ret;
++
++	if (!pdev)
++		return -ENODEV;
++
++	bridge = pci_find_host_bridge(pdev->bus);
++	if (!bridge || !bridge->dev.parent)
++		return -ENODEV;
++
++	dev = bridge->dev.parent;
++	pcie = dev_get_drvdata(dev);
++	if (!pcie || !pcie->orderly_poweroff ||
++	    pcie->orderly_endpoint != pdev)
++		return -EPERM;
++	if (pcie->orderly_awake_offline || pcie->pci->suspended)
++		return -EALREADY;
++	if (!dw_pcie_link_up(pcie->pci))
++		return -ENOLINK;
+ 
++	pci_save_state(pdev);
++	ret = pci_set_power_state(pdev, PCI_D3hot);
++	if (ret) {
++		dev_err(dev,
++			"orderly QCA awake-off: endpoint D3hot failed: %d\n",
++			ret);
++		return ret;
++	}
++	if (pdev->current_state != PCI_D3hot)
++		return -EIO;
++
++	dev_info(dev,
++		 "orderly QCA awake-off: endpoint D3hot; forcing L23 and host shutdown\n");
++	ret = dw_pcie_suspend_noirq_force(pcie->pci);
++	if (ret)
++		goto err_endpoint_d0;
++	if (!pcie->pci->suspended) {
++		ret = -EIO;
++		goto err_endpoint_d0;
++	}
++
++	ret = icc_disable(pcie->icc_mem);
++	if (ret)
++		goto err_host_resume;
++	ret = icc_disable(pcie->icc_cpu);
++	if (ret)
++		goto err_icc_mem;
++
++	if (orderly_awake_gdsc_off) {
++		ret = pm_runtime_put_sync_suspend(dev);
++		if (ret < 0) {
++			pm_runtime_get_noresume(dev);
++			goto err_icc_cpu;
++		}
++		pcie->orderly_awake_gdsc_suspended = true;
++	}
++
++	pcie->orderly_awake_offline = true;
++	dev_info(dev,
++		 "orderly QCA awake-off: root, PHY, clocks, package rails and ICC off; genpd=%s\n",
++		 pcie->orderly_awake_gdsc_suspended ? "off" : "retained");
++	return 0;
++
++err_icc_cpu:
++	icc_enable(pcie->icc_cpu);
++err_icc_mem:
++	icc_enable(pcie->icc_mem);
++err_host_resume:
++	pinctrl_pm_select_default_state(dev);
++	dw_pcie_resume_noirq(pcie->pci);
++err_endpoint_d0:
++	pci_set_power_state(pdev, PCI_D0);
++	return ret;
++}
++EXPORT_SYMBOL_GPL(qcom_pcie_orderly_poweroff_awake);
++
++int qcom_pcie_orderly_poweroff_resume(struct pci_dev *pdev)
++{
++	struct pci_host_bridge *bridge;
++	struct qcom_pcie *pcie;
++	struct device *dev;
++	int ret;
++
++	if (!pdev)
++		return -ENODEV;
++	bridge = pci_find_host_bridge(pdev->bus);
++	if (!bridge || !bridge->dev.parent)
++		return -ENODEV;
++
++	dev = bridge->dev.parent;
++	pcie = dev_get_drvdata(dev);
++	if (!pcie || !pcie->orderly_poweroff ||
++	    pcie->orderly_endpoint != pdev)
++		return -EPERM;
++	if (!pcie->pci->suspended)
++		return 0;
++
++	if (pcie->orderly_awake_gdsc_suspended) {
++		ret = pm_runtime_get_sync(dev);
++		if (ret < 0) {
++			pm_runtime_put_noidle(dev);
++			dev_err(dev,
++				"orderly QCA awake-off: failed to restore PCIe genpd: %d\n",
++				ret);
++			return ret;
++		}
++		pcie->orderly_awake_gdsc_suspended = false;
++	}
++
++	ret = pinctrl_pm_select_default_state(dev);
++	if (ret)
++		return ret;
++	ret = icc_enable(pcie->icc_cpu);
++	if (ret)
++		return ret;
++	ret = icc_enable(pcie->icc_mem);
++	if (ret)
++		goto err_disable_icc_cpu;
++	ret = dw_pcie_resume_noirq(pcie->pci);
++	if (ret)
++		goto err_disable_icc_mem;
++
++	dev_info(dev,
++		 "orderly QCA awake-off: genpd, ICC, root and endpoint rails restored\n");
++	return 0;
++
++err_disable_icc_mem:
++	icc_disable(pcie->icc_mem);
++err_disable_icc_cpu:
++	icc_disable(pcie->icc_cpu);
++	return ret;
++}
++EXPORT_SYMBOL_GPL(qcom_pcie_orderly_poweroff_resume);
++
+ void qcom_pcie_orderly_poweroff_disarm(struct pci_dev *pdev)
+ {
+ 	struct pci_host_bridge *bridge;
+@@ -2554,6 +2731,11 @@
+ 	if (!pcie)
+ 		return 0;
+ 	if (pcie->orderly_poweroff) {
++		if (pcie->orderly_awake_offline && pcie->pci->suspended) {
++			dev_info(dev,
++				 "orderly QCA awake-off: system suspend found root already off\n");
++			return 0;
++		}
+ 		if (!pcie->orderly_endpoint ||
+ 		    pcie->orderly_endpoint->current_state != PCI_D3hot) {
+ 			dev_err(dev,
+@@ -2669,41 +2851,8 @@
+ 		if (!pcie->pci->suspended)
+ 			return 0;
+ 
+-		ret = pinctrl_pm_select_default_state(dev);
+-		if (ret) {
+-			dev_err(dev,
+-				"orderly QCA power-off: failed to restore default pins: %d\n",
+-				ret);
+-			return ret;
+-		}
+-
+-		ret = icc_enable(pcie->icc_cpu);
+-		if (ret) {
+-			dev_err(dev,
+-				"orderly QCA power-off: failed to restore CPU-PCIe vote: %d\n",
+-				ret);
+-			return ret;
+-		}
+-
+-		ret = icc_enable(pcie->icc_mem);
+-		if (ret) {
+-			dev_err(dev,
+-				"orderly QCA power-off: failed to restore PCIe-MEM vote: %d\n",
+-				ret);
+-			icc_disable(pcie->icc_cpu);
+-			return ret;
+-		}
+-
+-		ret = dw_pcie_resume_noirq(pcie->pci);
+-		if (ret) {
+-			icc_disable(pcie->icc_mem);
+-			icc_disable(pcie->icc_cpu);
+-			return ret;
+-		}
+-
+-		dev_info(dev,
+-			 "orderly QCA power-off: ICC votes, root complex and endpoint rails restored\n");
+-		return 0;
++		return qcom_pcie_orderly_poweroff_resume(
++			pcie->orderly_endpoint);
+ 	}
+ 	if (pcie->drv_armed || pcie->drv_offline) {
+ 		if (!pcie->drv_resources_suspended &&
+--- a/drivers/net/wireless/ath/ath11k/pci.h
++++ b/drivers/net/wireless/ath/ath11k/pci.h
+@@ -7,6 +7,8 @@
+ #define _ATH11K_PCI_H
+ 
+ #include <linux/mhi.h>
++#include <linux/atomic.h>
++#include <linux/mutex.h>
+ 
+ #include "core.h"
+ 
+@@ -76,6 +78,9 @@
+ 	u16 link_ctl;
+ 	u64 dma_mask;
+ 	bool orderly_early_down;
++	bool orderly_awake_down;
++	struct mutex orderly_awake_lock;
++	atomic_t orderly_awake_wake_attempts;
+ };
+ 
+ static inline struct ath11k_pci *ath11k_pci_priv(struct ath11k_base *ab)
+--- a/drivers/net/wireless/ath/ath11k/pci.c
++++ b/drivers/net/wireless/ath/ath11k/pci.c
+@@ -9,6 +9,7 @@
+ #include <linux/pci.h>
+ #include <linux/of.h>
+ #include <linux/pci-qcom.h>
++#include <linux/suspend.h>
+ #include <linux/time.h>
+ #include <linux/vmalloc.h>
+ 
+@@ -39,6 +40,11 @@
+ MODULE_PARM_DESC(orderly_qca_poweroff,
+ 		 "Use the guarded QCA6390 firmware/MHI/PCIe/rail shutdown sequence");
+ 
++static unsigned int orderly_awake_wait_ms = 10000;
++module_param(orderly_awake_wait_ms, uint, 0644);
++MODULE_PARM_DESC(orderly_awake_wait_ms,
++		 "Userspace verification delay after awake QCA shutdown");
++
+ static const struct pci_device_id ath11k_pci_id_table[] = {
+ 	{ PCI_VDEVICE(QCOM, QCA6390_DEVICE_ID) },
+ 	{ PCI_VDEVICE(QCOM, WCN6855_DEVICE_ID) },
+@@ -52,6 +58,13 @@
+ {
+ 	struct ath11k_pci *ab_pci = ath11k_pci_priv(ab);
+ 
++	if (unlikely(ab_pci->orderly_awake_down)) {
++		atomic_inc(&ab_pci->orderly_awake_wake_attempts);
++		ath11k_warn(ab,
++			    "orderly QCA awake-off: blocked bus wake attempt\n");
++		return -ESHUTDOWN;
++	}
++
+ 	return mhi_device_get_sync(ab_pci->mhi_ctrl->mhi_dev);
+ }
+ 
+@@ -1006,7 +1019,100 @@
+ 
+ 	return irq_set_affinity_and_hint(ab_pci->pdev->irq, m);
+ }
++
++static ssize_t orderly_awake_poweroff_show(struct device *dev,
++					   struct device_attribute *attr,
++					   char *buf)
++{
++	struct ath11k_base *ab = dev_get_drvdata(dev);
++	struct ath11k_pci *ab_pci = ath11k_pci_priv(ab);
++
++	return sysfs_emit(buf, "%u\n", ab_pci->orderly_awake_down);
++}
++
++static ssize_t orderly_awake_poweroff_store(struct device *dev,
++					    struct device_attribute *attr,
++					    const char *buf, size_t count)
++{
++	struct ath11k_base *ab = dev_get_drvdata(dev);
++	struct ath11k_pci *ab_pci = ath11k_pci_priv(ab);
++	int ret;
++
++	if (!sysfs_streq(buf, "1"))
++		return -EINVAL;
++	if (pm_suspend_target_state != PM_SUSPEND_ON)
++		return -EBUSY;
+ 
++	mutex_lock(&ab_pci->orderly_awake_lock);
++	if (ab_pci->orderly_awake_down) {
++		ret = -EALREADY;
++		goto out_unlock;
++	}
++	if (!ath11k_hif_orderly_poweroff_enabled(ab)) {
++		ret = -EPERM;
++		goto out_unlock;
++	}
++
++	ret = qcom_pcie_orderly_poweroff_prepare(ab_pci->pdev);
++	if (ret) {
++		ath11k_warn(ab,
++			    "orderly QCA awake-off: PCIe runtime resume/reclaim failed: %d\n",
++			    ret);
++		goto out_unlock;
++	}
++	ath11k_info(ab,
++		    "orderly QCA awake-off: PCIe/MHI responsive in process context\n");
++
++	ret = ath11k_core_suspend(ab);
++	if (ret) {
++		ath11k_warn(ab,
++			    "orderly QCA awake-off: core quiesce failed: %d\n", ret);
++		goto out_unlock;
++	}
++
++	mhi_pm_set_channel_suspend_state(ab_pci->mhi_ctrl,
++					 MHI_CHANNEL_SUSPEND_RETAINED);
++	ret = ath11k_core_suspend_late(ab);
++	if (ret) {
++		ath11k_warn(ab,
++			    "orderly QCA awake-off: endpoint shutdown failed: %d\n",
++			    ret);
++		goto out_unlock;
++	}
++
++	ret = qcom_pcie_orderly_poweroff_awake(ab_pci->pdev);
++	if (ret) {
++		ath11k_warn(ab,
++			    "orderly QCA awake-off: root shutdown failed: %d\n", ret);
++		goto out_unlock;
++	}
++
++	ab_pci->orderly_early_down = true;
++	ab_pci->orderly_awake_down = true;
++	atomic_set(&ab_pci->orderly_awake_wake_attempts, 0);
++	ath11k_info(ab,
++		    "orderly QCA awake-off: complete before system suspend; wait_ms=%u\n",
++		    orderly_awake_wait_ms);
++	ret = count;
++
++out_unlock:
++	mutex_unlock(&ab_pci->orderly_awake_lock);
++	return ret;
++}
++static DEVICE_ATTR_RW(orderly_awake_poweroff);
++
++static ssize_t orderly_awake_wake_attempts_show(struct device *dev,
++						struct device_attribute *attr,
++						char *buf)
++{
++	struct ath11k_base *ab = dev_get_drvdata(dev);
++	struct ath11k_pci *ab_pci = ath11k_pci_priv(ab);
++
++	return sysfs_emit(buf, "%d\n",
++			  atomic_read(&ab_pci->orderly_awake_wake_attempts));
++}
++static DEVICE_ATTR_RO(orderly_awake_wake_attempts);
++
+ static int ath11k_pci_probe(struct pci_dev *pdev,
+ 			    const struct pci_device_id *pci_dev)
+ {
+@@ -1029,6 +1135,8 @@
+ 	ab_pci->dev_id = pci_dev->device;
+ 	ab_pci->ab = ab;
+ 	ab_pci->pdev = pdev;
++	mutex_init(&ab_pci->orderly_awake_lock);
++	atomic_set(&ab_pci->orderly_awake_wake_attempts, 0);
+ 	ab->hif.ops = &ath11k_pci_hif_ops;
+ 	ab->fw_mode = ATH11K_FIRMWARE_MODE_NORMAL;
+ 	pci_set_drvdata(pdev, ab);
+@@ -1204,8 +1312,20 @@
+ 		goto err_free_irq;
+ 	}
+ 	ath11k_qmi_fwreset_from_cold_boot(ab);
++	ret = device_create_file(&pdev->dev, &dev_attr_orderly_awake_poweroff);
++	if (ret)
++		goto err_core_deinit;
++	ret = device_create_file(&pdev->dev,
++				 &dev_attr_orderly_awake_wake_attempts);
++	if (ret) {
++		device_remove_file(&pdev->dev,
++				   &dev_attr_orderly_awake_poweroff);
++		goto err_core_deinit;
++	}
+ 	return 0;
+ 
++err_core_deinit:
++	ath11k_core_deinit(ab);
+ err_free_irq:
+ 	/* __free_irq() expects the caller to have cleared the affinity hint */
+ 	ath11k_pci_set_irq_affinity_hint(ab_pci, NULL);
+@@ -1240,6 +1360,9 @@
+ 	struct ath11k_base *ab = pci_get_drvdata(pdev);
+ 	struct ath11k_pci *ab_pci = ath11k_pci_priv(ab);
+ 
++	device_remove_file(&pdev->dev, &dev_attr_orderly_awake_wake_attempts);
++	device_remove_file(&pdev->dev, &dev_attr_orderly_awake_poweroff);
++
+ 	ath11k_pci_set_irq_affinity_hint(ab_pci, NULL);
+ 
+ 	if (test_bit(ATH11K_FLAG_QMI_FAIL, &ab->dev_flags)) {
+@@ -1293,6 +1416,12 @@
+ 	bool orderly = ath11k_hif_orderly_poweroff_enabled(ab);
+ 	int ret;
+ 
++	if (ab_pci->orderly_awake_down) {
++		ath11k_info(ab,
++			    "orderly QCA awake-off: endpoint already off at system suspend\n");
++		return 0;
++	}
++
+ 	if (test_bit(ATH11K_FLAG_QMI_FAIL, &ab->dev_flags)) {
+ 		ath11k_dbg(ab, ATH11K_DBG_BOOT, "boot skipping pci suspend as qmi is not initialised\n");
+ 		return 0;
+@@ -1383,11 +1512,23 @@
+ 	struct ath11k_pci *ab_pci = ath11k_pci_priv(ab);
+ 	int ret;
+ 
++	if (ab_pci->orderly_awake_down) {
++		ret = qcom_pcie_orderly_poweroff_resume(ab_pci->pdev);
++		if (ret) {
++			ath11k_warn(ab,
++				    "orderly QCA awake-off: root restore failed: %d\n",
++				    ret);
++			return ret;
++		}
++	}
++
+ 	ret = ath11k_core_resume_early(ab);
+ 	if (ret)
+ 		ath11k_warn(ab, "failed to early resume core: %d\n", ret);
+ 	else
+ 		ab_pci->orderly_early_down = false;
++	if (!ret)
++		ab_pci->orderly_awake_down = false;
+ 
+ 	return ret;
+ }

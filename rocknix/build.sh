@@ -53,7 +53,7 @@ fg-coulomb-counter)
     ;;
 consoleos-rc1)
     config_fragment="${kit}/rocknix/consoleos-rc1.config"
-    expected_release='7.2.0-consoleos-rc20-earlyqca-ordering'
+    expected_release='7.2.0-consoleos-rc21-awakeqca-parity'
     artifact_name="rocknix-${expected_release}.tar.zst"
     dtb_name='sm8250-retroidpocket-rp5-consoleos-rc1'
     ;;
@@ -548,7 +548,7 @@ elif [[ "${profile}" == consoleos-rc1 ]]; then
     cd "${out}"
     sha256sum "${dtb_name}.dtb" > CONSOLEOS-RC1-DTB-SHA256SUMS
     printf '%s\n' \
-        'ConsoleOS RC20 built: RC19 plus child-before-parent MHI/QRTR late-suspend ordering repair. Not installed or boot-tested.' \
+        'ConsoleOS RC21 built: RC20 plus process-context QCA shutdown, verified CLKREQ reclaim, and optional PCIe0 GDSC power-off. Not installed or boot-tested.' \
         > BUILD-SUCCESS.txt
     cd "${source_dir}"
 elif [[ "${profile}" == slpi-integrated ]]; then
