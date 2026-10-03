@@ -223,10 +223,10 @@ def apply_patches(repo, source, fix, profile):
         config_guard = (Path(__file__).resolve().parent /
                         "dwc-pcie-suspended-config-guard.patch")
         require(config_guard.is_file(),
-                "Missing suspended DesignWare PCIe config-access guard")
+                "Missing suspended DesignWare PCIe config/MSI guard")
         require(hashlib.sha256(config_guard.read_bytes()).hexdigest() ==
-                "92096a03d6ed42ae05ee453417815c05d78cefeb93e0d99808b2eacec43978bb",
-                "DesignWare PCIe config-access guard checksum mismatch")
+                "1bdc9a907d43968dadcc8a2b69c5cd7fd8b019b977f808f4fb22a22590259bb6",
+                "DesignWare PCIe config/MSI guard checksum mismatch")
         extra_patches.append(config_guard)
     if profile == "lpm-platform":
         lpm_fix = Path(__file__).resolve().parent / "qcom-lpm-platform-suspend.patch"
