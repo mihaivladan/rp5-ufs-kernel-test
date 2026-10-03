@@ -198,13 +198,13 @@ def apply_patches(repo, source, fix, profile):
                 "abdbd431d328d0efcd1acc29aff128f5b8a67163ba51cb1838fedb491bbcf961",
                 "Orderly PCIe ICC release patch checksum mismatch")
         extra_patches.append(orderly_icc)
-        adsp_proxy_allsets = Path(__file__).resolve().parent / "qcom-rpmhpd-sm8250-lcx-lmx-all-states.patch"
-        require(adsp_proxy_allsets.is_file(),
-                "Missing SM8250 ADSP proxy all-state RPMh patch")
-        require(hashlib.sha256(adsp_proxy_allsets.read_bytes()).hexdigest() ==
-                "648bb8bed59c4aaae43c48e43543a85314ffcd698ea7ec79ebacbec62980f449",
-                "SM8250 ADSP proxy all-state RPMh patch checksum mismatch")
-        extra_patches.append(adsp_proxy_allsets)
+        early_orderly = Path(__file__).resolve().parent / "qca6390-early-orderly-poweroff.patch"
+        require(early_orderly.is_file(),
+                "Missing QCA6390 early orderly power-off patch")
+        require(hashlib.sha256(early_orderly.read_bytes()).hexdigest() ==
+                "de5ba631791097c160b7c5cc0cfe3be1f8bc45fa4b1c42b56a063140400f712d",
+                "QCA6390 early orderly power-off patch checksum mismatch")
+        extra_patches.append(early_orderly)
     if profile == "lpm-platform":
         lpm_fix = Path(__file__).resolve().parent / "qcom-lpm-platform-suspend.patch"
         require(lpm_fix.is_file(), "Missing exact-state platform suspend patch")
@@ -336,6 +336,8 @@ def apply_patches(repo, source, fix, profile):
         qcom_pcie = (source / "drivers/pci/controller/dwc/pcie-qcom.c").read_text()
         require("module_param(orderly_qca_poweroff, bool, 0644);" in ath11k_pci and
                 "QFPROM_PWR_CTRL_SHUTDOWN_EN_MASK" in ath11k_pci and
+                "qcom_pcie_orderly_poweroff_prepare(ab_pci->pdev)" in ath11k_pci and
+                "orderly_early_down" in ath11k_pci and
                 "qcom_pcie_orderly_poweroff_arm(ab_pci->pdev)" in ath11k_pci and
                 "MHI_CHANNEL_SUSPEND_RETAINED" in ath11k_pci,
                 "Guarded ath11k orderly power-off markers missing")
@@ -344,22 +346,12 @@ def apply_patches(repo, source, fix, profile):
                 "MHI_CHANNEL_SUSPEND_RESET" in qrtr,
                 "Orderly QCA QRTR channel-lifetime markers missing")
         require("orderly QCA power-off: L23 acknowledged" in qcom_pcie and
+                "pre-shutdown ADSP handoff/reclaim complete" in qcom_pcie and
                 "qcom_pcie_orderly_poweroff_arm" in qcom_pcie and
                 "pci_pwrctrl_power_off_devices(pci->dev);" in qcom_pcie and
                 "orderly QCA power-off: root complex suspended, ICC votes zero" in qcom_pcie and
                 "orderly QCA power-off: ICC votes, root complex and endpoint rails restored" in qcom_pcie,
                 "Guarded Qualcomm PCIe orderly power-off markers missing")
-        rpmhpd = (source / "drivers/pmdomain/qcom/rpmhpd.c").read_text()
-        required_adsp_proxy_votes = (
-            "const bool\tall_state_votes;",
-            "static struct rpmhpd sm8250_lcx = {",
-            "static struct rpmhpd sm8250_lmx = {",
-            "[RPMHPD_LCX] = &sm8250_lcx,",
-            "[RPMHPD_LMX] = &sm8250_lmx,",
-            "if (peer || pd->all_state_votes) {",
-        )
-        require(all(marker in rpmhpd for marker in required_adsp_proxy_votes),
-                "SM8250 LCX/LMX all-state RPMh vote markers missing")
     if profile == "lpm-platform":
         lpm_source = (source / "drivers/soc/qcom/qcom_lpm_platform_suspend.c").read_text()
         require("#define CONSOLEOS_SM8250_SUSPEND_STATE\t0x4100c244" in lpm_source and

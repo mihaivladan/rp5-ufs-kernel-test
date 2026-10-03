@@ -1,0 +1,160 @@
+--- a/include/linux/pci-qcom.h
++++ b/include/linux/pci-qcom.h
+@@ -8,9 +8,15 @@
+ struct pci_dev;
+ 
+ #if IS_ENABLED(CONFIG_PCIE_QCOM)
++int qcom_pcie_orderly_poweroff_prepare(struct pci_dev *pdev);
+ int qcom_pcie_orderly_poweroff_arm(struct pci_dev *pdev);
+ void qcom_pcie_orderly_poweroff_disarm(struct pci_dev *pdev);
+ #else
++static inline int qcom_pcie_orderly_poweroff_prepare(struct pci_dev *pdev)
++{
++	return -EOPNOTSUPP;
++}
++
+ static inline int qcom_pcie_orderly_poweroff_arm(struct pci_dev *pdev)
+ {
+ 	return -EOPNOTSUPP;
+--- a/drivers/pci/controller/dwc/pcie-qcom.c
++++ b/drivers/pci/controller/dwc/pcie-qcom.c
+@@ -2294,7 +2294,57 @@
+ 	pcie->orderly_poweroff = false;
+ 	if (pdev)
+ 		pci_dev_put(pdev);
++}
++
++int qcom_pcie_orderly_poweroff_prepare(struct pci_dev *pdev)
++{
++	struct pci_host_bridge *bridge;
++	struct qcom_pcie *pcie;
++	int ret;
++
++	if (!pdev || pdev->vendor != PCI_VENDOR_ID_QCOM ||
++	    pdev->device != 0x1101)
++		return -ENODEV;
++
++	bridge = pci_find_host_bridge(pdev->bus);
++	if (!bridge || !bridge->dev.parent)
++		return -ENODEV;
++
++	pcie = dev_get_drvdata(bridge->dev.parent);
++	if (!pcie || !pcie->drv_supported || pcie->drv_dev_id != 0)
++		return -EOPNOTSUPP;
++	if (pcie->drv_armed || pcie->drv_offline || pcie->orderly_poweroff)
++		return -EBUSY;
++	if (!dw_pcie_link_up(pcie->pci))
++		return -ENOLINK;
++
++	/* Android runtime-resumes the link from PCIe-DRV immediately before
++	 * its final radio shutdown.  Exercise the equivalent ENABLE/DISABLE
++	 * transaction here while the endpoint is still responsive, without
++	 * carrying ownership into the subsequent system suspend.
++	 */
++	ret = qcom_pcie_drv_handoff(pcie->drv_dev_id,
++				    pcie->drv_l1ss_timeout_ms);
++	if (ret) {
++		dev_err(pcie->pci->dev,
++			"orderly QCA power-off: pre-shutdown ADSP handoff failed: %d\n",
++			ret);
++		return ret;
++	}
++
++	ret = qcom_pcie_drv_reclaim(pcie->drv_dev_id);
++	if (ret) {
++		dev_err(pcie->pci->dev,
++			"orderly QCA power-off: pre-shutdown ADSP reclaim failed: %d\n",
++			ret);
++		return ret;
++	}
++
++	dev_info(pcie->pci->dev,
++		 "orderly QCA power-off: pre-shutdown ADSP handoff/reclaim complete\n");
++	return 0;
+ }
++EXPORT_SYMBOL_GPL(qcom_pcie_orderly_poweroff_prepare);
+ 
+ int qcom_pcie_orderly_poweroff_arm(struct pci_dev *pdev)
+ {
+--- a/drivers/net/wireless/ath/ath11k/pci.h
++++ b/drivers/net/wireless/ath/ath11k/pci.h
+@@ -75,6 +75,7 @@
+ 	unsigned long flags;
+ 	u16 link_ctl;
+ 	u64 dma_mask;
++	bool orderly_early_down;
+ };
+ 
+ static inline struct ath11k_pci *ath11k_pci_priv(struct ath11k_base *ab)
+--- a/drivers/net/wireless/ath/ath11k/pci.c
++++ b/drivers/net/wireless/ath/ath11k/pci.c
+@@ -1298,7 +1298,17 @@
+ 	if (test_bit(ATH11K_FLAG_QMI_FAIL, &ab->dev_flags)) {
+ 		ath11k_dbg(ab, ATH11K_DBG_BOOT, "boot skipping pci suspend as qmi is not initialised\n");
+ 		return 0;
++	}
++	if (orderly) {
++		ret = qcom_pcie_orderly_poweroff_prepare(ab_pci->pdev);
++		if (ret) {
++			ath11k_warn(ab,
++				    "orderly QCA power-off: pre-shutdown PCIe-DRV cycle failed: %d\n",
++				    ret);
++			return ret;
++		}
+ 	}
++
+ 	ret = ath11k_core_suspend(ab);
+ 	if (ret)
+ 		ath11k_warn(ab, "failed to suspend core: %d\n", ret);
+@@ -1309,6 +1319,22 @@
+ 						 MHI_CHANNEL_SUSPEND_RETAINED);
+ 		ath11k_info(ab,
+ 			    "orderly QCA power-off: preserving QMI transport for late firmware stop\n");
++
++		/* Run the endpoint transaction in the normal suspend phase, while
++		 * the rest of the platform and the QMI transport are still awake.
++		 * The root port completes L23/PHY/rail shutdown in noirq after PCI
++		 * core has placed this endpoint in D3hot.
++		 */
++		ret = ath11k_core_suspend_late(ab);
++		if (ret) {
++			ath11k_warn(ab,
++				    "orderly QCA power-off: early endpoint shutdown failed: %d\n",
++				    ret);
++			return ret;
++		}
++		ab_pci->orderly_early_down = true;
++		ath11k_info(ab,
++			    "orderly QCA power-off: endpoint shutdown completed in normal suspend phase\n");
+ 	}
+ 
+ 	return 0;
+@@ -1334,9 +1360,13 @@
+ static __maybe_unused int ath11k_pci_pm_suspend_late(struct device *dev)
+ {
+ 	struct ath11k_base *ab = dev_get_drvdata(dev);
++	struct ath11k_pci *ab_pci = ath11k_pci_priv(ab);
+ 	bool orderly = ath11k_hif_orderly_poweroff_enabled(ab);
+ 	int ret;
+ 
++	if (orderly && ab_pci->orderly_early_down)
++		return 0;
++
+ 	ret = ath11k_core_suspend_late(ab);
+ 	if (ret)
+ 		ath11k_warn(ab, "failed to late suspend core: %d\n", ret);
+@@ -1352,11 +1382,14 @@
+ static __maybe_unused int ath11k_pci_pm_resume_early(struct device *dev)
+ {
+ 	struct ath11k_base *ab = dev_get_drvdata(dev);
++	struct ath11k_pci *ab_pci = ath11k_pci_priv(ab);
+ 	int ret;
+ 
+ 	ret = ath11k_core_resume_early(ab);
+ 	if (ret)
+ 		ath11k_warn(ab, "failed to early resume core: %d\n", ret);
++	else
++		ab_pci->orderly_early_down = false;
+ 
+ 	return ret;
+ }
