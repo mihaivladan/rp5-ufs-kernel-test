@@ -1,0 +1,30 @@
+--- a/drivers/pci/controller/dwc/pcie-designware-host.c
++++ b/drivers/pci/controller/dwc/pcie-designware-host.c
+@@ -734,6 +734,13 @@ static void __iomem *dw_pcie_other_conf_map_bus(struct pci_bus *bus,
+ 	int type, ret;
+ 	u32 busdev;
+ 
++	/* A suspended DesignWare host may have its physical power domain
++	 * collapsed.  Do not read link-state or program an ATU in that state;
++	 * report the downstream function as inaccessible instead.
++	 */
++	if (pci->suspended)
++		return NULL;
++
+ 	/*
+ 	 * Checking whether the link is up here is a last line of defense
+ 	 * against platforms that forward errors on the system bus as
+@@ -828,6 +835,13 @@ void __iomem *dw_pcie_own_conf_map_bus(struct pci_bus *bus, unsigned int devfn,
+ 	struct dw_pcie_rp *pp = bus->sysdata;
+ 	struct dw_pcie *pci = to_dw_pcie_from_pp(pp);
+ 
++	/* DBI lives in the host power domain.  Generic PCI PM can still query
++	 * the enumerated Root Port after an orderly awake shutdown, so reject
++	 * those accesses without touching the collapsed domain.
++	 */
++	if (pci->suspended)
++		return NULL;
++
+ 	if (PCI_SLOT(devfn) > 0)
+ 		return NULL;
+ 

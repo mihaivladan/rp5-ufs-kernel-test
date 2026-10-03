@@ -217,9 +217,17 @@ def apply_patches(repo, source, fix, profile):
         require(physical_gdsc.is_file(),
                 "Missing guarded PCIe0 physical-GDSC collapse patch")
         require(hashlib.sha256(physical_gdsc.read_bytes()).hexdigest() ==
-                "e60c9e2c2d43327722b825fe22a5b0e357726f8a0a0eeb2f977f556e8d8eebc6",
+                "af269d5dd437be87da287aa0deaa6bcb38f83f89a4729f27bb088b8ebcf962e0",
                 "PCIe0 physical-GDSC collapse patch checksum mismatch")
         extra_patches.append(physical_gdsc)
+        config_guard = (Path(__file__).resolve().parent /
+                        "dwc-pcie-suspended-config-guard.patch")
+        require(config_guard.is_file(),
+                "Missing suspended DesignWare PCIe config-access guard")
+        require(hashlib.sha256(config_guard.read_bytes()).hexdigest() ==
+                "92096a03d6ed42ae05ee453417815c05d78cefeb93e0d99808b2eacec43978bb",
+                "DesignWare PCIe config-access guard checksum mismatch")
+        extra_patches.append(config_guard)
     if profile == "lpm-platform":
         lpm_fix = Path(__file__).resolve().parent / "qcom-lpm-platform-suspend.patch"
         require(lpm_fix.is_file(), "Missing exact-state platform suspend patch")
@@ -349,6 +357,7 @@ def apply_patches(repo, source, fix, profile):
                 "PM8150B physical CC-attachment guard missing")
         ath11k_pci = (source / "drivers/net/wireless/ath/ath11k/pci.c").read_text()
         qcom_pcie = (source / "drivers/pci/controller/dwc/pcie-qcom.c").read_text()
+        dwc_host = (source / "drivers/pci/controller/dwc/pcie-designware-host.c").read_text()
         require("module_param(orderly_qca_poweroff, bool, 0644);" in ath11k_pci and
                 "QFPROM_PWR_CTRL_SHUTDOWN_EN_MASK" in ath11k_pci and
                 "qcom_pcie_orderly_poweroff_prepare(ab_pci->pdev)" in ath11k_pci and
@@ -371,8 +380,7 @@ def apply_patches(repo, source, fix, profile):
                 "qcom_pcie_orderly_restore_gdsc_on" in qcom_pcie and
                 "PCIe0 GDSCR collapse before=" in qcom_pcie and
                 "PCIe0 GDSCR restore before=" in qcom_pcie and
-                '"deferred-to-system-noirq"' in qcom_pcie and
-                "physical GDSC collapsed after PCI children" in qcom_pcie and
+                '"collapsed"' in qcom_pcie and
                 "pm_runtime_put_sync_suspend(dev)" not in
                     qcom_pcie[qcom_pcie.index("qcom_pcie_orderly_poweroff_awake"):qcom_pcie.index("EXPORT_SYMBOL_GPL(qcom_pcie_orderly_poweroff_awake)")] and
                 "orderly QCA awake-off: system suspend found root already off" in qcom_pcie and
@@ -381,6 +389,10 @@ def apply_patches(repo, source, fix, profile):
                 "orderly QCA awake-off: GDSC, ICC, root and endpoint rails restored" in qcom_pcie and
                 '"tracked-on"' in qcom_pcie,
                 "Guarded Qualcomm PCIe orderly power-off markers missing")
+        require(dwc_host.count("if (pci->suspended)") >= 2 and
+                "report the downstream function as inaccessible" in dwc_host and
+                "DBI lives in the host power domain" in dwc_host,
+                "Suspended DesignWare PCIe config-access guards missing")
     if profile == "lpm-platform":
         lpm_source = (source / "drivers/soc/qcom/qcom_lpm_platform_suspend.c").read_text()
         require("#define CONSOLEOS_SM8250_SUSPEND_STATE\t0x4100c244" in lpm_source and

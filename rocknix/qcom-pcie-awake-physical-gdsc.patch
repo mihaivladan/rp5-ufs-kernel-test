@@ -64,7 +64,7 @@
 +		 "orderly QCA awake-off: PCIe0 GDSCR collapse before=%#x after=%#x ret=%d\n",
 +		 before, after, ret);
 +	iounmap(gdscr);
- 
++
 +	return ret;
 +}
 +
@@ -87,41 +87,42 @@
 +		 "orderly QCA awake-off: PCIe0 GDSCR restore before=%#x after=%#x ret=%d\n",
 +		 before, after, ret);
 +	iounmap(gdscr);
-+
+ 
 +	return ret;
 +}
 +
  int qcom_pcie_orderly_poweroff_awake(struct pci_dev *pdev)
  {
  	struct pci_host_bridge *bridge;
-@@ -2467,23 +2521,13 @@
- 	if (ret)
+@@ -2468,18 +2522,21 @@
  		goto err_icc_mem;
  
--	if (orderly_awake_gdsc_off) {
+ 	if (orderly_awake_gdsc_off) {
 -		ret = pm_runtime_put_sync_suspend(dev);
 -		if (ret < 0) {
 -			pm_runtime_get_noresume(dev);
--			goto err_icc_cpu;
--		}
++		ret = qcom_pcie_orderly_force_gdsc_collapse(pcie);
++		if (ret) {
++			/* Never touch the powered-down host until its domain is on. */
++			if (qcom_pcie_orderly_restore_gdsc_on(pcie))
++				return ret;
+ 			goto err_icc_cpu;
+ 		}
 -		pcie->orderly_awake_gdsc_suspended = true;
--	}
--
++		pcie->orderly_awake_gdsc_collapsed = true;
+ 	}
+ 
  	pcie->orderly_awake_offline = true;
  	dev_info(dev,
 -		 "orderly QCA awake-off: root, PHY, clocks, package rails and ICC off; genpd=%s\n",
 -		 pcie->orderly_awake_gdsc_suspended ? "off" : "retained");
 +		 "orderly QCA awake-off: root, PHY, clocks, package rails and ICC off; genpd=%s physical=%s\n",
 +		 "tracked-on",
-+		 orderly_awake_gdsc_off ? "deferred-to-system-noirq" : "on");
++		 pcie->orderly_awake_gdsc_collapsed ? "collapsed" : "on");
  	return 0;
  
--err_icc_cpu:
--	icc_enable(pcie->icc_cpu);
- err_icc_mem:
- 	icc_enable(pcie->icc_mem);
- err_host_resume:
-@@ -2516,16 +2560,11 @@
+ err_icc_cpu:
+@@ -2516,16 +2573,11 @@
  	if (!pcie->pci->suspended)
  		return 0;
  
@@ -142,7 +143,7 @@
  	}
  
  	ret = pinctrl_pm_select_default_state(dev);
-@@ -2542,7 +2581,7 @@
+@@ -2542,7 +2594,7 @@
  		goto err_disable_icc_mem;
  
  	dev_info(dev,
@@ -151,25 +152,3 @@
  	return 0;
  
  err_disable_icc_mem:
-@@ -2732,8 +2771,20 @@
- 		return 0;
- 	if (pcie->orderly_poweroff) {
- 		if (pcie->orderly_awake_offline && pcie->pci->suspended) {
-+			/* The PCI bus suspends children before their host.  Collapse
-+			 * the physical domain here, after generic PCI PM has finished
-+			 * touching the still-enumerated endpoint, and restore it from
-+			 * the host's resume_noirq callback before PCI children resume.
-+			 */
-+			if (orderly_awake_gdsc_off &&
-+			    !pcie->orderly_awake_gdsc_collapsed) {
-+				ret = qcom_pcie_orderly_force_gdsc_collapse(pcie);
-+				if (ret)
-+					return ret;
-+				pcie->orderly_awake_gdsc_collapsed = true;
-+			}
- 			dev_info(dev,
--				 "orderly QCA awake-off: system suspend found root already off\n");
-+				 "orderly QCA awake-off: system suspend found root already off; physical GDSC collapsed after PCI children\n");
- 			return 0;
- 		}
- 		if (!pcie->orderly_endpoint ||
