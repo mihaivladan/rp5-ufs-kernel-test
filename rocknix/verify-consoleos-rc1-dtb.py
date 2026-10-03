@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Prove that RC1 is the accepted full-stack DT plus one measured policy delta."""
+"""Prove the accepted full-stack DT, policy deltas and RC26 ramoops window."""
 
 import struct
 import sys
@@ -32,6 +32,14 @@ PCIE = "/soc@0/pcie@1c00000"
 MCU_ALWAYS_ON = "/vreg-mcu-3v3-regulator/regulator-always-on"
 PCIE_SLEEP = "/soc@0/pinctrl@f100000/pcie0-sleep-state"
 PCIE_SLEEP_CLKREQ = f"{PCIE_SLEEP}/clkreq-pins"
+RAMOOPS = "/reserved-memory/ramoops@9e300000"
+RAMOOPS_EXPECTED = {
+    f"{RAMOOPS}/compatible": b"ramoops\0",
+    f"{RAMOOPS}/reg": struct.pack(">4I", 0, 0x9E300000, 0, 0x100000),
+    f"{RAMOOPS}/record-size": struct.pack(">I", 0x80000),
+    f"{RAMOOPS}/console-size": struct.pack(">I", 0x80000),
+    f"{RAMOOPS}/no-map": b"",
+}
 EXPECTED = {f"{node}/status" for node in STATUS_NODES} | {
     f"{PCIE}/qcom,drv-supported", f"{PCIE}/qcom,drv-dev-id",
     f"{PCIE}/qcom,drv-l1ss-timeout-us", f"{PCIE}/pinctrl-names",
@@ -40,7 +48,7 @@ EXPECTED = {f"{node}/status" for node in STATUS_NODES} | {
     f"{PCIE_SLEEP}/phandle", f"{PCIE_SLEEP_CLKREQ}/pins",
     f"{PCIE_SLEEP_CLKREQ}/function", f"{PCIE_SLEEP_CLKREQ}/drive-strength",
     f"{PCIE_SLEEP_CLKREQ}/bias-pull-up",
-}
+} | RAMOOPS_EXPECTED.keys()
 
 
 def parse(path: Path) -> dict[str, bytes]:
@@ -133,6 +141,9 @@ def main() -> None:
     for key, value in expected_sleep.items():
         if candidate[key] != value:
             raise SystemExit(f"wrong PCIe sleep property: {key}")
+    for key, value in RAMOOPS_EXPECTED.items():
+        if candidate[key] != value:
+            raise SystemExit(f"wrong persistent-console property: {key}")
     default_clkreq = "/soc@0/pinctrl@f100000/pcie0-default-state/clkreq-pins/function"
     if candidate[default_clkreq] != b"pci_e0\0":
         raise SystemExit("PCIe default CLKREQ mux was altered")
@@ -144,7 +155,7 @@ def main() -> None:
     ):
         if status(candidate[f"{node}/status"]) != b"disabled":
             raise SystemExit(f"unvalidated subsystem enabled: {node}")
-    print("VERIFIED: RC1 full stack plus controllable MCU/RGB rail and exact GPIO80 sleep/default pinctrl")
+    print("VERIFIED: RC26 full stack, power policy and fixed 1 MiB persistent console")
 
 
 if __name__ == "__main__":
