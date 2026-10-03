@@ -1,0 +1,128 @@
+--- a/drivers/pci/controller/dwc/pcie-qcom.c
++++ b/drivers/pci/controller/dwc/pcie-qcom.c
+@@ -54,6 +54,7 @@
+ #define PARF_SYS_CTRL				0x00
+ #define PARF_PM_CTRL				0x20
+ #define PARF_CLKREQ_OVERRIDE			0x2b0
++#define PCIE0_GDSCR_PHYS			0x0016b004
+ #define PARF_PCS_DEEMPH				0x34
+ #define PARF_PCS_SWING				0x38
+ #define PARF_PHY_CTRL				0x40
+@@ -111,6 +112,8 @@
+ /* PARF_CLKREQ_OVERRIDE register fields */
+ #define PARF_CLKREQ_IN_ENABLE			BIT(1)
+ #define PARF_CLKREQ_IN_VALUE			BIT(3)
++#define GDSCR_SW_COLLAPSE			BIT(0)
++#define GDSCR_PWR_ON				BIT(31)
+ 
+ /* PARF_PCS_DEEMPH register fields */
+ #define PCS_DEEMPH_TX_DEEMPH_GEN1(x)		FIELD_PREP(GENMASK(21, 16), x)
+@@ -312,6 +315,7 @@
+ 	bool orderly_poweroff;
+ 	bool orderly_awake_offline;
+ 	bool orderly_awake_gdsc_suspended;
++	bool orderly_awake_gdsc_collapsed;
+ 	bool drv_resources_suspended;
+ 	bool drv_clocks_disabled;
+ 	bool drv_supplies_disabled;
+@@ -2307,6 +2311,7 @@
+ 	pcie->orderly_poweroff = false;
+ 	pcie->orderly_awake_offline = false;
+ 	pcie->orderly_awake_gdsc_suspended = false;
++	pcie->orderly_awake_gdsc_collapsed = false;
+ 	if (pdev)
+ 		pci_dev_put(pdev);
+ }
+@@ -2414,7 +2419,56 @@
+ 	return 0;
+ }
+ EXPORT_SYMBOL_GPL(qcom_pcie_orderly_poweroff_arm);
++
++static int qcom_pcie_orderly_force_gdsc_collapse(struct qcom_pcie *pcie)
++{
++	void __iomem *gdscr;
++	u32 before, after;
++	int ret;
++
++	/* SM8250 describes PCIe0 as RET_ON, so genpd's power_off callback
++	 * intentionally leaves this register physically on. Qualcomm's
++	 * downstream driver collapses the domain for radio-off. This guarded
++	 * diagnostic write is made only after the endpoint, root, PHY, clocks
++	 * and ICC paths are already off.
++	 */
++	gdscr = ioremap(PCIE0_GDSCR_PHYS, sizeof(u32));
++	if (!gdscr)
++		return -ENOMEM;
++
++	before = readl_relaxed(gdscr);
++	writel_relaxed(before | GDSCR_SW_COLLAPSE, gdscr);
++	ret = readl_poll_timeout(gdscr, after, !(after & GDSCR_PWR_ON),
++				 1, 2000);
++	dev_info(pcie->pci->dev,
++		 "orderly QCA awake-off: PCIe0 GDSCR collapse before=%#x after=%#x ret=%d\n",
++		 before, after, ret);
++	iounmap(gdscr);
++
++	return ret;
++}
++
++static int qcom_pcie_orderly_verify_gdsc_on(struct qcom_pcie *pcie)
++{
++	void __iomem *gdscr;
++	u32 value;
++	int ret = 0;
+ 
++	gdscr = ioremap(PCIE0_GDSCR_PHYS, sizeof(u32));
++	if (!gdscr)
++		return -ENOMEM;
++
++	value = readl_relaxed(gdscr);
++	if ((value & GDSCR_SW_COLLAPSE) || !(value & GDSCR_PWR_ON))
++		ret = -EIO;
++	dev_info(pcie->pci->dev,
++		 "orderly QCA awake-off: PCIe0 GDSCR restore value=%#x ret=%d\n",
++		 value, ret);
++	iounmap(gdscr);
++
++	return ret;
++}
++
+ int qcom_pcie_orderly_poweroff_awake(struct pci_dev *pdev)
+ {
+ 	struct pci_host_bridge *bridge;
+@@ -2474,12 +2528,20 @@
+ 			goto err_icc_cpu;
+ 		}
+ 		pcie->orderly_awake_gdsc_suspended = true;
++		ret = qcom_pcie_orderly_force_gdsc_collapse(pcie);
++		if (ret) {
++			pm_runtime_get_sync(dev);
++			pcie->orderly_awake_gdsc_suspended = false;
++			goto err_icc_cpu;
++		}
++		pcie->orderly_awake_gdsc_collapsed = true;
+ 	}
+ 
+ 	pcie->orderly_awake_offline = true;
+ 	dev_info(dev,
+-		 "orderly QCA awake-off: root, PHY, clocks, package rails and ICC off; genpd=%s\n",
+-		 pcie->orderly_awake_gdsc_suspended ? "off" : "retained");
++		 "orderly QCA awake-off: root, PHY, clocks, package rails and ICC off; genpd=%s physical=%s\n",
++		 pcie->orderly_awake_gdsc_suspended ? "off" : "retained",
++		 pcie->orderly_awake_gdsc_collapsed ? "collapsed" : "on");
+ 	return 0;
+ 
+ err_icc_cpu:
+@@ -2526,6 +2588,12 @@
+ 			return ret;
+ 		}
+ 		pcie->orderly_awake_gdsc_suspended = false;
++		if (pcie->orderly_awake_gdsc_collapsed) {
++			ret = qcom_pcie_orderly_verify_gdsc_on(pcie);
++			if (ret)
++				return ret;
++			pcie->orderly_awake_gdsc_collapsed = false;
++		}
+ 	}
+ 
+ 	ret = pinctrl_pm_select_default_state(dev);

@@ -212,6 +212,14 @@ def apply_patches(repo, source, fix, profile):
                 "34cda72a49647471e0270c451fbc875185c47e2251040b0bfb35481c9cab8a99",
                 "QCA6390 awake orderly power-off patch checksum mismatch")
         extra_patches.append(awake_orderly)
+        physical_gdsc = (Path(__file__).resolve().parent /
+                         "qcom-pcie-awake-physical-gdsc.patch")
+        require(physical_gdsc.is_file(),
+                "Missing guarded PCIe0 physical-GDSC collapse patch")
+        require(hashlib.sha256(physical_gdsc.read_bytes()).hexdigest() ==
+                "46fd7dce60db9825546daa3a592f93c5e3f71a274b18d541a1422be731d28cf7",
+                "PCIe0 physical-GDSC collapse patch checksum mismatch")
+        extra_patches.append(physical_gdsc)
     if profile == "lpm-platform":
         lpm_fix = Path(__file__).resolve().parent / "qcom-lpm-platform-suspend.patch"
         require(lpm_fix.is_file(), "Missing exact-state platform suspend patch")
@@ -359,6 +367,9 @@ def apply_patches(repo, source, fix, profile):
                 "orderly QCA power-off: CLKREQ override clear failed" in qcom_pcie and
                 "qcom_pcie_orderly_poweroff_arm" in qcom_pcie and
                 "qcom_pcie_orderly_poweroff_awake" in qcom_pcie and
+                "qcom_pcie_orderly_force_gdsc_collapse" in qcom_pcie and
+                "PCIe0 GDSCR collapse before=" in qcom_pcie and
+                "PCIe0 GDSCR restore value=" in qcom_pcie and
                 "orderly QCA awake-off: system suspend found root already off" in qcom_pcie and
                 "pci_pwrctrl_power_off_devices(pci->dev);" in qcom_pcie and
                 "orderly QCA awake-off: root, PHY, clocks, package rails and ICC off" in qcom_pcie and

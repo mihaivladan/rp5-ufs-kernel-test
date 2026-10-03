@@ -548,7 +548,7 @@ elif [[ "${profile}" == consoleos-rc1 ]]; then
     cd "${out}"
     sha256sum "${dtb_name}.dtb" > CONSOLEOS-RC1-DTB-SHA256SUMS
     printf '%s\n' \
-        'ConsoleOS RC21 built: RC20 plus process-context QCA shutdown, verified CLKREQ reclaim, and optional PCIe0 GDSC power-off. Not installed or boot-tested.' \
+        'ConsoleOS RC21 built: RC20 plus process-context QCA shutdown, verified CLKREQ reclaim, and guarded physical PCIe0 GDSC collapse/restore. Not installed or boot-tested.' \
         > BUILD-SUCCESS.txt
     cd "${source_dir}"
 elif [[ "${profile}" == slpi-integrated ]]; then
