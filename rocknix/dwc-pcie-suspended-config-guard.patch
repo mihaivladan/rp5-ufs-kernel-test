@@ -1,6 +1,29 @@
 --- a/drivers/pci/controller/dwc/pcie-designware-host.c
 +++ b/drivers/pci/controller/dwc/pcie-designware-host.c
-@@ -734,6 +734,13 @@ static void __iomem *dw_pcie_other_conf_map_bus(struct pci_bus *bus,
+@@ -118,2 +118,8 @@
+-	pp->irq_mask[ctrl] |= BIT(bit);
+-	dw_pcie_writel_dbi(pci, PCIE_MSI_INTR0_MASK + res, pp->irq_mask[ctrl]);
++	pp->irq_mask[ctrl] |= BIT(bit);
++	/* Keep the software mask authoritative while the host is off.  The
++	 * resume path replays it through dw_pcie_msi_init() after DBI power is
++	 * restored; only the unsafe powered-domain write is suppressed here.
++	 */
++	if (pci->suspended)
++		return;
++	dw_pcie_writel_dbi(pci, PCIE_MSI_INTR0_MASK + res, pp->irq_mask[ctrl]);
+@@ -132,2 +138,4 @@
+-	pp->irq_mask[ctrl] &= ~BIT(bit);
+-	dw_pcie_writel_dbi(pci, PCIE_MSI_INTR0_MASK + res, pp->irq_mask[ctrl]);
++	pp->irq_mask[ctrl] &= ~BIT(bit);
++	if (pci->suspended)
++		return;
++	dw_pcie_writel_dbi(pci, PCIE_MSI_INTR0_MASK + res, pp->irq_mask[ctrl]);
+@@ -145 +153,3 @@
+-	dw_pcie_writel_dbi(pci, PCIE_MSI_INTR0_STATUS + res, BIT(bit));
++	if (pci->suspended)
++		return;
++	dw_pcie_writel_dbi(pci, PCIE_MSI_INTR0_STATUS + res, BIT(bit));
+@@ -734,6 +744,13 @@ static void __iomem *dw_pcie_other_conf_map_bus(struct pci_bus *bus,
  	int type, ret;
  	u32 busdev;
  
@@ -14,7 +37,7 @@
  	/*
  	 * Checking whether the link is up here is a last line of defense
  	 * against platforms that forward errors on the system bus as
-@@ -828,6 +835,13 @@ void __iomem *dw_pcie_own_conf_map_bus(struct pci_bus *bus, unsigned int devfn,
+@@ -828,6 +845,13 @@ void __iomem *dw_pcie_own_conf_map_bus(struct pci_bus *bus, unsigned int devfn,
  	struct dw_pcie_rp *pp = bus->sysdata;
  	struct dw_pcie *pci = to_dw_pcie_from_pp(pp);
  

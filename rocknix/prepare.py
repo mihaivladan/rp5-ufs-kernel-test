@@ -389,10 +389,40 @@ def apply_patches(repo, source, fix, profile):
                 "orderly QCA awake-off: GDSC, ICC, root and endpoint rails restored" in qcom_pcie and
                 '"tracked-on"' in qcom_pcie,
                 "Guarded Qualcomm PCIe orderly power-off markers missing")
-        require(dwc_host.count("if (pci->suspended)") >= 2 and
+        mask_start = dwc_host.index("static void dw_pci_bottom_mask")
+        unmask_start = dwc_host.index("static void dw_pci_bottom_unmask")
+        ack_start = dwc_host.index("static void dw_pci_bottom_ack")
+        chip_start = dwc_host.index("static struct irq_chip dw_pci_msi_bottom_irq_chip")
+        mask = dwc_host[mask_start:unmask_start]
+        unmask = dwc_host[unmask_start:ack_start]
+        ack = dwc_host[ack_start:chip_start]
+        require(dwc_host.count("if (pci->suspended)") >= 5 and
                 "report the downstream function as inaccessible" in dwc_host and
                 "DBI lives in the host power domain" in dwc_host,
                 "Suspended DesignWare PCIe config-access guards missing")
+        require(mask.index("pp->irq_mask[ctrl] |= BIT(bit);") <
+                    mask.index("if (pci->suspended)") <
+                    mask.index("dw_pcie_writel_dbi") and
+                unmask.index("pp->irq_mask[ctrl] &= ~BIT(bit);") <
+                    unmask.index("if (pci->suspended)") <
+                    unmask.index("dw_pcie_writel_dbi") and
+                ack.index("if (pci->suspended)") <
+                    ack.index("dw_pcie_writel_dbi") and
+                "resume path replays it through dw_pcie_msi_init()" in mask,
+                "Suspended DesignWare MSI cache/write ordering guards missing")
+        qcom_resume = qcom_pcie[
+            qcom_pcie.index("static int qcom_pcie_resume_noirq"):
+            qcom_pcie.index("static int qcom_pcie_resume_early")]
+        require("return qcom_pcie_orderly_poweroff_resume(" in qcom_resume,
+                "Awake-off host restore is not routed through resume_noirq")
+        dwc_resume_start = dwc_host.index("int dw_pcie_resume_noirq")
+        dwc_resume = dwc_host[dwc_resume_start:]
+        setup_rc = dwc_host[
+            dwc_host.index("int dw_pcie_setup_rc"):dwc_resume_start]
+        require(dwc_resume.index("dw_pcie_setup_rc(&pci->pp);") <
+                    dwc_resume.index("pci->suspended = false;") and
+                "dw_pcie_msi_init(pp);" in setup_rc,
+                "DesignWare resume does not replay cached MSI masks before clearing suspended")
     if profile == "lpm-platform":
         lpm_source = (source / "drivers/soc/qcom/qcom_lpm_platform_suspend.c").read_text()
         require("#define CONSOLEOS_SM8250_SUSPEND_STATE\t0x4100c244" in lpm_source and
