@@ -10,6 +10,23 @@
 
 #include "sm8250-retroidpocket-rp5-phase4a-wireless-adsp-pcie-drv.dts"
 
+/*
+ * The bootloader reserves 0x9c000000-0x9e3fffff.  The simple framebuffer
+ * consumes 0x9c000000-0x9e2fffff, leaving this final 1 MiB reserved on both
+ * the candidate and stock boots.  Split it evenly between the panic record
+ * and the continuous console so a suspend reset has a chance to name the
+ * last callback that ran.
+ */
+&{/reserved-memory} {
+	ramoops@9e300000 {
+		compatible = "ramoops";
+		reg = <0x0 0x9e300000 0x0 0x100000>;
+		record-size = <0x80000>;
+		console-size = <0x80000>;
+		no-map;
+	};
+};
+
 &{/audio-codec} { status = "okay"; };
 &{/multi-ledl1} { status = "okay"; };
 &{/multi-ledl2} { status = "okay"; };

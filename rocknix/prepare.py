@@ -509,6 +509,16 @@ def apply_patches(repo, source, fix, profile):
             if profile == "consoleos-rc1":
                 rc_dts = root / "sm8250-retroidpocket-rp5-consoleos-rc1.dts"
                 require(rc_dts.is_file(), "Missing ConsoleOS RC1 DTS")
+                rc_dts_text = rc_dts.read_text()
+                for marker in (
+                    "ramoops@9e300000",
+                    'compatible = "ramoops";',
+                    "reg = <0x0 0x9e300000 0x0 0x100000>;",
+                    "record-size = <0x80000>;",
+                    "console-size = <0x80000>;",
+                ):
+                    require(marker in rc_dts_text,
+                            f"Missing RC26 persistent-console DTS marker: {marker}")
                 shutil.copyfile(
                     rc_dts,
                     source / "arch/arm64/boot/dts/qcom" / rc_dts.name,

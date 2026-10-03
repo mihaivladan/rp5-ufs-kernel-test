@@ -1,4 +1,4 @@
-name: ConsoleOS RP5 kernel RC25 PCI MSI guard
+name: ConsoleOS RP5 kernel RC26 rootless PCIe GDSC + pstore
 on:
   workflow_dispatch:
   push:
@@ -24,6 +24,7 @@ on:
       - 'rocknix/qca6390-awake-orderly-poweroff.patch'
       - 'rocknix/qcom-pcie-awake-physical-gdsc.patch'
       - 'rocknix/dwc-pcie-suspended-config-guard.patch'
+      - 'rocknix/qcom-pcie-rootless-gdsc-offline.patch'
       - 'rocknix/rpmh-regulator-suspend-state.patch'
       - 'rocknix/regulator-core-s2idle-state-mem.patch'
       - 'rocknix/rpmh-regulator-suspend-trace.patch'
