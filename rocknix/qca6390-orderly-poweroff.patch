@@ -189,7 +189,17 @@ index a163168..8f798da 100644
  	int ret;
  
  	if (test_bit(ATH11K_FLAG_QMI_FAIL, &ab->dev_flags)) {
-@@ -1238,6 +1303,14 @@ static __maybe_unused int ath11k_pci_pm_suspend(struct device *dev)
+@@ -1238,6 +1303,24 @@ static __maybe_unused int ath11k_pci_pm_suspend(struct device *dev)
++	if (orderly) {
++		ret = qcom_pcie_orderly_poweroff_prepare(ab_pci->pdev);
++		if (ret) {
++			ath11k_warn(ab,
++				    "orderly QCA power-off: pre-shutdown PCIe-DRV cycle failed: %d\n",
++				    ret);
++			return ret;
++		}
++	}
++
  	ret = ath11k_core_suspend(ab);
  	if (ret)
  		ath11k_warn(ab, "failed to suspend core: %d\n", ret);

@@ -189,7 +189,7 @@ def apply_patches(repo, source, fix, profile):
         orderly_qca = Path(__file__).resolve().parent / "qca6390-orderly-poweroff.patch"
         require(orderly_qca.is_file(), "Missing guarded QCA6390 orderly power-off patch")
         require(hashlib.sha256(orderly_qca.read_bytes()).hexdigest() ==
-                "8fdacde833ac82356c3ffbe8a564beaf23bea79469c5418c52e5ea3225c91384",
+                "f58938dc811d1e3c51e04ded7059ce88919519e76e8d72ba2fc68f46843869cc",
                 "QCA6390 orderly power-off patch checksum mismatch")
         extra_patches.append(orderly_qca)
         orderly_icc = Path(__file__).resolve().parent / "qcom-pcie-orderly-icc-release.patch"
@@ -202,7 +202,7 @@ def apply_patches(repo, source, fix, profile):
         require(early_orderly.is_file(),
                 "Missing QCA6390 early orderly power-off patch")
         require(hashlib.sha256(early_orderly.read_bytes()).hexdigest() ==
-                "11506019a79f93b3afe0b63011ad28e5c019edf23669b33dd0dcc5753b1b19d5",
+                "89a9b8c63b739d2610ee7ecb88bb52ca1541c8b14c86b8a1910662df272b2774",
                 "QCA6390 early orderly power-off patch checksum mismatch")
         extra_patches.append(early_orderly)
     if profile == "lpm-platform":

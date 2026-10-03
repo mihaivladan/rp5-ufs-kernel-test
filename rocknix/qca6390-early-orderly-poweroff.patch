@@ -88,26 +88,7 @@
  static inline struct ath11k_pci *ath11k_pci_priv(struct ath11k_base *ab)
 --- a/drivers/net/wireless/ath/ath11k/pci.c
 +++ b/drivers/net/wireless/ath/ath11k/pci.c
-@@ -1298,8 +1298,18 @@
-	if (test_bit(ATH11K_FLAG_QMI_FAIL, &ab->dev_flags)) {
-		ath11k_dbg(ab, ATH11K_DBG_BOOT, "boot skipping pci suspend as qmi is not initialised\n");
-		return 0;
- 	}
- 
-+	if (orderly) {
-+		ret = qcom_pcie_orderly_poweroff_prepare(ab_pci->pdev);
-+		if (ret) {
-+			ath11k_warn(ab,
-+				    "orderly QCA power-off: pre-shutdown PCIe-DRV cycle failed: %d\n",
-+				    ret);
-+			return ret;
-+		}
-+	}
-+
- 	ret = ath11k_core_suspend(ab);
- 	if (ret)
- 		ath11k_warn(ab, "failed to suspend core: %d\n", ret);
-@@ -1309,6 +1319,22 @@
+@@ -1319,6 +1319,22 @@
  						 MHI_CHANNEL_SUSPEND_RETAINED);
  		ath11k_info(ab,
  			    "orderly QCA power-off: preserving QMI transport for late firmware stop\n");
@@ -130,7 +111,7 @@
  	}
  
  	return 0;
-@@ -1334,9 +1360,13 @@
+@@ -1344,9 +1360,13 @@
  static __maybe_unused int ath11k_pci_pm_suspend_late(struct device *dev)
  {
  	struct ath11k_base *ab = dev_get_drvdata(dev);
@@ -144,7 +125,7 @@
  	ret = ath11k_core_suspend_late(ab);
  	if (ret)
  		ath11k_warn(ab, "failed to late suspend core: %d\n", ret);
-@@ -1352,11 +1382,14 @@
+@@ -1362,11 +1382,14 @@
  static __maybe_unused int ath11k_pci_pm_resume_early(struct device *dev)
  {
  	struct ath11k_base *ab = dev_get_drvdata(dev);
