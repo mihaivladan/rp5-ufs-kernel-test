@@ -217,7 +217,7 @@ def apply_patches(repo, source, fix, profile):
         require(physical_gdsc.is_file(),
                 "Missing guarded PCIe0 physical-GDSC collapse patch")
         require(hashlib.sha256(physical_gdsc.read_bytes()).hexdigest() ==
-                "af269d5dd437be87da287aa0deaa6bcb38f83f89a4729f27bb088b8ebcf962e0",
+                "e60c9e2c2d43327722b825fe22a5b0e357726f8a0a0eeb2f977f556e8d8eebc6",
                 "PCIe0 physical-GDSC collapse patch checksum mismatch")
         extra_patches.append(physical_gdsc)
     if profile == "lpm-platform":
@@ -371,6 +371,8 @@ def apply_patches(repo, source, fix, profile):
                 "qcom_pcie_orderly_restore_gdsc_on" in qcom_pcie and
                 "PCIe0 GDSCR collapse before=" in qcom_pcie and
                 "PCIe0 GDSCR restore before=" in qcom_pcie and
+                '"deferred-to-system-noirq"' in qcom_pcie and
+                "physical GDSC collapsed after PCI children" in qcom_pcie and
                 "pm_runtime_put_sync_suspend(dev)" not in
                     qcom_pcie[qcom_pcie.index("qcom_pcie_orderly_poweroff_awake"):qcom_pcie.index("EXPORT_SYMBOL_GPL(qcom_pcie_orderly_poweroff_awake)")] and
                 "orderly QCA awake-off: system suspend found root already off" in qcom_pcie and
