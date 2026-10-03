@@ -202,7 +202,7 @@ def apply_patches(repo, source, fix, profile):
         require(early_orderly.is_file(),
                 "Missing QCA6390 early orderly power-off patch")
         require(hashlib.sha256(early_orderly.read_bytes()).hexdigest() ==
-                "89a9b8c63b739d2610ee7ecb88bb52ca1541c8b14c86b8a1910662df272b2774",
+                "21f2cb30d3e857c34b9d1fb88abd680cc212697f0dfd9ca8245f0f1a0c286001",
                 "QCA6390 early orderly power-off patch checksum mismatch")
         extra_patches.append(early_orderly)
     if profile == "lpm-platform":
@@ -338,6 +338,7 @@ def apply_patches(repo, source, fix, profile):
                 "QFPROM_PWR_CTRL_SHUTDOWN_EN_MASK" in ath11k_pci and
                 "qcom_pcie_orderly_poweroff_prepare(ab_pci->pdev)" in ath11k_pci and
                 "orderly_early_down" in ath11k_pci and
+                "MHI children quiesced; channels marked reset" in ath11k_pci and
                 "qcom_pcie_orderly_poweroff_arm(ab_pci->pdev)" in ath11k_pci and
                 "MHI_CHANNEL_SUSPEND_RETAINED" in ath11k_pci,
                 "Guarded ath11k orderly power-off markers missing")

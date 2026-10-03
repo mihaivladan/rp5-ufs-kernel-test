@@ -88,6 +88,9 @@
  static inline struct ath11k_pci *ath11k_pci_priv(struct ath11k_base *ab)
 --- a/drivers/net/wireless/ath/ath11k/pci.c
 +++ b/drivers/net/wireless/ath/ath11k/pci.c
+@@ -912,2 +912,0 @@ static int ath11k_pci_orderly_power_down(struct ath11k_base *ab)
+-	mhi_pm_set_channel_suspend_state(ab_pci->mhi_ctrl,
+-					 MHI_CHANNEL_SUSPEND_RESET);
 @@ -1319,6 +1319,22 @@
  						 MHI_CHANNEL_SUSPEND_RETAINED);
  		ath11k_info(ab,
@@ -111,7 +114,7 @@
  	}
  
  	return 0;
-@@ -1344,9 +1360,13 @@
+@@ -1344,9 +1360,23 @@
  static __maybe_unused int ath11k_pci_pm_suspend_late(struct device *dev)
  {
  	struct ath11k_base *ab = dev_get_drvdata(dev);
@@ -119,8 +122,18 @@
  	bool orderly = ath11k_hif_orderly_poweroff_enabled(ab);
  	int ret;
  
-+	if (orderly && ab_pci->orderly_early_down)
++	if (orderly && ab_pci->orderly_early_down) {
++		/* MHI children suspend before their PCI parent in the late
++		 * phase. Keep RETAINED through their callbacks so QRTR does
++		 * not touch channels after the controller was stopped above;
++		 * switch to RESET only now, ready for resume_early().
++		 */
++		mhi_pm_set_channel_suspend_state(ab_pci->mhi_ctrl,
++						 MHI_CHANNEL_SUSPEND_RESET);
++		ath11k_info(ab,
++			    "orderly QCA power-off: MHI children quiesced; channels marked reset\n");
 +		return 0;
++	}
 +
  	ret = ath11k_core_suspend_late(ab);
  	if (ret)
