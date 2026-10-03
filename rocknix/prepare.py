@@ -355,10 +355,14 @@ def apply_patches(repo, source, fix, profile):
                 "Orderly QCA QRTR channel-lifetime markers missing")
         require("orderly QCA power-off: L23 acknowledged" in qcom_pcie and
                 "pre-shutdown ADSP handoff/reclaim complete" in qcom_pcie and
+                "PARF_CLKREQ_OVERRIDE" in qcom_pcie and
+                "orderly QCA power-off: CLKREQ override clear failed" in qcom_pcie and
                 "qcom_pcie_orderly_poweroff_arm" in qcom_pcie and
+                "qcom_pcie_orderly_poweroff_awake" in qcom_pcie and
+                "orderly QCA awake-off: system suspend found root already off" in qcom_pcie and
                 "pci_pwrctrl_power_off_devices(pci->dev);" in qcom_pcie and
-                "orderly QCA power-off: root complex suspended, ICC votes zero" in qcom_pcie and
-                "orderly QCA power-off: ICC votes, root complex and endpoint rails restored" in qcom_pcie,
+                "orderly QCA awake-off: root, PHY, clocks, package rails and ICC off" in qcom_pcie and
+                "orderly QCA awake-off: genpd, ICC, root and endpoint rails restored" in qcom_pcie,
                 "Guarded Qualcomm PCIe orderly power-off markers missing")
     if profile == "lpm-platform":
         lpm_source = (source / "drivers/soc/qcom/qcom_lpm_platform_suspend.c").read_text()
