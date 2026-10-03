@@ -228,6 +228,14 @@ def apply_patches(repo, source, fix, profile):
                 "1bdc9a907d43968dadcc8a2b69c5cd7fd8b019b977f808f4fb22a22590259bb6",
                 "DesignWare PCIe config/MSI guard checksum mismatch")
         extra_patches.append(config_guard)
+        rootless_gdsc = (Path(__file__).resolve().parent /
+                         "qcom-pcie-rootless-gdsc-offline.patch")
+        require(rootless_gdsc.is_file(),
+                "Missing rootless PCIe0 GDSC offline patch")
+        require(hashlib.sha256(rootless_gdsc.read_bytes()).hexdigest() ==
+                "f4144a1bbad8e0e9ad5cd01cb7ff6e89b56778f0fc3a2d130100cd592e3de263",
+                "Rootless PCIe0 GDSC offline patch checksum mismatch")
+        extra_patches.append(rootless_gdsc)
     if profile == "lpm-platform":
         lpm_fix = Path(__file__).resolve().parent / "qcom-lpm-platform-suspend.patch"
         require(lpm_fix.is_file(), "Missing exact-state platform suspend patch")
@@ -389,6 +397,21 @@ def apply_patches(repo, source, fix, profile):
                 "orderly QCA awake-off: GDSC, ICC, root and endpoint rails restored" in qcom_pcie and
                 '"tracked-on"' in qcom_pcie,
                 "Guarded Qualcomm PCIe orderly power-off markers missing")
+        rootless_suspend = qcom_pcie[
+            qcom_pcie.index("static int qcom_pcie_suspend_late"):
+            qcom_pcie.index("static int qcom_pcie_resume_noirq")]
+        rootless_resume = qcom_pcie[
+            qcom_pcie.index("static int qcom_pcie_resume_noirq"):
+            qcom_pcie.index("static int qcom_pcie_resume_early")]
+        require("module_param(orderly_rootless_gdsc_off, bool, 0644);" in
+                    qcom_pcie and
+                "!qcom_pcie_has_downstream_device(pcie)" in rootless_suspend and
+                "dw_pcie_suspend_noirq_force(pcie->pci);" in rootless_suspend and
+                "qcom_pcie_orderly_force_gdsc_collapse(pcie);" in rootless_suspend and
+                "qcom_pcie_orderly_restore_gdsc_on(pcie);" in rootless_resume and
+                "dw_pcie_resume_noirq(pcie->pci);" in rootless_resume and
+                "awaiting PCI rescan" in rootless_resume,
+                "Rootless PCI removal/GDSC suspend-resume path missing")
         mask_start = dwc_host.index("static void dw_pci_bottom_mask")
         unmask_start = dwc_host.index("static void dw_pci_bottom_unmask")
         ack_start = dwc_host.index("static void dw_pci_bottom_ack")

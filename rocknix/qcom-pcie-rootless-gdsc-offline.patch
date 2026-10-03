@@ -1,0 +1,160 @@
+--- a/drivers/pci/controller/dwc/pcie-qcom.c
++++ b/drivers/pci/controller/dwc/pcie-qcom.c
+@@ -50,6 +50,11 @@ module_param(orderly_awake_gdsc_off, bool, 0644);
+ MODULE_PARM_DESC(orderly_awake_gdsc_off,
+ 		 "Power the PCIe0 genpd off during an armed awake QCA shutdown");
+ 
++static bool orderly_rootless_gdsc_off;
++module_param(orderly_rootless_gdsc_off, bool, 0644);
++MODULE_PARM_DESC(orderly_rootless_gdsc_off,
++		 "Collapse PCIe0 after all downstream PCI devices are removed");
++
+ /* PARF registers */
+ #define PARF_SYS_CTRL				0x00
+ #define PARF_PM_CTRL				0x20
+@@ -315,6 +320,8 @@ struct qcom_pcie {
+ 	bool orderly_poweroff;
+ 	bool orderly_awake_offline;
+ 	bool orderly_awake_gdsc_collapsed;
++	bool orderly_rootless_offline;
++	bool orderly_rootless_gdsc_collapsed;
+ 	bool drv_resources_suspended;
+ 	bool drv_clocks_disabled;
+ 	bool drv_supplies_disabled;
+@@ -2642,6 +2649,26 @@ static int qcom_pcie_suspend_late(struct device *dev)
+ 		return 0;
+ 	}
+ 
++	if (orderly_rootless_gdsc_off &&
++	    !qcom_pcie_has_downstream_device(pcie)) {
++		if (pcie->drv_armed || pcie->drv_offline ||
++		    pcie->orderly_rootless_offline)
++			return -EBUSY;
++
++		ret = pinctrl_pm_select_sleep_state(dev);
++		if (ret) {
++			dev_err(dev,
++				"rootless QCA off: failed to select PCIe sleep pins: %d\n",
++				ret);
++			return ret;
++		}
++
++		pcie->orderly_rootless_offline = true;
++		dev_info(dev,
++			 "rootless QCA off: no downstream PCI devices; skipping ADSP handoff\n");
++		return 0;
++	}
++
+ 	if (pcie->drv_armed || pcie->drv_offline)
+ 		return -EBUSY;
+ 
+@@ -2831,6 +2858,49 @@ static int qcom_pcie_suspend_noirq(struct device *dev)
+ 			 "orderly QCA power-off: root complex suspended, ICC votes zero\n");
+ 		return 0;
+ 	}
++	if (pcie->orderly_rootless_offline) {
++		if (qcom_pcie_has_downstream_device(pcie)) {
++			dev_err(dev,
++				"rootless QCA off: downstream PCI device reappeared before noirq\n");
++			return -EBUSY;
++		}
++
++		ret = dw_pcie_suspend_noirq_force(pcie->pci);
++		if (ret)
++			return ret;
++		if (!pcie->pci->suspended) {
++			dev_err(dev,
++				"rootless QCA off: root complex stayed active\n");
++			return -EIO;
++		}
++
++		ret = icc_disable(pcie->icc_mem);
++		if (ret) {
++			dev_err(dev,
++				"rootless QCA off: failed to release PCIe-MEM vote: %d\n",
++				ret);
++			return ret;
++		}
++		ret = icc_disable(pcie->icc_cpu);
++		if (ret) {
++			dev_err(dev,
++				"rootless QCA off: failed to release CPU-PCIe vote: %d\n",
++				ret);
++			icc_enable(pcie->icc_mem);
++			return ret;
++		}
++
++		ret = qcom_pcie_orderly_force_gdsc_collapse(pcie);
++		if (ret) {
++			icc_enable(pcie->icc_cpu);
++			icc_enable(pcie->icc_mem);
++			return ret;
++		}
++		pcie->orderly_rootless_gdsc_collapsed = true;
++		dev_info(dev,
++			 "rootless QCA off: host, PHY, rails, ICC and PCIe0 GDSC off\n");
++		return 0;
++	}
+ 	if (pcie->drv_supported &&
+ 	    (pm_suspend_target_state == PM_SUSPEND_TO_IDLE ||
+ 	     pm_suspend_target_state == PM_SUSPEND_MEM)) {
+@@ -2906,6 +2976,37 @@ static int qcom_pcie_resume_noirq(struct device *dev)
+ 		return qcom_pcie_orderly_poweroff_resume(
+ 			pcie->orderly_endpoint);
+ 	}
++	if (pcie->orderly_rootless_offline) {
++		if (pcie->orderly_rootless_gdsc_collapsed) {
++			ret = qcom_pcie_orderly_restore_gdsc_on(pcie);
++			if (ret)
++				return ret;
++			pcie->orderly_rootless_gdsc_collapsed = false;
++		}
++
++		ret = pinctrl_pm_select_default_state(dev);
++		if (ret)
++			return ret;
++		ret = icc_enable(pcie->icc_cpu);
++		if (ret)
++			return ret;
++		ret = icc_enable(pcie->icc_mem);
++		if (ret)
++			goto rootless_disable_icc_cpu;
++		ret = dw_pcie_resume_noirq(pcie->pci);
++		if (ret)
++			goto rootless_disable_icc_mem;
++
++		dev_info(dev,
++			 "rootless QCA off: GDSC, ICC and host restored; awaiting PCI rescan\n");
++		return 0;
++
++rootless_disable_icc_mem:
++		icc_disable(pcie->icc_mem);
++rootless_disable_icc_cpu:
++		icc_disable(pcie->icc_cpu);
++		return ret;
++	}
+ 	if (pcie->drv_armed || pcie->drv_offline) {
+ 		if (!pcie->drv_resources_suspended &&
+ 		    !pcie->drv_clocks_disabled && !pcie->drv_supplies_disabled &&
+@@ -2994,6 +3095,21 @@ static int qcom_pcie_resume_early(struct device *dev)
+ 		return 0;
+ 	}
+ 
++	if (pcie->orderly_rootless_offline) {
++		if (pcie->pci->suspended ||
++		    pcie->orderly_rootless_gdsc_collapsed) {
++			dev_err(dev,
++				"rootless QCA off: resume incomplete; keeping state armed\n");
++			return -EIO;
++		}
++
++		pcie->orderly_rootless_offline = false;
++		qcom_pcie_icc_opp_update(pcie);
++		dev_info(dev,
++			 "rootless QCA off: resume complete; userspace may rescan PCI\n");
++		return 0;
++	}
++
+ 	if (pcie->drv_offline) {
+ 		if (pcie->drv_resources_suspended || pcie->drv_clocks_disabled ||
+ 		    pcie->drv_supplies_disabled || pcie->drv_icc_mem_disabled ||
