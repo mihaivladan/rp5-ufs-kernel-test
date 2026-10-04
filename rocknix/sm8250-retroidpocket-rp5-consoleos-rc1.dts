@@ -9,23 +9,7 @@
  */
 
 #include "sm8250-retroidpocket-rp5-phase4a-wireless-adsp-pcie-drv.dts"
-
-/*
- * The bootloader reserves 0x9c000000-0x9e3fffff.  The simple framebuffer
- * consumes 0x9c000000-0x9e2fffff, leaving this final 1 MiB reserved on both
- * the candidate and stock boots.  Split it evenly between the panic record
- * and the continuous console so a suspend reset has a chance to name the
- * last callback that ran.
- */
-&{/reserved-memory} {
-	ramoops@9e300000 {
-		compatible = "ramoops";
-		reg = <0x0 0x9e300000 0x0 0x100000>;
-		record-size = <0x80000>;
-		console-size = <0x80000>;
-		no-map;
-	};
-};
+#include <dt-bindings/interconnect/qcom,icc.h>
 
 &{/audio-codec} { status = "okay"; };
 &{/multi-ledl1} { status = "okay"; };
@@ -85,12 +69,10 @@
 };
 
 &pcie0 {
-	/* Exact provider handles, endpoints and RPMh tags proven by Phase 4DU.
-	 * Keep these cells numeric so adding this consumer does not renumber every
-	 * generated phandle in the otherwise-identical release DTB.
-	 */
-	interconnects = <0x4a 6 7 0x36 1 7>,
-			<0x33 2 3 0x1d8 14 3>;
+	interconnects = <&aggre2_noc MASTER_PCIE QCOM_ICC_TAG_ALWAYS
+			 &mc_virt SLAVE_EBI_CH0 QCOM_ICC_TAG_ALWAYS>,
+			<&gem_noc MASTER_AMPSS_M0 QCOM_ICC_TAG_ACTIVE_ONLY
+			 &system_noc SLAVE_PCIE_0 QCOM_ICC_TAG_ACTIVE_ONLY>;
 	interconnect-names = "pcie-mem", "cpu-pcie";
 
 	pinctrl-names = "default", "sleep";

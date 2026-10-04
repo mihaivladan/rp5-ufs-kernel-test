@@ -53,7 +53,7 @@ fg-coulomb-counter)
     ;;
 consoleos-rc1)
     config_fragment="${kit}/rocknix/consoleos-rc1.config"
-    expected_release='7.2.0-consoleos-rc26-pci-rootless-gdsc'
+    expected_release='7.2.0-consoleos-rc27-idlecycle'
     artifact_name="rocknix-${expected_release}.tar.zst"
     dtb_name='sm8250-retroidpocket-rp5-consoleos-rc1'
     ;;
@@ -548,7 +548,7 @@ elif [[ "${profile}" == consoleos-rc1 ]]; then
     cd "${out}"
     sha256sum "${dtb_name}.dtb" > CONSOLEOS-RC1-DTB-SHA256SUMS
     printf '%s\n' \
-        'ConsoleOS RC21 built: RC20 plus process-context QCA shutdown, verified CLKREQ reclaim, and guarded physical PCIe0 GDSC collapse/restore. Not installed or boot-tested.' \
+        'ConsoleOS RC27 built: RC17 plus an opt-in awake ADSP-owned PCIe idle-cycle discriminator. Not installed or boot-tested.' \
         > BUILD-SUCCESS.txt
     cd "${source_dir}"
 elif [[ "${profile}" == slpi-integrated ]]; then

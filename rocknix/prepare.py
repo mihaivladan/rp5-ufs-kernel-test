@@ -189,7 +189,7 @@ def apply_patches(repo, source, fix, profile):
         orderly_qca = Path(__file__).resolve().parent / "qca6390-orderly-poweroff.patch"
         require(orderly_qca.is_file(), "Missing guarded QCA6390 orderly power-off patch")
         require(hashlib.sha256(orderly_qca.read_bytes()).hexdigest() ==
-                "f58938dc811d1e3c51e04ded7059ce88919519e76e8d72ba2fc68f46843869cc",
+                "8fdacde833ac82356c3ffbe8a564beaf23bea79469c5418c52e5ea3225c91384",
                 "QCA6390 orderly power-off patch checksum mismatch")
         extra_patches.append(orderly_qca)
         orderly_icc = Path(__file__).resolve().parent / "qcom-pcie-orderly-icc-release.patch"
@@ -198,44 +198,14 @@ def apply_patches(repo, source, fix, profile):
                 "abdbd431d328d0efcd1acc29aff128f5b8a67163ba51cb1838fedb491bbcf961",
                 "Orderly PCIe ICC release patch checksum mismatch")
         extra_patches.append(orderly_icc)
-        early_orderly = Path(__file__).resolve().parent / "qca6390-early-orderly-poweroff.patch"
-        require(early_orderly.is_file(),
-                "Missing QCA6390 early orderly power-off patch")
-        require(hashlib.sha256(early_orderly.read_bytes()).hexdigest() ==
-                "21f2cb30d3e857c34b9d1fb88abd680cc212697f0dfd9ca8245f0f1a0c286001",
-                "QCA6390 early orderly power-off patch checksum mismatch")
-        extra_patches.append(early_orderly)
-        awake_orderly = Path(__file__).resolve().parent / "qca6390-awake-orderly-poweroff.patch"
-        require(awake_orderly.is_file(),
-                "Missing QCA6390 awake orderly power-off patch")
-        require(hashlib.sha256(awake_orderly.read_bytes()).hexdigest() ==
-                "34cda72a49647471e0270c451fbc875185c47e2251040b0bfb35481c9cab8a99",
-                "QCA6390 awake orderly power-off patch checksum mismatch")
-        extra_patches.append(awake_orderly)
-        physical_gdsc = (Path(__file__).resolve().parent /
-                         "qcom-pcie-awake-physical-gdsc.patch")
-        require(physical_gdsc.is_file(),
-                "Missing guarded PCIe0 physical-GDSC collapse patch")
-        require(hashlib.sha256(physical_gdsc.read_bytes()).hexdigest() ==
-                "af269d5dd437be87da287aa0deaa6bcb38f83f89a4729f27bb088b8ebcf962e0",
-                "PCIe0 physical-GDSC collapse patch checksum mismatch")
-        extra_patches.append(physical_gdsc)
-        config_guard = (Path(__file__).resolve().parent /
-                        "dwc-pcie-suspended-config-guard.patch")
-        require(config_guard.is_file(),
-                "Missing suspended DesignWare PCIe config/MSI guard")
-        require(hashlib.sha256(config_guard.read_bytes()).hexdigest() ==
-                "1bdc9a907d43968dadcc8a2b69c5cd7fd8b019b977f808f4fb22a22590259bb6",
-                "DesignWare PCIe config/MSI guard checksum mismatch")
-        extra_patches.append(config_guard)
-        rootless_gdsc = (Path(__file__).resolve().parent /
-                         "qcom-pcie-rootless-gdsc-offline.patch")
-        require(rootless_gdsc.is_file(),
-                "Missing rootless PCIe0 GDSC offline patch")
-        require(hashlib.sha256(rootless_gdsc.read_bytes()).hexdigest() ==
-                "f4144a1bbad8e0e9ad5cd01cb7ff6e89b56778f0fc3a2d130100cd592e3de263",
-                "Rootless PCIe0 GDSC offline patch checksum mismatch")
-        extra_patches.append(rootless_gdsc)
+        idle_cycle = (Path(__file__).resolve().parent /
+                      "qcom-pcie-orderly-idle-cycle.patch")
+        require(idle_cycle.is_file(),
+                "Missing guarded PCIe0 orderly idle-cycle patch")
+        require(hashlib.sha256(idle_cycle.read_bytes()).hexdigest() ==
+                "4884dff497fa4e7482c29656509a9e0d1acef8aab20bc6df339db386fb15068f",
+                "PCIe0 orderly idle-cycle patch checksum mismatch")
+        extra_patches.append(idle_cycle)
     if profile == "lpm-platform":
         lpm_fix = Path(__file__).resolve().parent / "qcom-lpm-platform-suspend.patch"
         require(lpm_fix.is_file(), "Missing exact-state platform suspend patch")
@@ -365,12 +335,8 @@ def apply_patches(repo, source, fix, profile):
                 "PM8150B physical CC-attachment guard missing")
         ath11k_pci = (source / "drivers/net/wireless/ath/ath11k/pci.c").read_text()
         qcom_pcie = (source / "drivers/pci/controller/dwc/pcie-qcom.c").read_text()
-        dwc_host = (source / "drivers/pci/controller/dwc/pcie-designware-host.c").read_text()
         require("module_param(orderly_qca_poweroff, bool, 0644);" in ath11k_pci and
                 "QFPROM_PWR_CTRL_SHUTDOWN_EN_MASK" in ath11k_pci and
-                "qcom_pcie_orderly_poweroff_prepare(ab_pci->pdev)" in ath11k_pci and
-                "orderly_early_down" in ath11k_pci and
-                "MHI children quiesced; channels marked reset" in ath11k_pci and
                 "qcom_pcie_orderly_poweroff_arm(ab_pci->pdev)" in ath11k_pci and
                 "MHI_CHANNEL_SUSPEND_RETAINED" in ath11k_pci,
                 "Guarded ath11k orderly power-off markers missing")
@@ -379,73 +345,14 @@ def apply_patches(repo, source, fix, profile):
                 "MHI_CHANNEL_SUSPEND_RESET" in qrtr,
                 "Orderly QCA QRTR channel-lifetime markers missing")
         require("orderly QCA power-off: L23 acknowledged" in qcom_pcie and
-                "pre-shutdown ADSP handoff/reclaim complete" in qcom_pcie and
-                "PARF_CLKREQ_OVERRIDE" in qcom_pcie and
-                "orderly QCA power-off: CLKREQ override clear failed" in qcom_pcie and
                 "qcom_pcie_orderly_poweroff_arm" in qcom_pcie and
-                "qcom_pcie_orderly_poweroff_awake" in qcom_pcie and
-                "qcom_pcie_orderly_force_gdsc_collapse" in qcom_pcie and
-                "qcom_pcie_orderly_restore_gdsc_on" in qcom_pcie and
-                "PCIe0 GDSCR collapse before=" in qcom_pcie and
-                "PCIe0 GDSCR restore before=" in qcom_pcie and
-                '"collapsed"' in qcom_pcie and
-                "pm_runtime_put_sync_suspend(dev)" not in
-                    qcom_pcie[qcom_pcie.index("qcom_pcie_orderly_poweroff_awake"):qcom_pcie.index("EXPORT_SYMBOL_GPL(qcom_pcie_orderly_poweroff_awake)")] and
-                "orderly QCA awake-off: system suspend found root already off" in qcom_pcie and
                 "pci_pwrctrl_power_off_devices(pci->dev);" in qcom_pcie and
-                "orderly QCA awake-off: root, PHY, clocks, package rails and ICC off" in qcom_pcie and
-                "orderly QCA awake-off: GDSC, ICC, root and endpoint rails restored" in qcom_pcie and
-                '"tracked-on"' in qcom_pcie,
+                "orderly QCA power-off: root complex suspended, ICC votes zero" in qcom_pcie and
+                "orderly QCA power-off: ICC votes, root complex and endpoint rails restored" in qcom_pcie and
+                "orderly_idle_cycle_ms" in qcom_pcie and
+                "orderly idle cycle: PCIe RC%u handed to ADSP" in qcom_pcie and
+                "orderly idle cycle: PCIe RC%u reclaimed after" in qcom_pcie,
                 "Guarded Qualcomm PCIe orderly power-off markers missing")
-        rootless_suspend = qcom_pcie[
-            qcom_pcie.index("static int qcom_pcie_suspend_late"):
-            qcom_pcie.index("static int qcom_pcie_resume_noirq")]
-        rootless_resume = qcom_pcie[
-            qcom_pcie.index("static int qcom_pcie_resume_noirq"):
-            qcom_pcie.index("static int qcom_pcie_resume_early")]
-        require("module_param(orderly_rootless_gdsc_off, bool, 0644);" in
-                    qcom_pcie and
-                "!qcom_pcie_has_downstream_device(pcie)" in rootless_suspend and
-                "dw_pcie_suspend_noirq_force(pcie->pci);" in rootless_suspend and
-                "qcom_pcie_orderly_force_gdsc_collapse(pcie);" in rootless_suspend and
-                "qcom_pcie_orderly_restore_gdsc_on(pcie);" in rootless_resume and
-                "dw_pcie_resume_noirq(pcie->pci);" in rootless_resume and
-                "awaiting PCI rescan" in rootless_resume,
-                "Rootless PCI removal/GDSC suspend-resume path missing")
-        mask_start = dwc_host.index("static void dw_pci_bottom_mask")
-        unmask_start = dwc_host.index("static void dw_pci_bottom_unmask")
-        ack_start = dwc_host.index("static void dw_pci_bottom_ack")
-        chip_start = dwc_host.index("static struct irq_chip dw_pci_msi_bottom_irq_chip")
-        mask = dwc_host[mask_start:unmask_start]
-        unmask = dwc_host[unmask_start:ack_start]
-        ack = dwc_host[ack_start:chip_start]
-        require(dwc_host.count("if (pci->suspended)") >= 5 and
-                "report the downstream function as inaccessible" in dwc_host and
-                "DBI lives in the host power domain" in dwc_host,
-                "Suspended DesignWare PCIe config-access guards missing")
-        require(mask.index("pp->irq_mask[ctrl] |= BIT(bit);") <
-                    mask.index("if (pci->suspended)") <
-                    mask.index("dw_pcie_writel_dbi") and
-                unmask.index("pp->irq_mask[ctrl] &= ~BIT(bit);") <
-                    unmask.index("if (pci->suspended)") <
-                    unmask.index("dw_pcie_writel_dbi") and
-                ack.index("if (pci->suspended)") <
-                    ack.index("dw_pcie_writel_dbi") and
-                "resume path replays it through dw_pcie_msi_init()" in mask,
-                "Suspended DesignWare MSI cache/write ordering guards missing")
-        qcom_resume = qcom_pcie[
-            qcom_pcie.index("static int qcom_pcie_resume_noirq"):
-            qcom_pcie.index("static int qcom_pcie_resume_early")]
-        require("return qcom_pcie_orderly_poweroff_resume(" in qcom_resume,
-                "Awake-off host restore is not routed through resume_noirq")
-        dwc_resume_start = dwc_host.index("int dw_pcie_resume_noirq")
-        dwc_resume = dwc_host[dwc_resume_start:]
-        setup_rc = dwc_host[
-            dwc_host.index("int dw_pcie_setup_rc"):dwc_resume_start]
-        require(dwc_resume.index("dw_pcie_setup_rc(&pci->pp);") <
-                    dwc_resume.index("pci->suspended = false;") and
-                "dw_pcie_msi_init(pp);" in setup_rc,
-                "DesignWare resume does not replay cached MSI masks before clearing suspended")
     if profile == "lpm-platform":
         lpm_source = (source / "drivers/soc/qcom/qcom_lpm_platform_suspend.c").read_text()
         require("#define CONSOLEOS_SM8250_SUSPEND_STATE\t0x4100c244" in lpm_source and
@@ -509,16 +416,6 @@ def apply_patches(repo, source, fix, profile):
             if profile == "consoleos-rc1":
                 rc_dts = root / "sm8250-retroidpocket-rp5-consoleos-rc1.dts"
                 require(rc_dts.is_file(), "Missing ConsoleOS RC1 DTS")
-                rc_dts_text = rc_dts.read_text()
-                for marker in (
-                    "ramoops@9e300000",
-                    'compatible = "ramoops";',
-                    "reg = <0x0 0x9e300000 0x0 0x100000>;",
-                    "record-size = <0x80000>;",
-                    "console-size = <0x80000>;",
-                ):
-                    require(marker in rc_dts_text,
-                            f"Missing RC26 persistent-console DTS marker: {marker}")
                 shutil.copyfile(
                     rc_dts,
                     source / "arch/arm64/boot/dts/qcom" / rc_dts.name,
