@@ -9,7 +9,6 @@
  */
 
 #include "sm8250-retroidpocket-rp5-phase4a-wireless-adsp-pcie-drv.dts"
-#include <dt-bindings/interconnect/qcom,icc.h>
 
 &{/audio-codec} { status = "okay"; };
 &{/multi-ledl1} { status = "okay"; };
@@ -69,10 +68,11 @@
 };
 
 &pcie0 {
-	interconnects = <&aggre2_noc MASTER_PCIE QCOM_ICC_TAG_ALWAYS
-			 &mc_virt SLAVE_EBI_CH0 QCOM_ICC_TAG_ALWAYS>,
-			<&gem_noc MASTER_AMPSS_M0 QCOM_ICC_TAG_ACTIVE_ONLY
-			 &system_noc SLAVE_PCIE_0 QCOM_ICC_TAG_ACTIVE_ONLY>;
+	/* Exact provider handles, endpoints and RPMh tags proven by Phase 4DU.
+	 * Numeric cells keep the otherwise-identical release DTB's phandles stable.
+	 */
+	interconnects = <0x4a 6 7 0x36 1 7>,
+			<0x33 2 3 0x1d8 14 3>;
 	interconnect-names = "pcie-mem", "cpu-pcie";
 
 	pinctrl-names = "default", "sleep";
