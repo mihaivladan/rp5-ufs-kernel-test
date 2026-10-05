@@ -206,6 +206,14 @@ def apply_patches(repo, source, fix, profile):
                 "caf4eafad145953f77de899102d984b36f8f5c7963d9a4b5ae8a1b3b5cac35a0",
                 "Retroid MCU/RGB system PM patch checksum mismatch")
         extra_patches.append(gamepad_pm)
+        fan_startup = (Path(__file__).resolve().parent /
+                       "pwm-fan-configurable-startup.patch")
+        require(fan_startup.is_file(),
+                "Missing configurable PWM-fan startup patch")
+        require(hashlib.sha256(fan_startup.read_bytes()).hexdigest() ==
+                "62c68a6f1fba671148f35ab95175d2c15f5cf930b6d631fef3f9f71ef93fee5b",
+                "PWM-fan startup patch checksum mismatch")
+        extra_patches.append(fan_startup)
     if profile == "lpm-platform":
         lpm_fix = Path(__file__).resolve().parent / "qcom-lpm-platform-suspend.patch"
         require(lpm_fix.is_file(), "Missing exact-state platform suspend patch")
@@ -299,6 +307,14 @@ def apply_patches(repo, source, fix, profile):
                 ".pm = pm_sleep_ptr(&htr3212_pm_ops)," in htr3212 and
                 "regulator_disable(priv->vdd);" in htr3212,
                 "HTR3212 shared-rail PM implementation missing")
+        pwm_fan = (source / "drivers/hwmon/pwm-fan.c").read_text()
+        pwm_fan_binding = (source /
+            "Documentation/devicetree/bindings/hwmon/pwm-fan.yaml").read_text()
+        require("fan-startup-percent" in pwm_fan_binding and
+                'device_property_read_u32(dev, "fan-startup-percent",' in pwm_fan and
+                "state->duty_cycle = 0;" in pwm_fan and
+                "pwm_fan_update_state(ctx, initial_pwm);" in pwm_fan,
+                "Configurable PWM-fan startup implementation missing")
         rpmh_regulator = (source / "drivers/regulator/qcom-rpmh-regulator.c").read_text()
         regulator_core = (source / "drivers/regulator/core.c").read_text()
         required_rpmh = (
@@ -538,8 +554,8 @@ def main():
         ),
         "consoleos_rc1_policy": (
             "Accepted Phase 4AT full stack; shared MCU/RGB/gamepad rail controllable; "
-            "gamepad unbind cleanup; failed/no-effect RPMh, endpoint-off and exact-state "
-            "diagnostics excluded"
+            "gamepad unbind cleanup; RP5 fan silent at kernel probe; failed/no-effect "
+            "RPMh, endpoint-off and exact-state diagnostics excluded"
             if profile == "consoleos-rc1" else None
         ),
         "pm8150b_pdphy_attach_gating": (

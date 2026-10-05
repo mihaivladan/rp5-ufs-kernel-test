@@ -19,7 +19,11 @@
 &{/multi-ledr2} { status = "okay"; };
 &{/multi-ledr3} { status = "okay"; };
 &{/multi-ledr4} { status = "okay"; };
-&{/pwm-fan} { status = "okay"; };
+&{/pwm-fan} {
+	status = "okay";
+	/* Avoid ROCKNIX's fixed PWM 70 probe pulse on this handheld. */
+	fan-startup-percent = <0>;
+};
 &{/sound} { status = "okay"; };
 &{/vdc-5v-regulator} { status = "okay"; };
 &{/vreg-fan-pwr-regulator} { status = "okay"; };

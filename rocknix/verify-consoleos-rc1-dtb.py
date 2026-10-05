@@ -29,6 +29,7 @@ STATUS_NODES = {
     "/soc@0/usb@a6f8800", "/soc@0/usb@a6f8800/usb@a600000",
 }
 PCIE = "/soc@0/pcie@1c00000"
+PWM_FAN = "/pwm-fan"
 MCU_ALWAYS_ON = "/vreg-mcu-3v3-regulator/regulator-always-on"
 PCIE_SLEEP = "/soc@0/pinctrl@f100000/pcie0-sleep-state"
 PCIE_SLEEP_CLKREQ = f"{PCIE_SLEEP}/clkreq-pins"
@@ -36,7 +37,8 @@ STATIC_EXPECTED = {f"{node}/status" for node in STATUS_NODES} | {
     f"{PCIE}/qcom,drv-supported", f"{PCIE}/qcom,drv-dev-id",
     f"{PCIE}/qcom,drv-l1ss-timeout-us", f"{PCIE}/pinctrl-names",
     f"{PCIE}/pinctrl-1", f"{PCIE}/interconnects",
-    f"{PCIE}/interconnect-names", MCU_ALWAYS_ON,
+    f"{PCIE}/interconnect-names", f"{PWM_FAN}/fan-startup-percent",
+    MCU_ALWAYS_ON,
     f"{PCIE_SLEEP}/phandle", f"{PCIE_SLEEP_CLKREQ}/pins",
     f"{PCIE_SLEEP_CLKREQ}/function", f"{PCIE_SLEEP_CLKREQ}/drive-strength",
     f"{PCIE_SLEEP_CLKREQ}/bias-pull-up",
@@ -128,6 +130,8 @@ def main() -> None:
     )
     if candidate[f"{PCIE}/interconnects"] != expected_icc:
         raise SystemExit("wrong PCIe interconnect providers, endpoints or tags")
+    if candidate[f"{PWM_FAN}/fan-startup-percent"] != struct.pack(">I", 0):
+        raise SystemExit("RP5 fan does not request a silent kernel startup")
     if candidate[f"{PCIE}/pinctrl-names"] != b"default\0sleep\0":
         raise SystemExit("wrong PCIe pinctrl state names")
     sleep_phandle = candidate[f"{PCIE_SLEEP}/phandle"]

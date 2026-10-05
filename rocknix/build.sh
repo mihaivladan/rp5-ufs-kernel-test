@@ -53,7 +53,7 @@ fg-coulomb-counter)
     ;;
 consoleos-rc1)
     config_fragment="${kit}/rocknix/consoleos-rc1.config"
-    expected_release='7.2.0-consoleos-rc17-gamepadpm1'
+    expected_release='7.2.0-consoleos-rc17-productpm2'
     artifact_name="rocknix-${expected_release}.tar.zst"
     dtb_name='sm8250-retroidpocket-rp5-consoleos-rc1'
     ;;
@@ -339,6 +339,16 @@ elif sys.argv[2] in ('adsp-no-auto-ab', 'lpass-devote-fix', 'lpass-pm-clock', 'a
         )
         if not all(marker in htr3212 for marker in required_htr3212):
             raise SystemExit('HTR3212 shared-rail PM markers missing')
+        pwm_fan = Path('drivers/hwmon/pwm-fan.c').read_text()
+        pwm_fan_binding = Path(
+            'Documentation/devicetree/bindings/hwmon/pwm-fan.yaml').read_text()
+        required_pwm_fan = (
+            'device_property_read_u32(dev, "fan-startup-percent",',
+            'pwm_fan_update_state(ctx, initial_pwm);',
+        )
+        if not all(marker in pwm_fan for marker in required_pwm_fan) or \
+           'fan-startup-percent' not in pwm_fan_binding:
+            raise SystemExit('Configurable PWM-fan startup markers missing')
 elif sys.argv[2] == 'pcie-drv-handoff':
     required = {
         'CONFIG_PCIE_QCOM=y', 'CONFIG_PCIE_QCOM_DRV=y', 'CONFIG_RPMSG=y',
@@ -664,6 +674,7 @@ fi
 if [[ "${profile}" == consoleos-rc1 ]]; then
     cp drivers/input/joystick/retroid.c drivers/input/joystick/retroid.o "${out}/"
     cp drivers/leds/leds-htr3212.c drivers/leds/leds-htr3212.o "${out}/"
+    cp drivers/hwmon/pwm-fan.c "${out}/"
     cp drivers/regulator/qcom-rpmh-regulator.c drivers/regulator/qcom-rpmh-regulator.o \
         drivers/regulator/core.c "${out}/"
     objdump -drS drivers/input/joystick/retroid.o > "${out}/retroid-gamepad-disassembly.txt"
