@@ -56,7 +56,8 @@
 
 &uart16 {
 	gamepad {
-		vdd-supply = <&vreg_mcu_3v3>;
+		/* Keep the accepted RC17 DTB's existing phandle allocation stable. */
+		vdd-supply = <0x4f>;
 	};
 };
 
