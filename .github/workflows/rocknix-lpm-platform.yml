@@ -1,4 +1,4 @@
-name: ConsoleOS RP5 kernel RC27 awake PCIe idle-cycle discriminator
+name: ConsoleOS RP5 RC17 gamepad and shared-rail PM
 on:
   workflow_dispatch:
   push:
@@ -17,10 +17,10 @@ on:
       - 'rocknix/qcom-pcie-offline-pinctrl.patch'
       - 'rocknix/qcom-fg-gen4-coulomb-counter.patch'
       - 'rocknix/retroid-gamepad-remove.patch'
+      - 'rocknix/retroid-mcu-rgb-system-pm.patch'
       - 'rocknix/qcom-pmic-typec-pdphy-attach-gating.patch'
       - 'rocknix/qca6390-orderly-poweroff.patch'
       - 'rocknix/qcom-pcie-orderly-icc-release.patch'
-      - 'rocknix/qcom-pcie-orderly-idle-cycle.patch'
       - 'rocknix/rpmh-regulator-suspend-state.patch'
       - 'rocknix/regulator-core-s2idle-state-mem.patch'
       - 'rocknix/rpmh-regulator-suspend-trace.patch'
@@ -88,19 +88,19 @@ jobs:
           ccache --zero-stats
           ccache --show-config
           printf 'cache_restore=%s\n' '${{ steps.kernel-compiler-cache.outputs.cache-hit }}'
-      - name: Prepare ConsoleOS RP5 RC27 awake idle-cycle source
+      - name: Prepare ConsoleOS RP5 RC17 gamepad PM source
         run: |
           set -euo pipefail
-          bash rocknix/build.sh prepare 2>&1 | tee rocknix-consoleos-rc27-prepare.log
-      - name: Build ConsoleOS RP5 RC27 kernel and modules
+          bash rocknix/build.sh prepare 2>&1 | tee rocknix-consoleos-rc17-gamepadpm-prepare.log
+      - name: Build ConsoleOS RP5 RC17 gamepad PM kernel and modules
         run: |
           set -euo pipefail
-          bash rocknix/build.sh compile 2>&1 | tee rocknix-consoleos-rc27-compile.log
+          bash rocknix/build.sh compile 2>&1 | tee rocknix-consoleos-rc17-gamepadpm-compile.log
       - name: Report kernel compiler cache
         if: always()
         run: |
           if command -v ccache >/dev/null 2>&1; then
-            ccache --show-stats --verbose | tee rocknix-consoleos-rc27-ccache.log
+            ccache --show-stats --verbose | tee rocknix-consoleos-rc17-gamepadpm-ccache.log
           fi
       - name: Save successful kernel compiler cache
         if: success()
@@ -112,12 +112,12 @@ jobs:
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
-          name: rocknix-rp5-consoleos-rc27-idlecycle
+          name: rocknix-rp5-consoleos-rc17-gamepadpm
           retention-days: 14
           compression-level: 0
           if-no-files-found: error
           path: |
             rocknix-out/
-            rocknix-consoleos-rc27-prepare.log
-            rocknix-consoleos-rc27-compile.log
-            rocknix-consoleos-rc27-ccache.log
+            rocknix-consoleos-rc17-gamepadpm-prepare.log
+            rocknix-consoleos-rc17-gamepadpm-compile.log
+            rocknix-consoleos-rc17-gamepadpm-ccache.log

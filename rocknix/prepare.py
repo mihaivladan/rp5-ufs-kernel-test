@@ -198,14 +198,14 @@ def apply_patches(repo, source, fix, profile):
                 "abdbd431d328d0efcd1acc29aff128f5b8a67163ba51cb1838fedb491bbcf961",
                 "Orderly PCIe ICC release patch checksum mismatch")
         extra_patches.append(orderly_icc)
-        idle_cycle = (Path(__file__).resolve().parent /
-                      "qcom-pcie-orderly-idle-cycle.patch")
-        require(idle_cycle.is_file(),
-                "Missing guarded PCIe0 orderly idle-cycle patch")
-        require(hashlib.sha256(idle_cycle.read_bytes()).hexdigest() ==
-                "4884dff497fa4e7482c29656509a9e0d1acef8aab20bc6df339db386fb15068f",
-                "PCIe0 orderly idle-cycle patch checksum mismatch")
-        extra_patches.append(idle_cycle)
+        gamepad_pm = (Path(__file__).resolve().parent /
+                      "retroid-mcu-rgb-system-pm.patch")
+        require(gamepad_pm.is_file(),
+                "Missing Retroid MCU/RGB system PM patch")
+        require(hashlib.sha256(gamepad_pm.read_bytes()).hexdigest() ==
+                "caf4eafad145953f77de899102d984b36f8f5c7963d9a4b5ae8a1b3b5cac35a0",
+                "Retroid MCU/RGB system PM patch checksum mismatch")
+        extra_patches.append(gamepad_pm)
     if profile == "lpm-platform":
         lpm_fix = Path(__file__).resolve().parent / "qcom-lpm-platform-suspend.patch"
         require(lpm_fix.is_file(), "Missing exact-state platform suspend patch")
@@ -287,8 +287,18 @@ def apply_patches(repo, source, fix, profile):
         require("static void gamepad_mcu_uart_remove(struct serdev_device *serdev)" in gamepad and
                 "device_remove_file(&gamepad_dev->platform_dev->dev," in gamepad and
                 "platform_device_unregister(gamepad_dev->platform_dev);" in gamepad and
-                ".remove = gamepad_mcu_uart_remove," in gamepad,
-                "Retroid gamepad unbind cleanup missing")
+                ".remove = gamepad_mcu_uart_remove," in gamepad and
+                "static int gamepad_mcu_uart_suspend(struct device *dev)" in gamepad and
+                "static int gamepad_mcu_uart_resume(struct device *dev)" in gamepad and
+                "devm_regulator_get(dev, \"vdd\")" in gamepad and
+                ".pm = pm_sleep_ptr(&gamepad_mcu_uart_pm_ops)," in gamepad,
+                "Retroid gamepad lifecycle PM implementation missing")
+        htr3212 = (source / "drivers/leds/leds-htr3212.c").read_text()
+        require("static int htr3212_suspend(struct device *dev)" in htr3212 and
+                "static int htr3212_resume(struct device *dev)" in htr3212 and
+                ".pm = pm_sleep_ptr(&htr3212_pm_ops)," in htr3212 and
+                "regulator_disable(priv->vdd);" in htr3212,
+                "HTR3212 shared-rail PM implementation missing")
         rpmh_regulator = (source / "drivers/regulator/qcom-rpmh-regulator.c").read_text()
         regulator_core = (source / "drivers/regulator/core.c").read_text()
         required_rpmh = (
@@ -348,10 +358,7 @@ def apply_patches(repo, source, fix, profile):
                 "qcom_pcie_orderly_poweroff_arm" in qcom_pcie and
                 "pci_pwrctrl_power_off_devices(pci->dev);" in qcom_pcie and
                 "orderly QCA power-off: root complex suspended, ICC votes zero" in qcom_pcie and
-                "orderly QCA power-off: ICC votes, root complex and endpoint rails restored" in qcom_pcie and
-                "orderly_idle_cycle_ms" in qcom_pcie and
-                "orderly idle cycle: PCIe RC%u handed to ADSP" in qcom_pcie and
-                "orderly idle cycle: PCIe RC%u reclaimed after" in qcom_pcie,
+                "orderly QCA power-off: ICC votes, root complex and endpoint rails restored" in qcom_pcie,
                 "Guarded Qualcomm PCIe orderly power-off markers missing")
     if profile == "lpm-platform":
         lpm_source = (source / "drivers/soc/qcom/qcom_lpm_platform_suspend.c").read_text()

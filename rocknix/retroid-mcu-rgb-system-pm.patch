@@ -1,0 +1,372 @@
+From: ConsoleOS <consoleos@localhost>
+Date: Sun, 5 Oct 2026 00:00:00 +0000
+Subject: [PATCH] input: retroid: own shared MCU rail across system sleep
+
+The Retroid gamepad MCU and both HTR3212 RGB controllers share the switchable
+vreg_mcu_3v3 rail. Keeping their drivers bound while independently dropping
+the rail avoids userspace unbind/rebind, preserves the registered input device
+and lets normal device PM order restore the hardware before applications run.
+
+Make the gamepad an explicit regulator consumer, close and reopen its serdev
+session around system sleep, and re-run the existing MCU startup sequence on
+resume. Add matching HTR3212 PM callbacks so both LED consumers release the
+shared rail and initialise their controllers before LED brightness restoration.
+---
+--- a/drivers/input/joystick/retroid.c
++++ b/drivers/input/joystick/retroid.c
+@@ -18,6 +18,7 @@
+ #include <linux/module.h>
+ #include <linux/moduleparam.h>
+ #include <linux/of.h>
++#include <linux/regulator/consumer.h>
+ #include <linux/serdev.h>
+ #include <linux/slab.h>
+ #include <linux/platform_device.h>
+@@ -62,6 +63,10 @@
+ 	struct gpio_desc *reset_gpio;
+ 	struct input_dev *dev_input;
+ 	struct platform_device *platform_dev;
++	struct regulator *vdd;
++	unsigned long prev_states;
++	bool serial_open;
++	bool vdd_enabled;
+ };
+ 
+ static bool rumble_enable = true;
+@@ -198,7 +203,6 @@
+ static void gamepad_input_handler(struct gamepad_device *dev,
+ 				  struct gamepad_data *data)
+ {
+-	static unsigned long prev_states;
+ 	unsigned long keys = data->data[0] | (data->data[1] << 8);
+ 	unsigned long current_states = keys, changes;
+ 	int i;
+@@ -242,7 +246,8 @@
+ 	}
+ 
+ 
+-	bitmap_xor(&changes, &current_states, &prev_states, ARRAY_SIZE(keymap));
++	bitmap_xor(&changes, &current_states, &dev->prev_states,
++		   ARRAY_SIZE(keymap));
+ 
+ 	for_each_set_bit(i, &changes, ARRAY_SIZE(keymap)) {
+ 		input_report_key(indev, keymap[i], (current_states & BIT(i)));
+@@ -279,7 +284,7 @@
+ 			 ( abs(value) < axis_righty_deadzone )? 0 : INT_SIGN(value) * ( abs(value) - axis_righty_antideadzone ));
+ 
+ 	input_sync(indev);
+-	prev_states = keys;
++	dev->prev_states = keys;
+ }
+ 
+ static void gamepad_data_handler(struct serdev_device *serdev,
+@@ -367,7 +372,42 @@
+ }
+ 
+ static DEVICE_ATTR_RW(rumble_enable);
++
++static void gamepad_mcu_disable(void *data)
++{
++	struct gamepad_device *gamepad_dev = data;
++	struct serdev_device *serdev = to_serdev_device(gamepad_dev->dev);
++
++	if (gamepad_dev->serial_open) {
++		serdev_device_close(serdev);
++		gamepad_dev->serial_open = false;
++	}
++
++	if (gamepad_dev->reset_gpio)
++		gpiod_set_value_cansleep(gamepad_dev->reset_gpio, 0);
++	if (gamepad_dev->enable_gpio)
++		gpiod_set_value_cansleep(gamepad_dev->enable_gpio, 0);
++	if (gamepad_dev->boot_gpio)
++		gpiod_set_value_cansleep(gamepad_dev->boot_gpio, 0);
++
++	if (gamepad_dev->vdd_enabled) {
++		regulator_disable(gamepad_dev->vdd);
++		gamepad_dev->vdd_enabled = false;
++	}
++}
+ 
++static int gamepad_mcu_enable_supply(struct gamepad_device *gamepad_dev)
++{
++	int ret;
++
++	ret = regulator_enable(gamepad_dev->vdd);
++	if (ret)
++		return ret;
++
++	gamepad_dev->vdd_enabled = true;
++	return 0;
++}
++
+ static int gamepad_mcu_uart_probe(struct serdev_device *serdev)
+ {
+ 	struct device *dev = &serdev->dev;
+@@ -381,26 +421,42 @@
+ 	gamepad_dev = devm_kzalloc(dev, sizeof(*gamepad_dev), GFP_KERNEL);
+ 	if (!gamepad_dev)
+ 		return dev_err_probe(dev, -ENOMEM, "could not allocate memory for device data\n");
++	gamepad_dev->dev = dev;
+ 
++	gamepad_dev->vdd = devm_regulator_get(dev, "vdd");
++	if (IS_ERR(gamepad_dev->vdd))
++		return dev_err_probe(dev, PTR_ERR(gamepad_dev->vdd),
++				     "Unable to get MCU supply\n");
++
++	ret = gamepad_mcu_enable_supply(gamepad_dev);
++	if (ret)
++		return dev_err_probe(dev, ret, "Unable to enable MCU supply\n");
++	ret = devm_add_action_or_reset(dev, gamepad_mcu_disable, gamepad_dev);
++	if (ret)
++		return ret;
++
+ 	gamepad_dev->boot_gpio =
+ 		devm_gpiod_get_optional(dev, "boot", GPIOD_OUT_HIGH);
+ 	if (IS_ERR(gamepad_dev->boot_gpio)) {
+ 		ret = PTR_ERR(gamepad_dev->boot_gpio);
+-		dev_warn(dev, "Unable to get boot gpio: %d\n", ret);
++		gamepad_dev->boot_gpio = NULL;
++		return dev_err_probe(dev, ret, "Unable to get boot gpio\n");
+ 	}
+ 
+ 	gamepad_dev->enable_gpio =
+ 		devm_gpiod_get_optional(dev, "enable", GPIOD_OUT_HIGH);
+ 	if (IS_ERR(gamepad_dev->enable_gpio)) {
+ 		ret = PTR_ERR(gamepad_dev->enable_gpio);
+-		dev_warn(dev, "Unable to get enable gpio: %d\n", ret);
++		gamepad_dev->enable_gpio = NULL;
++		return dev_err_probe(dev, ret, "Unable to get enable gpio\n");
+ 	}
+ 
+ 	gamepad_dev->reset_gpio =
+ 		devm_gpiod_get_optional(dev, "reset", GPIOD_OUT_HIGH);
+ 	if (IS_ERR(gamepad_dev->reset_gpio)) {
+ 		ret = PTR_ERR(gamepad_dev->reset_gpio);
+-		dev_warn(dev, "Unable to get reset gpio: %d\n", ret);
++		gamepad_dev->reset_gpio = NULL;
++		return dev_err_probe(dev, ret, "Unable to get reset gpio\n");
+ 	}
+ 
+ 	if (gamepad_dev->boot_gpio)
+@@ -419,10 +475,10 @@
+ 
+ 	msleep(100);
+ 
+-	ret = devm_serdev_device_open(dev, serdev);
++	ret = serdev_device_open(serdev);
+ 	if (ret)
+ 		return dev_err_probe(dev, ret, "Unable to open UART device\n");
+-	gamepad_dev->dev = dev;
++	gamepad_dev->serial_open = true;
+ 
+ 	serdev_device_set_drvdata(serdev, gamepad_dev);
+ 
+@@ -525,6 +581,66 @@
+ 	gamepad_dev->platform_dev = NULL;
+ }
+ 
++static int gamepad_mcu_uart_suspend(struct device *dev)
++{
++	struct serdev_device *serdev = to_serdev_device(dev);
++	struct gamepad_device *gamepad_dev = serdev_device_get_drvdata(serdev);
++	int enabled;
++
++	input_reset_device(gamepad_dev->dev_input);
++	gamepad_dev->prev_states = 0;
++	gamepad_mcu_disable(gamepad_dev);
++
++	enabled = regulator_is_enabled(gamepad_dev->vdd);
++	dev_dbg(dev, "MCU suspended, shared rail enabled=%d\n", enabled);
++	return 0;
++}
++
++static int gamepad_mcu_uart_resume(struct device *dev)
++{
++	struct serdev_device *serdev = to_serdev_device(dev);
++	struct gamepad_device *gamepad_dev = serdev_device_get_drvdata(serdev);
++	int ret;
++
++	ret = gamepad_mcu_enable_supply(gamepad_dev);
++	if (ret)
++		return dev_err_probe(dev, ret, "Unable to restore MCU supply\n");
++
++	if (gamepad_dev->boot_gpio)
++		gpiod_set_value_cansleep(gamepad_dev->boot_gpio, 0);
++	if (gamepad_dev->reset_gpio)
++		gpiod_set_value_cansleep(gamepad_dev->reset_gpio, 0);
++	if (gamepad_dev->enable_gpio)
++		gpiod_set_value_cansleep(gamepad_dev->enable_gpio, 0);
++	msleep(100);
++	if (gamepad_dev->enable_gpio)
++		gpiod_set_value_cansleep(gamepad_dev->enable_gpio, 1);
++	if (gamepad_dev->reset_gpio)
++		gpiod_set_value_cansleep(gamepad_dev->reset_gpio, 1);
++	msleep(100);
++
++	ret = serdev_device_open(serdev);
++	if (ret)
++		goto err_disable;
++	gamepad_dev->serial_open = true;
++
++	ret = serdev_device_set_baudrate(serdev, 115200);
++	if (ret < 0)
++		goto err_disable;
++	serdev_device_set_flow_control(serdev, false);
++	serdev_device_set_client_ops(serdev, &gamepad_mcu_uart_client_ops);
++	gamepad_send_init_sequence(serdev);
++	return 0;
++
++err_disable:
++	gamepad_mcu_disable(gamepad_dev);
++	return dev_err_probe(dev, ret, "Unable to restore MCU UART\n");
++}
++
++static DEFINE_SIMPLE_DEV_PM_OPS(gamepad_mcu_uart_pm_ops,
++				 gamepad_mcu_uart_suspend,
++				 gamepad_mcu_uart_resume);
++
+ static const struct of_device_id gamepad_mcu_uart_of_match[] = {
+ 	{ .compatible = "retroid,retroid-pocket-gamepad" },
+ 	{}
+@@ -535,6 +651,7 @@
+ 	.driver = {
+ 		.name = DRIVER_NAME,
+ 		.of_match_table = gamepad_mcu_uart_of_match,
++		.pm = pm_sleep_ptr(&gamepad_mcu_uart_pm_ops),
+ 	},
+ 	.probe = gamepad_mcu_uart_probe,
+ 	.remove = gamepad_mcu_uart_remove,
+--- a/drivers/leds/leds-htr3212.c
++++ b/drivers/leds/leds-htr3212.c
+@@ -38,6 +38,7 @@
+ 	unsigned int num_leds;
+ 	struct gpio_desc *sdb;
+ 	struct regulator *vdd;
++	bool powered;
+ 	struct htr3212_led_data leds[];
+ };
+ 
+@@ -210,7 +211,63 @@
+ };
+ 
+ MODULE_DEVICE_TABLE(of, of_htr3212_match);
++
++static int htr3212_power_on(struct htr3212_priv *priv)
++{
++	int ret;
++
++	ret = regulator_enable(priv->vdd);
++	if (ret)
++		return ret;
++
++	priv->powered = true;
++	gpiod_set_value_cansleep(priv->sdb, 1);
++	usleep_range(10000, 11000);
++
++	ret = htr3212_init_regs(priv);
++	if (!ret)
++		return 0;
++
++	gpiod_set_value_cansleep(priv->sdb, 0);
++	regulator_disable(priv->vdd);
++	priv->powered = false;
++	return ret;
++}
++
++static int htr3212_power_off(struct htr3212_priv *priv)
++{
++	int ret;
++
++	if (!priv->powered)
++		return 0;
++
++	ret = htr3212_reset_regs(priv);
++	if (ret)
++		dev_warn(&priv->client->dev,
++			 "Failed to reset registers before power-off (%pe)\n",
++			 ERR_PTR(ret));
++
++	gpiod_set_value_cansleep(priv->sdb, 0);
++	ret = regulator_disable(priv->vdd);
++	if (!ret)
++		priv->powered = false;
++
++	return ret;
++}
+ 
++static int htr3212_suspend(struct device *dev)
++{
++	return htr3212_power_off(dev_get_drvdata(dev));
++}
++
++static int htr3212_resume(struct device *dev)
++{
++	return htr3212_power_on(dev_get_drvdata(dev));
++}
++
++static DEFINE_SIMPLE_DEV_PM_OPS(htr3212_pm_ops,
++				 htr3212_suspend, htr3212_resume);
++
+ static int htr3212_probe(struct i2c_client *client)
+ {
+ 	struct device *dev = &client->dev;
+@@ -237,24 +294,18 @@
+ 		return ret;
+ 	}
+ 
+-	ret = regulator_enable(priv->vdd);
+-	if (ret < 0) {
+-		return ret;
+-	}
+-
+-	gpiod_set_value_cansleep(priv->sdb, 1);
+-	usleep_range(10000, 11000);
+-
+ 	priv->client = client;
+ 	i2c_set_clientdata(client, priv);
+ 
+-	ret = htr3212_init_regs(priv);
++	ret = htr3212_power_on(priv);
+ 	if (ret)
+ 		return ret;
+ 
+ 	ret = htr3212_parse_dt(dev, priv);
+-	if (ret)
++	if (ret) {
++		htr3212_power_off(priv);
+ 		return ret;
++	}
+ 
+ 	return 0;
+ }
+@@ -262,16 +313,8 @@
+ static void htr3212_remove(struct i2c_client *client)
+ {
+ 	struct htr3212_priv *priv = i2c_get_clientdata(client);
+-	int ret;
+-
+-	ret = htr3212_reset_regs(priv);
+-	if (ret)
+-		dev_err(&client->dev, "Failed to reset registers on removal (%pe)\n",
+-			ERR_PTR(ret));
+-
+-	gpiod_set_value_cansleep(priv->sdb, 0);
+-
+-	regulator_disable(priv->vdd);
++	if (htr3212_power_off(priv))
++		dev_err(&client->dev, "Failed to power off on removal\n");
+ }
+ 
+ static const struct i2c_device_id htr3212_id[] = {
+@@ -285,6 +328,7 @@
+ 	.driver = {
+ 		.name	= "htr3212",
+ 		.of_match_table = of_htr3212_match,
++		.pm = pm_sleep_ptr(&htr3212_pm_ops),
+ 	},
+ 	.probe		= htr3212_probe,
+ 	.remove		= htr3212_remove,
+-- 
+2.51.0
+

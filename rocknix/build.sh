@@ -53,7 +53,7 @@ fg-coulomb-counter)
     ;;
 consoleos-rc1)
     config_fragment="${kit}/rocknix/consoleos-rc1.config"
-    expected_release='7.2.0-consoleos-rc27-idlecycle'
+    expected_release='7.2.0-consoleos-rc17-gamepadpm1'
     artifact_name="rocknix-${expected_release}.tar.zst"
     dtb_name='sm8250-retroidpocket-rp5-consoleos-rc1'
     ;;
@@ -323,9 +323,22 @@ elif sys.argv[2] in ('adsp-no-auto-ab', 'lpass-devote-fix', 'lpass-pm-clock', 'a
             'device_remove_file(&gamepad_dev->platform_dev->dev,',
             'platform_device_unregister(gamepad_dev->platform_dev);',
             '.remove = gamepad_mcu_uart_remove,',
+            'static int gamepad_mcu_uart_suspend(struct device *dev)',
+            'static int gamepad_mcu_uart_resume(struct device *dev)',
+            'devm_regulator_get(dev, "vdd")',
+            '.pm = pm_sleep_ptr(&gamepad_mcu_uart_pm_ops),',
         )
         if not all(marker in gamepad for marker in required_gamepad):
-            raise SystemExit('Retroid gamepad unbind cleanup markers missing')
+            raise SystemExit('Retroid gamepad lifecycle PM markers missing')
+        htr3212 = Path('drivers/leds/leds-htr3212.c').read_text()
+        required_htr3212 = (
+            'static int htr3212_suspend(struct device *dev)',
+            'static int htr3212_resume(struct device *dev)',
+            '.pm = pm_sleep_ptr(&htr3212_pm_ops),',
+            'regulator_disable(priv->vdd);',
+        )
+        if not all(marker in htr3212 for marker in required_htr3212):
+            raise SystemExit('HTR3212 shared-rail PM markers missing')
 elif sys.argv[2] == 'pcie-drv-handoff':
     required = {
         'CONFIG_PCIE_QCOM=y', 'CONFIG_PCIE_QCOM_DRV=y', 'CONFIG_RPMSG=y',
@@ -548,7 +561,7 @@ elif [[ "${profile}" == consoleos-rc1 ]]; then
     cd "${out}"
     sha256sum "${dtb_name}.dtb" > CONSOLEOS-RC1-DTB-SHA256SUMS
     printf '%s\n' \
-        'ConsoleOS RC27 built: RC17 plus an opt-in awake ADSP-owned PCIe idle-cycle discriminator. Not installed or boot-tested.' \
+        'ConsoleOS RC17 gamepad PM built: exact RC17 plus bound-driver MCU/RGB shared-rail lifecycle. Not installed or boot-tested.' \
         > BUILD-SUCCESS.txt
     cd "${source_dir}"
 elif [[ "${profile}" == slpi-integrated ]]; then
@@ -650,9 +663,11 @@ if [[ "${profile}" == fg-coulomb-counter || "${profile}" == consoleos-rc1 ]]; th
 fi
 if [[ "${profile}" == consoleos-rc1 ]]; then
     cp drivers/input/joystick/retroid.c drivers/input/joystick/retroid.o "${out}/"
+    cp drivers/leds/leds-htr3212.c drivers/leds/leds-htr3212.o "${out}/"
     cp drivers/regulator/qcom-rpmh-regulator.c drivers/regulator/qcom-rpmh-regulator.o \
         drivers/regulator/core.c "${out}/"
     objdump -drS drivers/input/joystick/retroid.o > "${out}/retroid-gamepad-disassembly.txt"
+    objdump -drS drivers/leds/leds-htr3212.o > "${out}/htr3212-disassembly.txt"
     objdump -drS drivers/regulator/qcom-rpmh-regulator.o \
         > "${out}/qcom-rpmh-regulator-disassembly.txt"
     cp drivers/usb/typec/tcpm/qcom/qcom_pmic_typec_pdphy.c \

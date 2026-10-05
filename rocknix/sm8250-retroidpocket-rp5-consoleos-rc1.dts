@@ -54,6 +54,12 @@
 	/delete-property/ regulator-always-on;
 };
 
+&uart16 {
+	gamepad {
+		vdd-supply = <&vreg_mcu_3v3>;
+	};
+};
+
 &tlmm {
 	pcie0-sleep-state {
 		phandle = <0x10000>;

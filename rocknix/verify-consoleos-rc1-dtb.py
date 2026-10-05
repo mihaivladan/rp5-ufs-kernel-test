@@ -32,7 +32,7 @@ PCIE = "/soc@0/pcie@1c00000"
 MCU_ALWAYS_ON = "/vreg-mcu-3v3-regulator/regulator-always-on"
 PCIE_SLEEP = "/soc@0/pinctrl@f100000/pcie0-sleep-state"
 PCIE_SLEEP_CLKREQ = f"{PCIE_SLEEP}/clkreq-pins"
-EXPECTED = {f"{node}/status" for node in STATUS_NODES} | {
+STATIC_EXPECTED = {f"{node}/status" for node in STATUS_NODES} | {
     f"{PCIE}/qcom,drv-supported", f"{PCIE}/qcom,drv-dev-id",
     f"{PCIE}/qcom,drv-l1ss-timeout-us", f"{PCIE}/pinctrl-names",
     f"{PCIE}/pinctrl-1", f"{PCIE}/interconnects",
@@ -85,14 +85,24 @@ def main() -> None:
     if len(sys.argv) != 3:
         raise SystemExit("usage: verify-consoleos-rc1-dtb.py PHASE4A_BASE RC1")
     base, candidate = parse(Path(sys.argv[1])), parse(Path(sys.argv[2]))
+    gamepad_compat = b"retroid,retroid-pocket-gamepad\0"
+    gamepad_nodes = {
+        key.removesuffix("/compatible")
+        for key, value in base.items()
+        if key.endswith("/compatible") and value == gamepad_compat
+    }
+    if len(gamepad_nodes) != 1:
+        raise SystemExit(f"expected one Retroid gamepad node, got {sorted(gamepad_nodes)}")
+    gamepad = gamepad_nodes.pop()
+    expected = STATIC_EXPECTED | {f"{gamepad}/vdd-supply"}
     fixed_sleep_phandle = struct.pack(">I", 0x10000)
     if any(key.endswith("/phandle") and value == fixed_sleep_phandle
            for key, value in base.items()):
         raise SystemExit("reserved PCIe sleep phandle collides with base tree")
     changed = {key for key in base.keys() | candidate.keys()
                if base.get(key) != candidate.get(key)}
-    if changed != EXPECTED:
-        missing, extra = EXPECTED - changed, changed - EXPECTED
+    if changed != expected:
+        missing, extra = expected - changed, changed - expected
         raise SystemExit(f"wrong RC1 delta; missing={sorted(missing)} extra={sorted(extra)}")
     for node in STATUS_NODES:
         key = f"{node}/status"
@@ -138,13 +148,16 @@ def main() -> None:
         raise SystemExit("PCIe default CLKREQ mux was altered")
     if MCU_ALWAYS_ON not in base or MCU_ALWAYS_ON in candidate:
         raise SystemExit("MCU/RGB rail was not changed from always-on to controllable")
+    rail_phandle = candidate["/vreg-mcu-3v3-regulator/phandle"]
+    if candidate[f"{gamepad}/vdd-supply"] != rail_phandle:
+        raise SystemExit("gamepad is not a consumer of the shared MCU/RGB rail")
     for node in (
         "/soc@0/crypto@1dfa000", "/soc@0/remoteproc@5c00000",
         "/soc@0/remoteproc@8300000", "/soc@0/video-codec@aa00000",
     ):
         if status(candidate[f"{node}/status"]) != b"disabled":
             raise SystemExit(f"unvalidated subsystem enabled: {node}")
-    print("VERIFIED: RC1 full stack plus controllable MCU/RGB rail and exact GPIO80 sleep/default pinctrl")
+    print("VERIFIED: RC17 full stack plus bound-driver MCU/RGB rail PM and exact GPIO80 pinctrl")
 
 
 if __name__ == "__main__":
