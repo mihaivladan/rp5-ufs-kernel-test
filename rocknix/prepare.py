@@ -211,7 +211,7 @@ def apply_patches(repo, source, fix, profile):
         require(fan_startup.is_file(),
                 "Missing configurable PWM-fan startup patch")
         require(hashlib.sha256(fan_startup.read_bytes()).hexdigest() ==
-                "62c68a6f1fba671148f35ab95175d2c15f5cf930b6d631fef3f9f71ef93fee5b",
+                "7353398d93dac4db25363a7bc09e6b519f24aeb609f5061a02d037bd63b0eee7",
                 "PWM-fan startup patch checksum mismatch")
         extra_patches.append(fan_startup)
     if profile == "lpm-platform":
