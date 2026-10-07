@@ -134,6 +134,76 @@ read -r -a host_cc_command <<< "${host_cc}"
 "${host_cc_command[@]}" -O2 -Wall -Wextra -Werror \
     "${kit}/rocknix/consoleos-early-splash.c" \
     -o "${early_splash_overlay}/usr/bin/consoleos-early-splash"
+# Start the continuity helper as soon as devtmpfs/sysfs and /run exist.  It
+# snapshots the firmware-owned simpledrm framebuffer, waits for msm-drm fbdev,
+# redraws the same pixels, and exits before userspace starts Sway.  Keep stdout
+# and stderr detached from /dev/console: normal boot must not write text over
+# the retained firmware frame.
+cpio -i --quiet --to-stdout init < "${work}/initramfs.cpio" \
+    > "${early_splash_overlay}/init"
+python3 - "${early_splash_overlay}/init" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+source = path.read_text()
+marker = "/usr/bin/busybox mount -t tmpfs -o mode=755,size=20%,nr_inodes=800k,nosuid,nodev,strictatime tmpfs /run\n"
+insertion = marker + """
+
+# Preserve the firmware framebuffer through the simpledrm -> msm-drm handoff.
+# This helper never writes to the console and is deliberately independent of
+# /flash, SYSTEM, branding assets and the later compositor.
+/usr/bin/consoleos-early-splash --handoff >/dev/null 2>&1 &
+CONSOLEOS_EARLY_DISPLAY_PID=$!
+"""
+if source.count(marker) != 1:
+    raise SystemExit("Expected one initramfs /run mount marker")
+source = source.replace(marker, insertion)
+console = """exec 1>/dev/console
+exec 2>/dev/null
+"""
+console_guard = """case " $(cat /proc/cmdline) " in
+  *" consoleos_display_handoff=1 "*)
+    # Deferred fbcon takeover only works if normal initramfs boot is silent.
+    exec 1>/dev/null
+    exec 2>/dev/null
+    ;;
+  *)
+    exec 1>/dev/console
+    exec 2>/dev/null
+    ;;
+esac
+"""
+if source.count(console) != 1:
+    raise SystemExit("Expected one initramfs console redirection block")
+source = source.replace(console, console_guard)
+early_clear = """. /device.init 2>/dev/null
+
+# Get a serial number"""
+guarded_clear = """. /device.init 2>/dev/null
+
+case " $(cat /proc/cmdline) " in
+  *" consoleos_display_handoff=1 "*) ;;
+  *) clear >/dev/console ;;
+esac
+
+# Get a serial number"""
+if source.count(early_clear) != 1:
+    raise SystemExit("Expected one initramfs early-clear insertion point")
+source = source.replace(early_clear, guarded_clear)
+# Remove the now-redundant unconditional early clear below MACHINE_UID.
+unconditional = """[ -z "${MACHINE_UID}" ] && MACHINE_UID="$(cat /sys/class/net/eth0/address 2>/dev/null | tr -d :)"
+
+clear >/dev/console
+"""
+replacement = """[ -z "${MACHINE_UID}" ] && MACHINE_UID="$(cat /sys/class/net/eth0/address 2>/dev/null | tr -d :)"
+"""
+if source.count(unconditional) != 1:
+    raise SystemExit("Expected one unconditional initramfs clear")
+path.write_text(source.replace(unconditional, replacement))
+PY
+chmod 0755 "${early_splash_overlay}/init" \
+    "${early_splash_overlay}/usr/bin/consoleos-early-splash"
 (
     cd "${early_splash_overlay}"
     find . -print0 | LC_ALL=C sort -z | \
