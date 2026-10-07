@@ -1,4 +1,4 @@
-name: ConsoleOS RP5 RC17 product PM
+name: ConsoleOS RP5 RC17 early splash
 on:
   workflow_dispatch:
   push:
@@ -7,6 +7,7 @@ on:
       - '.github/workflows/rocknix-lpm-platform.yml'
       - 'rocknix/build.sh'
       - 'rocknix/prepare.py'
+      - 'rocknix/consoleos-early-splash.c'
       - 'rocknix/consoleos-rc1.config'
       - 'rocknix/CONSOLEOS-RC1.md'
       - 'rocknix/sm8250-adsp-no-auto-boot.patch'
@@ -89,11 +90,11 @@ jobs:
           ccache --zero-stats
           ccache --show-config
           printf 'cache_restore=%s\n' '${{ steps.kernel-compiler-cache.outputs.cache-hit }}'
-      - name: Prepare ConsoleOS RP5 RC17 product PM source
+      - name: Prepare ConsoleOS RP5 RC17 early-splash source
         run: |
           set -euo pipefail
           bash rocknix/build.sh prepare 2>&1 | tee rocknix-consoleos-rc17-productpm2-prepare.log
-      - name: Build ConsoleOS RP5 RC17 product PM kernel and modules
+      - name: Build ConsoleOS RP5 RC17 early-splash kernel and modules
         run: |
           set -euo pipefail
           bash rocknix/build.sh compile 2>&1 | tee rocknix-consoleos-rc17-productpm2-compile.log
@@ -113,7 +114,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
-          name: rocknix-rp5-consoleos-rc17-productpm2
+          name: rocknix-rp5-consoleos-rc17-early-splash1
           retention-days: 14
           compression-level: 0
           if-no-files-found: error

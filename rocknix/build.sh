@@ -128,6 +128,19 @@ echo 'f9fef3d14c0df53819026f4be74459835c2a0b0dcbf5b5bbd9ea19f0829402b3  linux.ta
 tar -xf linux.tar.xz
 source_dir="${work}/linux-7.2"
 python3 "${kit}/rocknix/prepare.py" release.tar "${work}" "${source_dir}" "${kit}/upstream-rocknix" "${out}"
+early_splash_overlay="${work}/consoleos-early-splash-overlay"
+mkdir -p "${early_splash_overlay}/usr/bin"
+read -r -a host_cc_command <<< "${host_cc}"
+"${host_cc_command[@]}" -O2 -Wall -Wextra -Werror \
+    "${kit}/rocknix/consoleos-early-splash.c" \
+    -o "${early_splash_overlay}/usr/bin/consoleos-early-splash"
+(
+    cd "${early_splash_overlay}"
+    find . -print0 | LC_ALL=C sort -z | \
+        cpio --null -o -H newc --quiet >> "${work}/initramfs.cpio"
+)
+sha256sum "${early_splash_overlay}/usr/bin/consoleos-early-splash" \
+    > "${out}/consoleos-early-splash.sha256"
 bash "${source_dir}/scripts/extract-ikconfig" "${work}/KERNEL" > "${out}/stock.config"
 unsquashfs -d "${work}/stock-root" "${work}/SYSTEM" usr/lib/kernel-overlays/base/lib/firmware
 cd "${source_dir}"
