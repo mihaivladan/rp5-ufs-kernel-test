@@ -16,6 +16,27 @@ The output is a distinct `7.2.0-consoleos-diag-ufs1` package with a raw ARM64 Im
 
 The extra diagnostics do not provide electrical power measurements for every component, and the UFS fix is not yet proven to meet the RP5 standby target. First verify boot/storage/audio, then clock-reference balance and suspend residency, then battery drain.
 
+## Early boot-display profiles
+
+The initramfs early-display helper is built once per SoC-family kernel, not
+once per panel. Device geometry is generated from the ConsoleOS platform
+manifest into `boot-display/profiles/<profile-id>/device.cfg` and
+`logo.bgra`. `generate-early-display-profiles.py` embeds a table of all of
+those profiles in the helper.
+
+At runtime the helper selects exactly one profile using the exact
+NUL-separated strings in `/proc/device-tree/compatible`, then validates the
+live fbdev width, height, byte stride, 32-bit channel layout and logo bounds.
+A missing, ambiguous or mismatched profile fails open without drawing. Do not
+add a generic SoC compatible as a device identifier and do not restore
+compile-time geometry macros. The firmware/GOP stride and Linux fbdev stride
+are separate profile fields: RP5's measured DRM fbdev pitch is 4352 bytes
+(`XR24`), while its continuous-splash framebuffer pitch is 4320 bytes.
+
+To add a device, add its `boot_display.device_tree_compatibles` and geometry
+to the platform manifest, generate its profile directory, rebuild, and run
+the UEFI test-mode Boot 0 on that physical device before promotion.
+
 ## GPU stale RPMh vote fix
 
 The `gpu-rpmh-fix` profile applies upstream commit `d9108bfdb746`,

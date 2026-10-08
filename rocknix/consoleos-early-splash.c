@@ -26,26 +26,30 @@
 #define POLL_NS 20000000L
 #define CAPTURE_ATTEMPTS 250
 #define HANDOFF_ATTEMPTS 500
-#define LOGO_ASSET "/usr/share/consoleos/boot-display/logo.bgra"
+#define DT_COMPATIBLE_PATH "/proc/device-tree/compatible"
+#define DT_COMPATIBLE_MAX 4096U
+#define BOOT_DISPLAY_MAX_COMPATIBLES 16U
 
-#ifndef CONSOLEOS_NATIVE_WIDTH
-#error CONSOLEOS_NATIVE_WIDTH must come from generated device.cfg
-#endif
-#ifndef CONSOLEOS_NATIVE_HEIGHT
-#error CONSOLEOS_NATIVE_HEIGHT must come from generated device.cfg
-#endif
-#ifndef CONSOLEOS_LOGO_X
-#error CONSOLEOS_LOGO_X must come from generated device.cfg
-#endif
-#ifndef CONSOLEOS_LOGO_Y
-#error CONSOLEOS_LOGO_Y must come from generated device.cfg
-#endif
-#ifndef CONSOLEOS_LOGO_WIDTH
-#error CONSOLEOS_LOGO_WIDTH must come from generated device.cfg
-#endif
-#ifndef CONSOLEOS_LOGO_HEIGHT
-#error CONSOLEOS_LOGO_HEIGHT must come from generated device.cfg
-#endif
+enum boot_display_pixel_format {
+	BOOT_DISPLAY_XRGB8888 = 1,
+};
+
+struct boot_display_profile {
+	const char *profile_id;
+	const char *compatibles[BOOT_DISPLAY_MAX_COMPATIBLES];
+	unsigned int compatible_count;
+	unsigned int native_width;
+	unsigned int native_height;
+	unsigned int native_stride_bytes;
+	enum boot_display_pixel_format pixel_format;
+	unsigned int logo_x;
+	unsigned int logo_y;
+	unsigned int logo_width;
+	unsigned int logo_height;
+	const char *logo_path;
+};
+
+#include "consoleos-early-display-profiles.h"
 
 struct framebuffer {
 	struct fb_fix_screeninfo fix;
@@ -99,6 +103,87 @@ struct activation_result {
 	int mode_matches;
 	int connector_enabled;
 };
+
+static int compatible_present(const uint8_t *property, size_t property_size,
+			      const char *expected)
+{
+	size_t offset = 0;
+	size_t expected_length = strlen(expected);
+
+	while (offset < property_size) {
+		size_t remaining = property_size - offset;
+		size_t length = strnlen((const char *)property + offset, remaining);
+
+		if (length == remaining)
+			return 0;
+		if (length == expected_length &&
+		    !memcmp(property + offset, expected, length))
+			return 1;
+		offset += length + 1U;
+	}
+	return 0;
+}
+
+static const struct boot_display_profile *select_display_profile(FILE *log)
+{
+	const struct boot_display_profile *selected = NULL;
+	uint8_t compatible[DT_COMPATIBLE_MAX];
+	ssize_t length;
+	size_t profile_index;
+	int fd;
+
+	fd = open(DT_COMPATIBLE_PATH, O_RDONLY | O_CLOEXEC);
+	if (fd < 0)
+		goto fail;
+	length = read(fd, compatible, sizeof(compatible));
+	close(fd);
+	if (length <= 0 || length == (ssize_t)sizeof(compatible))
+		goto fail;
+
+	for (profile_index = 0;
+	     profile_index < CONSOLEOS_DISPLAY_PROFILE_COUNT;
+	     profile_index++) {
+		const struct boot_display_profile *candidate =
+			&consoleos_display_profiles[profile_index];
+		unsigned int compatible_index;
+		int matched = 0;
+
+		for (compatible_index = 0;
+		     compatible_index < candidate->compatible_count;
+		     compatible_index++) {
+			if (compatible_present(compatible, (size_t)length,
+					       candidate->compatibles[compatible_index])) {
+				matched = 1;
+				break;
+			}
+		}
+		if (!matched)
+			continue;
+		if (selected) {
+			if (log)
+				fprintf(log, "profile-ambiguous first=%s second=%s\n",
+					selected->profile_id, candidate->profile_id);
+			return NULL;
+		}
+		selected = candidate;
+	}
+	if (log) {
+		if (selected)
+			fprintf(log, "profile-selected id=%s\n", selected->profile_id);
+		else
+			fprintf(log, "profile-no-compatible-match\n");
+		fflush(log);
+	}
+	return selected;
+
+fail:
+	if (log) {
+		fprintf(log, "profile-selection-failed path=%s errno=%d\n",
+			DT_COMPATIBLE_PATH, errno);
+		fflush(log);
+	}
+	return NULL;
+}
 
 static uint32_t channel(uint8_t value, const struct fb_bitfield *field)
 {
@@ -315,7 +400,8 @@ static int capture_rgb(const struct framebuffer *fb, uint8_t **rgb_out)
 	return 0;
 }
 
-static int read_logo_asset(uint8_t **pixels_out)
+static int read_logo_asset(const struct boot_display_profile *profile,
+			   uint8_t **pixels_out)
 {
 	static const uint8_t magic[8] = { 'R', 'D', 'K', 'L', 'O', 'G', 'O', '1' };
 	struct logo_header header;
@@ -324,14 +410,14 @@ static int read_logo_asset(uint8_t **pixels_out)
 	int fd = -1;
 	int result = -1;
 
-	fd = open(LOGO_ASSET, O_RDONLY | O_CLOEXEC);
+	fd = open(profile->logo_path, O_RDONLY | O_CLOEXEC);
 	if (fd < 0 || fstat(fd, &status) < 0 ||
 	    read(fd, &header, sizeof(header)) != (ssize_t)sizeof(header))
 		goto out;
 	if (memcmp(header.magic, magic, sizeof(magic)) ||
 	    header.header_bytes != sizeof(header) || header.format != 1 ||
-	    header.width != CONSOLEOS_LOGO_WIDTH ||
-	    header.height != CONSOLEOS_LOGO_HEIGHT ||
+	    header.width != profile->logo_width ||
+	    header.height != profile->logo_height ||
 	    header.payload_bytes !=
 		(size_t)header.width * header.height * 4U ||
 	    status.st_size != (off_t)(sizeof(header) + header.payload_bytes))
@@ -351,7 +437,28 @@ out:
 	return result;
 }
 
-static int draw_redika(struct framebuffer *fb, const uint8_t *logo,
+static int framebuffer_matches_profile(const struct framebuffer *fb,
+				       const struct boot_display_profile *profile)
+{
+	if (!usable_format(fb) || profile->pixel_format != BOOT_DISPLAY_XRGB8888)
+		return 0;
+	if (fb->var.xres != profile->native_width ||
+	    fb->var.yres != profile->native_height ||
+	    fb->fix.line_length != profile->native_stride_bytes ||
+	    fb->var.bits_per_pixel != 32U)
+		return 0;
+	if (fb->var.blue.offset != 0U || fb->var.blue.length != 8U ||
+	    fb->var.green.offset != 8U || fb->var.green.length != 8U ||
+	    fb->var.red.offset != 16U || fb->var.red.length != 8U ||
+	    fb->var.transp.length != 0U)
+		return 0;
+	return profile->logo_x + profile->logo_width <= fb->var.xres &&
+	       profile->logo_y + profile->logo_height <= fb->var.yres;
+}
+
+static int draw_redika(struct framebuffer *fb,
+		       const struct boot_display_profile *profile,
+		       const uint8_t *logo,
 		       struct activation_result *activation)
 {
 	struct fb_var_screeninfo requested;
@@ -362,11 +469,7 @@ static int draw_redika(struct framebuffer *fb, const uint8_t *logo,
 	int unblank = FB_BLANK_UNBLANK;
 
 	memset(activation, 0, sizeof(*activation));
-	if (!usable_format(fb) ||
-	    fb->var.xres != CONSOLEOS_NATIVE_WIDTH ||
-	    fb->var.yres != CONSOLEOS_NATIVE_HEIGHT ||
-	    CONSOLEOS_LOGO_X + CONSOLEOS_LOGO_WIDTH > fb->var.xres ||
-	    CONSOLEOS_LOGO_Y + CONSOLEOS_LOGO_HEIGHT > fb->var.yres)
+	if (!framebuffer_matches_profile(fb, profile))
 		return -1;
 
 	requested = fb->var;
@@ -376,14 +479,14 @@ static int draw_redika(struct framebuffer *fb, const uint8_t *logo,
 	activation->put_errno = activation->put_rc < 0 ? errno : 0;
 
 	memset(fb->mapping, 0, fb->mapping_size);
-	for (y = 0; y < CONSOLEOS_LOGO_HEIGHT; y++) {
+	for (y = 0; y < profile->logo_height; y++) {
 		uint8_t *row = fb->mapping +
-			(size_t)(CONSOLEOS_LOGO_Y + y + fb->var.yoffset) *
+			(size_t)(profile->logo_y + y + fb->var.yoffset) *
 				fb->fix.line_length +
-			(size_t)(CONSOLEOS_LOGO_X + fb->var.xoffset) *
+			(size_t)(profile->logo_x + fb->var.xoffset) *
 				bytes_per_pixel;
-		for (x = 0; x < CONSOLEOS_LOGO_WIDTH; x++) {
-			size_t input = ((size_t)y * CONSOLEOS_LOGO_WIDTH + x) * 4U;
+		for (x = 0; x < profile->logo_width; x++) {
+			size_t input = ((size_t)y * profile->logo_width + x) * 4U;
 			uint32_t value = pixel_value(logo[input + 2], logo[input + 1],
 						   logo[input], &fb->var);
 			store_pixel(row + (size_t)x * bytes_per_pixel, value,
@@ -423,6 +526,7 @@ static int draw_redika(struct framebuffer *fb, const uint8_t *logo,
 
 static int handoff_firmware_frame(void)
 {
+	const struct boot_display_profile *profile;
 	struct timespec delay = { .tv_nsec = POLL_NS };
 	struct framebuffer source;
 	struct framebuffer target;
@@ -435,18 +539,25 @@ static int handoff_firmware_frame(void)
 
 	log = fopen("/run/consoleos-early-display.log", "w");
 	log_marker(log, "start", NULL);
-	if (read_logo_asset(&logo)) {
+	profile = select_display_profile(log);
+	if (!profile)
+		goto out;
+	if (read_logo_asset(profile, &logo)) {
 		if (log) {
 			fprintf(log, "logo-asset-invalid path=%s errno=%d\n",
-				LOGO_ASSET, errno);
+				profile->logo_path, errno);
 			fflush(log);
 		}
 		goto out;
 	}
 	if (log) {
-		fprintf(log, "logo-asset-valid %ux%u at %u,%u\n",
-			CONSOLEOS_LOGO_WIDTH, CONSOLEOS_LOGO_HEIGHT,
-			CONSOLEOS_LOGO_X, CONSOLEOS_LOGO_Y);
+		fprintf(log,
+			"logo-asset-valid profile=%s %ux%u at %u,%u "
+			"expected-mode=%ux%u stride_bytes=%u format=xrgb8888\n",
+			profile->profile_id, profile->logo_width,
+			profile->logo_height, profile->logo_x, profile->logo_y,
+			profile->native_width, profile->native_height,
+			profile->native_stride_bytes);
 		fflush(log);
 	}
 	for (attempt = 0; attempt < CAPTURE_ATTEMPTS; attempt++) {
@@ -483,7 +594,27 @@ static int handoff_firmware_frame(void)
 			if (open_framebuffer(path, &target))
 				continue;
 			if (is_msm_framebuffer(&target)) {
-				if (!draw_redika(&target, logo, &activation)) {
+				if (log) {
+					fprintf(log,
+						"live-mode id=%.16s %ux%u virtual=%ux%u "
+						"stride_bytes=%u bpp=%u "
+						"rgba=%u:%u/%u:%u/%u:%u/%u:%u\n",
+						target.fix.id, target.var.xres,
+						target.var.yres, target.var.xres_virtual,
+						target.var.yres_virtual,
+						target.fix.line_length,
+						target.var.bits_per_pixel,
+						target.var.red.offset,
+						target.var.red.length,
+						target.var.green.offset,
+						target.var.green.length,
+						target.var.blue.offset,
+						target.var.blue.length,
+						target.var.transp.offset,
+						target.var.transp.length);
+					fflush(log);
+				}
+				if (!draw_redika(&target, profile, logo, &activation)) {
 					log_activation(log, &activation);
 					log_marker(log, "activated-msm", &target);
 					result = 0;

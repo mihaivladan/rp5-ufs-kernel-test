@@ -132,62 +132,14 @@ early_splash_overlay="${work}/consoleos-early-splash-overlay"
 boot_display_source="${kit}/rocknix/boot-display"
 boot_display_target="${early_splash_overlay}/usr/share/consoleos/boot-display"
 mkdir -p "${early_splash_overlay}/usr/bin" "${boot_display_target}"
-echo 'b91caa2ecf0402847e190b6fbb5a98320a451aa9145f082e95d2c658aa736322  device.cfg' | \
-    (cd "${boot_display_source}" && sha256sum -c -)
-echo '34206cf6b22644b657d35cd99f965938528c37537f0e8fdf2d28f8b8f2838f10  logo.bgra' | \
-    (cd "${boot_display_source}" && sha256sum -c -)
-cp "${boot_display_source}/device.cfg" "${boot_display_target}/device.cfg"
-cp "${boot_display_source}/logo.bgra" "${boot_display_target}/logo.bgra"
-early_profile_flags_text=$(python3 - "${boot_display_source}/device.cfg" <<'PY'
-from pathlib import Path
-import sys
-
-values = {}
-for line in Path(sys.argv[1]).read_text(encoding='ascii').splitlines():
-    if not line or line.startswith('#'):
-        continue
-    key, value = line.split('=', 1)
-    values[key] = value
-# Apply the same deterministic canvas -> native transform as the shared asset
-# generator.  The helper source remains device-agnostic; a device build only
-# supplies a different generated profile and logo payload.
-x = int(values['logo_x'], 0)
-y = int(values['logo_y'], 0)
-width = int(values['logo_width'], 0)
-height = int(values['logo_height'], 0)
-canvas_width = int(values['canvas_width'], 0)
-canvas_height = int(values['canvas_height'], 0)
-rotation = int(values['rotation'], 0)
-if rotation == 0:
-    nx, ny, nw, nh = x, y, width, height
-elif rotation == 90:
-    nx, ny, nw, nh = y, canvas_width - x - width, height, width
-elif rotation == 180:
-    nx, ny, nw, nh = canvas_width - x - width, canvas_height - y - height, width, height
-elif rotation == 270:
-    nx, ny, nw, nh = canvas_height - y - height, x, height, width
-else:
-    raise SystemExit(f'unsupported boot-display rotation: {rotation}')
-native_width = int(values['native_width'], 0)
-native_height = int(values['native_height'], 0)
-if min(nx, ny, nw, nh) < 0 or nx + nw > native_width or ny + nh > native_height:
-    raise SystemExit('generated native logo rectangle lies outside the framebuffer')
-native = {
-    'CONSOLEOS_NATIVE_WIDTH': native_width,
-    'CONSOLEOS_NATIVE_HEIGHT': native_height,
-    'CONSOLEOS_LOGO_X': nx,
-    'CONSOLEOS_LOGO_Y': ny,
-    'CONSOLEOS_LOGO_WIDTH': nw,
-    'CONSOLEOS_LOGO_HEIGHT': nh,
-}
-for key, value in native.items():
-    print(f'-D{key}={value}')
-PY
-)
-mapfile -t early_profile_flags <<< "${early_profile_flags_text}"
+cp -R "${boot_display_source}/profiles" "${boot_display_target}/profiles"
+early_profile_header="${work}/consoleos-early-display-profiles.h"
+python3 "${kit}/rocknix/generate-early-display-profiles.py" \
+    --profiles "${boot_display_source}/profiles" \
+    --output "${early_profile_header}"
 read -r -a host_cc_command <<< "${host_cc}"
 "${host_cc_command[@]}" -O2 -Wall -Wextra -Werror \
-    "${early_profile_flags[@]}" \
+    -I"${work}" \
     "${kit}/rocknix/consoleos-early-splash.c" \
     -o "${early_splash_overlay}/usr/bin/consoleos-early-splash"
 # Start the continuity helper as soon as devtmpfs/sysfs and /run exist.  It
@@ -270,7 +222,7 @@ sha256sum "${early_splash_overlay}/usr/bin/consoleos-early-splash" \
     > "${out}/consoleos-early-splash.sha256"
 (
     cd "${boot_display_target}"
-    sha256sum device.cfg logo.bgra
+    find profiles -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum
 ) > "${out}/consoleos-boot-display-assets.sha256"
 bash "${source_dir}/scripts/extract-ikconfig" "${work}/KERNEL" > "${out}/stock.config"
 unsquashfs -d "${work}/stock-root" "${work}/SYSTEM" usr/lib/kernel-overlays/base/lib/firmware
