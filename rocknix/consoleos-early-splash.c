@@ -94,6 +94,10 @@ struct activation_result {
 	int pan_errno;
 	int unblank_rc;
 	int unblank_errno;
+	int get_rc;
+	int get_errno;
+	int mode_matches;
+	int connector_enabled;
 };
 
 static uint32_t channel(uint8_t value, const struct fb_bitfield *field)
@@ -235,12 +239,50 @@ static void log_activation(FILE *log, const struct activation_result *result)
 	if (!log || !result)
 		return;
 	fprintf(log,
-		"fbdev-activation put=%d:%d msync=%d:%d pan=%d:%d unblank=%d:%d\n",
+		"fbdev-activation put=%d:%d msync=%d:%d pan=%d:%d "
+		"unblank=%d:%d get=%d:%d mode_matches=%d connector_enabled=%d\n",
 		result->put_rc, result->put_errno,
 		result->sync_rc, result->sync_errno,
 		result->pan_rc, result->pan_errno,
-		result->unblank_rc, result->unblank_errno);
+		result->unblank_rc, result->unblank_errno,
+		result->get_rc, result->get_errno, result->mode_matches,
+		result->connector_enabled);
 	fflush(log);
+}
+
+static int file_has_prefix(const char *path, const char *expected)
+{
+	char value[32];
+	ssize_t length;
+	int fd;
+
+	fd = open(path, O_RDONLY | O_CLOEXEC);
+	if (fd < 0)
+		return 0;
+	length = read(fd, value, sizeof(value) - 1);
+	close(fd);
+	if (length <= 0)
+		return 0;
+	value[length] = '\0';
+	return !strncmp(value, expected, strlen(expected));
+}
+
+static int dsi_connector_enabled(void)
+{
+	char path[80];
+	int card;
+
+	for (card = 0; card < 4; card++) {
+		snprintf(path, sizeof(path),
+			 "/sys/class/drm/card%d-DSI-1/status", card);
+		if (!file_has_prefix(path, "connected"))
+			continue;
+		snprintf(path, sizeof(path),
+			 "/sys/class/drm/card%d-DSI-1/enabled", card);
+		if (file_has_prefix(path, "enabled"))
+			return 1;
+	}
+	return 0;
 }
 
 static int capture_rgb(const struct framebuffer *fb, uint8_t **rgb_out)
@@ -313,6 +355,7 @@ static int draw_redika(struct framebuffer *fb, const uint8_t *logo,
 		       struct activation_result *activation)
 {
 	struct fb_var_screeninfo requested;
+	struct fb_var_screeninfo readback;
 	unsigned int bytes_per_pixel = (fb->var.bits_per_pixel + 7U) / 8U;
 	unsigned int x;
 	unsigned int y;
@@ -356,10 +399,26 @@ static int draw_redika(struct framebuffer *fb, const uint8_t *logo,
 	errno = 0;
 	activation->unblank_rc = ioctl(fb->fd, FBIOBLANK, unblank);
 	activation->unblank_errno = activation->unblank_rc < 0 ? errno : 0;
+	errno = 0;
+	activation->get_rc = ioctl(fb->fd, FBIOGET_VSCREENINFO, &readback);
+	activation->get_errno = activation->get_rc < 0 ? errno : 0;
+	if (!activation->get_rc)
+		activation->mode_matches =
+			readback.xres == requested.xres &&
+			readback.yres == requested.yres &&
+			readback.xoffset == requested.xoffset &&
+			readback.yoffset == requested.yoffset &&
+			readback.bits_per_pixel == requested.bits_per_pixel;
+	activation->connector_enabled = dsi_connector_enabled();
 
-	/* A memory copy alone is not a visible-handoff proof. */
+	/*
+	 * A memory copy or a successful write ioctl alone is not a visible-
+	 * handoff proof.  Require the fbdev mode to read back unchanged and the
+	 * MSM DSI connector to report that it is enabled after the commit.
+	 */
 	return activation->unblank_rc == 0 &&
-	       (activation->put_rc == 0 || activation->pan_rc == 0) ? 0 : -1;
+	       (activation->put_rc == 0 || activation->pan_rc == 0) &&
+	       activation->mode_matches && activation->connector_enabled ? 0 : -1;
 }
 
 static int handoff_firmware_frame(void)
