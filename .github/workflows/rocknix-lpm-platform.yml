@@ -90,11 +90,11 @@ jobs:
           ccache --zero-stats
           ccache --show-config
           printf 'cache_restore=%s\n' '${{ steps.kernel-compiler-cache.outputs.cache-hit }}'
-      - name: Prepare ConsoleOS RP5 display-ownership source
+      - name: Prepare ConsoleOS RP5 display-ownership2 source
         run: |
           set -euo pipefail
           bash rocknix/build.sh prepare 2>&1 | tee rocknix-consoleos-rc17-productpm2-prepare.log
-      - name: Build ConsoleOS RP5 display-ownership kernel and modules
+      - name: Build ConsoleOS RP5 display-ownership2 kernel and modules
         run: |
           set -euo pipefail
           bash rocknix/build.sh compile 2>&1 | tee rocknix-consoleos-rc17-productpm2-compile.log
@@ -114,7 +114,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
-          name: rocknix-rp5-consoleos-rc17-display-ownership1
+          name: rocknix-rp5-consoleos-rc17-display-ownership2
           retention-days: 14
           compression-level: 0
           if-no-files-found: error

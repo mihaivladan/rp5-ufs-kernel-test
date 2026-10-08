@@ -2,11 +2,12 @@
 /*
  * Minimal initramfs framebuffer handoff and splash renderer.
  *
- * The --handoff mode snapshots the framebuffer inherited from firmware and
- * redraws it as soon as the Qualcomm DRM fbdev replaces simpledrm.  This keeps
- * all vendor and product artwork outside the public kernel source and build
- * artifact.  The legacy IMAGE.bmp mode validates and renders an external
- * uncompressed 24-bit BMP.
+ * The --handoff mode inspects the framebuffer inherited from firmware, then
+ * renders the generated REDIKA device asset as soon as the Qualcomm DRM fbdev
+ * replaces simpledrm.  It also forces the fbdev mode/pan/unblank path and logs
+ * every return value.  A successful memcpy is deliberately not treated as a
+ * visible handoff.  The legacy IMAGE.bmp mode validates and renders an
+ * external uncompressed 24-bit BMP.
  */
 
 #include <errno.h>
@@ -25,6 +26,26 @@
 #define POLL_NS 20000000L
 #define CAPTURE_ATTEMPTS 250
 #define HANDOFF_ATTEMPTS 500
+#define LOGO_ASSET "/usr/share/consoleos/boot-display/logo.bgra"
+
+#ifndef CONSOLEOS_NATIVE_WIDTH
+#error CONSOLEOS_NATIVE_WIDTH must come from generated device.cfg
+#endif
+#ifndef CONSOLEOS_NATIVE_HEIGHT
+#error CONSOLEOS_NATIVE_HEIGHT must come from generated device.cfg
+#endif
+#ifndef CONSOLEOS_LOGO_X
+#error CONSOLEOS_LOGO_X must come from generated device.cfg
+#endif
+#ifndef CONSOLEOS_LOGO_Y
+#error CONSOLEOS_LOGO_Y must come from generated device.cfg
+#endif
+#ifndef CONSOLEOS_LOGO_WIDTH
+#error CONSOLEOS_LOGO_WIDTH must come from generated device.cfg
+#endif
+#ifndef CONSOLEOS_LOGO_HEIGHT
+#error CONSOLEOS_LOGO_HEIGHT must come from generated device.cfg
+#endif
 
 struct framebuffer {
 	struct fb_fix_screeninfo fix;
@@ -51,6 +72,28 @@ struct __attribute__((packed)) bmp_header {
 	int32_t y_pixels_per_m;
 	uint32_t colors_used;
 	uint32_t colors_important;
+};
+
+struct __attribute__((packed)) logo_header {
+	uint8_t magic[8];
+	uint32_t header_bytes;
+	uint32_t width;
+	uint32_t height;
+	uint32_t format;
+	uint32_t payload_bytes;
+	uint8_t payload_sha256[32];
+	uint32_t reserved;
+};
+
+struct activation_result {
+	int put_rc;
+	int put_errno;
+	int sync_rc;
+	int sync_errno;
+	int pan_rc;
+	int pan_errno;
+	int unblank_rc;
+	int unblank_errno;
 };
 
 static uint32_t channel(uint8_t value, const struct fb_bitfield *field)
@@ -164,6 +207,42 @@ static void log_marker(FILE *log, const char *marker,
 	fflush(log);
 }
 
+static void log_capture_stats(FILE *log, const uint8_t *rgb,
+			      unsigned int width, unsigned int height)
+{
+	uint64_t checksum = 1469598103934665603ULL;
+	uint64_t nonblack = 0;
+	size_t size = (size_t)width * height * 3U;
+	size_t index;
+
+	if (!log || !rgb)
+		return;
+	for (index = 0; index < size; index++) {
+		checksum ^= rgb[index];
+		checksum *= 1099511628211ULL;
+		if (rgb[index])
+			nonblack++;
+	}
+	fprintf(log,
+		"firmware-pixels nonzero_channels=%llu/%llu fnv1a64=%016llx\n",
+		(unsigned long long)nonblack, (unsigned long long)size,
+		(unsigned long long)checksum);
+	fflush(log);
+}
+
+static void log_activation(FILE *log, const struct activation_result *result)
+{
+	if (!log || !result)
+		return;
+	fprintf(log,
+		"fbdev-activation put=%d:%d msync=%d:%d pan=%d:%d unblank=%d:%d\n",
+		result->put_rc, result->put_errno,
+		result->sync_rc, result->sync_errno,
+		result->pan_rc, result->pan_errno,
+		result->unblank_rc, result->unblank_errno);
+	fflush(log);
+}
+
 static int capture_rgb(const struct framebuffer *fb, uint8_t **rgb_out)
 {
 	unsigned int bytes_per_pixel = (fb->var.bits_per_pixel + 7U) / 8U;
@@ -194,47 +273,93 @@ static int capture_rgb(const struct framebuffer *fb, uint8_t **rgb_out)
 	return 0;
 }
 
-static int draw_rgb(struct framebuffer *fb, const uint8_t *rgb,
-		    unsigned int width, unsigned int height)
+static int read_logo_asset(uint8_t **pixels_out)
 {
+	static const uint8_t magic[8] = { 'R', 'D', 'K', 'L', 'O', 'G', 'O', '1' };
+	struct logo_header header;
+	struct stat status;
+	uint8_t *pixels = NULL;
+	int fd = -1;
+	int result = -1;
+
+	fd = open(LOGO_ASSET, O_RDONLY | O_CLOEXEC);
+	if (fd < 0 || fstat(fd, &status) < 0 ||
+	    read(fd, &header, sizeof(header)) != (ssize_t)sizeof(header))
+		goto out;
+	if (memcmp(header.magic, magic, sizeof(magic)) ||
+	    header.header_bytes != sizeof(header) || header.format != 1 ||
+	    header.width != CONSOLEOS_LOGO_WIDTH ||
+	    header.height != CONSOLEOS_LOGO_HEIGHT ||
+	    header.payload_bytes !=
+		(size_t)header.width * header.height * 4U ||
+	    status.st_size != (off_t)(sizeof(header) + header.payload_bytes))
+		goto out;
+	pixels = malloc(header.payload_bytes);
+	if (!pixels || read(fd, pixels, header.payload_bytes) !=
+		(ssize_t)header.payload_bytes)
+		goto out;
+	*pixels_out = pixels;
+	pixels = NULL;
+	result = 0;
+
+out:
+	free(pixels);
+	if (fd >= 0)
+		close(fd);
+	return result;
+}
+
+static int draw_redika(struct framebuffer *fb, const uint8_t *logo,
+		       struct activation_result *activation)
+{
+	struct fb_var_screeninfo requested;
 	unsigned int bytes_per_pixel = (fb->var.bits_per_pixel + 7U) / 8U;
-	unsigned int copy_width;
-	unsigned int copy_height;
-	unsigned int source_x;
-	unsigned int source_y;
-	unsigned int destination_x;
-	unsigned int destination_y;
 	unsigned int x;
 	unsigned int y;
 	int unblank = FB_BLANK_UNBLANK;
 
-	if (!usable_format(fb))
+	memset(activation, 0, sizeof(*activation));
+	if (!usable_format(fb) ||
+	    fb->var.xres != CONSOLEOS_NATIVE_WIDTH ||
+	    fb->var.yres != CONSOLEOS_NATIVE_HEIGHT ||
+	    CONSOLEOS_LOGO_X + CONSOLEOS_LOGO_WIDTH > fb->var.xres ||
+	    CONSOLEOS_LOGO_Y + CONSOLEOS_LOGO_HEIGHT > fb->var.yres)
 		return -1;
-	copy_width = width < fb->var.xres ? width : fb->var.xres;
-	copy_height = height < fb->var.yres ? height : fb->var.yres;
-	source_x = (width - copy_width) / 2U;
-	source_y = (height - copy_height) / 2U;
-	destination_x = (fb->var.xres - copy_width) / 2U;
-	destination_y = (fb->var.yres - copy_height) / 2U;
+
+	requested = fb->var;
+	requested.activate = FB_ACTIVATE_NOW | FB_ACTIVATE_FORCE;
+	errno = 0;
+	activation->put_rc = ioctl(fb->fd, FBIOPUT_VSCREENINFO, &requested);
+	activation->put_errno = activation->put_rc < 0 ? errno : 0;
+
 	memset(fb->mapping, 0, fb->mapping_size);
-	for (y = 0; y < copy_height; y++) {
+	for (y = 0; y < CONSOLEOS_LOGO_HEIGHT; y++) {
 		uint8_t *row = fb->mapping +
-			(size_t)(destination_y + y + fb->var.yoffset) *
+			(size_t)(CONSOLEOS_LOGO_Y + y + fb->var.yoffset) *
 				fb->fix.line_length +
-			(size_t)(destination_x + fb->var.xoffset) *
+			(size_t)(CONSOLEOS_LOGO_X + fb->var.xoffset) *
 				bytes_per_pixel;
-		for (x = 0; x < copy_width; x++) {
-			size_t input = ((size_t)(source_y + y) * width +
-					(source_x + x)) * 3U;
-			uint32_t value = pixel_value(rgb[input], rgb[input + 1],
-						   rgb[input + 2], &fb->var);
+		for (x = 0; x < CONSOLEOS_LOGO_WIDTH; x++) {
+			size_t input = ((size_t)y * CONSOLEOS_LOGO_WIDTH + x) * 4U;
+			uint32_t value = pixel_value(logo[input + 2], logo[input + 1],
+						   logo[input], &fb->var);
 			store_pixel(row + (size_t)x * bytes_per_pixel, value,
 				    bytes_per_pixel);
 		}
 	}
-	msync(fb->mapping, fb->mapping_size, MS_SYNC);
-	ioctl(fb->fd, FBIOBLANK, unblank);
-	return 0;
+	errno = 0;
+	activation->sync_rc = msync(fb->mapping, fb->mapping_size, MS_SYNC);
+	activation->sync_errno = activation->sync_rc < 0 ? errno : 0;
+	errno = 0;
+	activation->pan_rc = ioctl(fb->fd, FBIOPAN_DISPLAY, &requested);
+	activation->pan_errno = activation->pan_rc < 0 ? errno : 0;
+	errno = 0;
+	activation->unblank_rc = ioctl(fb->fd, FBIOBLANK, unblank);
+	activation->unblank_errno = activation->unblank_rc < 0 ? errno : 0;
+
+	/* A memory copy alone is not a visible-handoff proof. */
+	return activation->unblank_rc == 0 &&
+	       (activation->put_rc == 0 || activation->pan_rc == 0) ? 0 : -1;
 }
 
 static int handoff_firmware_frame(void)
@@ -242,18 +367,40 @@ static int handoff_firmware_frame(void)
 	struct timespec delay = { .tv_nsec = POLL_NS };
 	struct framebuffer source;
 	struct framebuffer target;
+	struct activation_result activation;
 	uint8_t *rgb = NULL;
+	uint8_t *logo = NULL;
 	FILE *log;
 	int attempt;
 	int result = 1;
 
 	log = fopen("/run/consoleos-early-display.log", "w");
 	log_marker(log, "start", NULL);
+	if (read_logo_asset(&logo)) {
+		if (log) {
+			fprintf(log, "logo-asset-invalid path=%s errno=%d\n",
+				LOGO_ASSET, errno);
+			fflush(log);
+		}
+		goto out;
+	}
+	if (log) {
+		fprintf(log, "logo-asset-valid %ux%u at %u,%u\n",
+			CONSOLEOS_LOGO_WIDTH, CONSOLEOS_LOGO_HEIGHT,
+			CONSOLEOS_LOGO_X, CONSOLEOS_LOGO_Y);
+		fflush(log);
+	}
 	for (attempt = 0; attempt < CAPTURE_ATTEMPTS; attempt++) {
 		if (!open_framebuffer("/dev/fb0", &source)) {
-			if (!is_msm_framebuffer(&source) && usable_format(&source) &&
+			if (is_msm_framebuffer(&source)) {
+				close_framebuffer(&source);
+				break;
+			}
+			if (usable_format(&source) &&
 			    !capture_rgb(&source, &rgb)) {
 				log_marker(log, "captured-firmware", &source);
+				log_capture_stats(log, rgb, source.var.xres,
+						  source.var.yres);
 				close_framebuffer(&source);
 				break;
 			}
@@ -261,8 +408,11 @@ static int handoff_firmware_frame(void)
 		}
 		nanosleep(&delay, NULL);
 	}
-	if (!rgb)
-		goto out;
+	if (!rgb && log) {
+		fprintf(log,
+			"firmware-capture-missing; continuing with generated asset\n");
+		fflush(log);
+	}
 
 	for (attempt = 0; attempt < HANDOFF_ATTEMPTS; attempt++) {
 		int index;
@@ -274,10 +424,13 @@ static int handoff_firmware_frame(void)
 			if (open_framebuffer(path, &target))
 				continue;
 			if (is_msm_framebuffer(&target)) {
-				if (!draw_rgb(&target, rgb, source.var.xres,
-					      source.var.yres)) {
-					log_marker(log, "redrawn-msm", &target);
+				if (!draw_redika(&target, logo, &activation)) {
+					log_activation(log, &activation);
+					log_marker(log, "activated-msm", &target);
 					result = 0;
+				} else {
+					log_activation(log, &activation);
+					log_marker(log, "activation-failed-msm", &target);
 				}
 				close_framebuffer(&target);
 				goto out;
@@ -293,6 +446,7 @@ out:
 	if (log)
 		fclose(log);
 	free(rgb);
+	free(logo);
 	return result;
 }
 

@@ -129,9 +129,54 @@ tar -xf linux.tar.xz
 source_dir="${work}/linux-7.2"
 python3 "${kit}/rocknix/prepare.py" release.tar "${work}" "${source_dir}" "${kit}/upstream-rocknix" "${out}"
 early_splash_overlay="${work}/consoleos-early-splash-overlay"
-mkdir -p "${early_splash_overlay}/usr/bin"
+boot_display_source="${kit}/rocknix/boot-display"
+boot_display_target="${early_splash_overlay}/usr/share/consoleos/boot-display"
+mkdir -p "${early_splash_overlay}/usr/bin" "${boot_display_target}"
+echo 'b91caa2ecf0402847e190b6fbb5a98320a451aa9145f082e95d2c658aa736322  device.cfg' | \
+    (cd "${boot_display_source}" && sha256sum -c -)
+echo '34206cf6b22644b657d35cd99f965938528c37537f0e8fdf2d28f8b8f2838f10  logo.bgra' | \
+    (cd "${boot_display_source}" && sha256sum -c -)
+cp "${boot_display_source}/device.cfg" "${boot_display_target}/device.cfg"
+cp "${boot_display_source}/logo.bgra" "${boot_display_target}/logo.bgra"
+mapfile -t early_profile_flags < <(python3 - "${boot_display_source}/device.cfg" <<'PY'
+from pathlib import Path
+import sys
+
+values = {}
+for line in Path(sys.argv[1]).read_text(encoding='ascii').splitlines():
+    if not line or line.startswith('#'):
+        continue
+    key, value = line.split('=', 1)
+    values[key] = value
+# device.cfg records the logo in landscape design coordinates.  The generated
+# native payload is rotated 270 degrees, so use the deterministic native rect
+# from the same profile: x=y, y=canvas_width-x-width, w=height, h=width.
+native = {
+    'CONSOLEOS_NATIVE_WIDTH': int(values['native_width'], 0),
+    'CONSOLEOS_NATIVE_HEIGHT': int(values['native_height'], 0),
+    'CONSOLEOS_LOGO_X': int(values['logo_y'], 0),
+    'CONSOLEOS_LOGO_Y': int(values['canvas_width'], 0) - int(values['logo_x'], 0) - int(values['logo_width'], 0),
+    'CONSOLEOS_LOGO_WIDTH': int(values['logo_height'], 0),
+    'CONSOLEOS_LOGO_HEIGHT': int(values['logo_width'], 0),
+}
+if int(values['rotation'], 0) != 270:
+    raise SystemExit('RP5 early-display build requires the generated rotation=270 profile')
+if native != {
+    'CONSOLEOS_NATIVE_WIDTH': 1080,
+    'CONSOLEOS_NATIVE_HEIGHT': 1920,
+    'CONSOLEOS_LOGO_X': 421,
+    'CONSOLEOS_LOGO_Y': 607,
+    'CONSOLEOS_LOGO_WIDTH': 238,
+    'CONSOLEOS_LOGO_HEIGHT': 705,
+}:
+    raise SystemExit(f'unexpected RP5 native boot-display geometry: {native}')
+for key, value in native.items():
+    print(f'-D{key}={value}')
+PY
+)
 read -r -a host_cc_command <<< "${host_cc}"
 "${host_cc_command[@]}" -O2 -Wall -Wextra -Werror \
+    "${early_profile_flags[@]}" \
     "${kit}/rocknix/consoleos-early-splash.c" \
     -o "${early_splash_overlay}/usr/bin/consoleos-early-splash"
 # Start the continuity helper as soon as devtmpfs/sysfs and /run exist.  It
@@ -150,9 +195,10 @@ source = path.read_text()
 marker = "/usr/bin/busybox mount -t tmpfs -o mode=755,size=20%,nr_inodes=800k,nosuid,nodev,strictatime tmpfs /run\n"
 insertion = marker + """
 
-# Preserve the firmware framebuffer through the simpledrm -> msm-drm handoff.
-# This helper never writes to the console and is deliberately independent of
-# /flash, SYSTEM, branding assets and the later compositor.
+# Preserve the display through the simpledrm -> msm-drm handoff.  The helper
+# never writes to the console.  Its exact profile and logo payload are embedded
+# in the initramfs from the same generated device assets used by UEFI and the
+# later compositor.
 /usr/bin/consoleos-early-splash --handoff >/dev/null 2>&1 &
 CONSOLEOS_EARLY_DISPLAY_PID=$!
 """
@@ -211,6 +257,10 @@ chmod 0755 "${early_splash_overlay}/init" \
 )
 sha256sum "${early_splash_overlay}/usr/bin/consoleos-early-splash" \
     > "${out}/consoleos-early-splash.sha256"
+(
+    cd "${boot_display_target}"
+    sha256sum device.cfg logo.bgra
+) > "${out}/consoleos-boot-display-assets.sha256"
 bash "${source_dir}/scripts/extract-ikconfig" "${work}/KERNEL" > "${out}/stock.config"
 unsquashfs -d "${work}/stock-root" "${work}/SYSTEM" usr/lib/kernel-overlays/base/lib/firmware
 cd "${source_dir}"
