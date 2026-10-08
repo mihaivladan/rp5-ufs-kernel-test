@@ -24,6 +24,7 @@ REQUIRED = {
     "linux_fbdev_height",
     "linux_fbdev_stride_bytes",
     "linux_fbdev_pixel_format",
+    "linux_fbdev_rotation",
     "rotation",
     "canvas_width",
     "canvas_height",
@@ -33,6 +34,8 @@ REQUIRED = {
     "logo_height",
     "logo_payload_bytes",
     "logo_payload_sha256",
+    "linux_fbdev_logo_payload_bytes",
+    "linux_fbdev_logo_payload_sha256",
 }
 
 
@@ -78,14 +81,16 @@ def c_string(value: str) -> str:
     return '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
 
 
-def native_rect(values: dict[str, str]) -> tuple[int, int, int, int]:
+def native_rect(
+    values: dict[str, str], rotation_key: str = "rotation"
+) -> tuple[int, int, int, int]:
     x = bounded_int(values, "logo_x", 0, 16383)
     y = bounded_int(values, "logo_y", 0, 16383)
     width = bounded_int(values, "logo_width", 1, 16384)
     height = bounded_int(values, "logo_height", 1, 16384)
     canvas_width = bounded_int(values, "canvas_width", 1, 16384)
     canvas_height = bounded_int(values, "canvas_height", 1, 16384)
-    rotation = bounded_int(values, "rotation", 0, 270)
+    rotation = bounded_int(values, rotation_key, 0, 270)
     if rotation == 0:
         return x, y, width, height
     if rotation == 90:
@@ -99,9 +104,11 @@ def native_rect(values: dict[str, str]) -> tuple[int, int, int, int]:
 
 def load_profile(directory: Path) -> dict:
     cfg = directory / "device.cfg"
-    logo = directory / "logo.bgra"
+    logo = directory / "logo-linux-fbdev.bgra"
     if not cfg.is_file() or not logo.is_file():
-        raise SystemExit(f"{directory}: device.cfg and logo.bgra are required")
+        raise SystemExit(
+            f"{directory}: device.cfg and logo-linux-fbdev.bgra are required"
+        )
     values = parse_cfg(cfg)
     profile_id = values["profile_id"]
     if profile_id != directory.name or not re.fullmatch(r"[a-z0-9][a-z0-9._-]{0,63}", profile_id):
@@ -132,15 +139,19 @@ def load_profile(directory: Path) -> dict:
         raise SystemExit(f"{directory}: early helper supports only xrgb8888")
     if linux_width != native_width or linux_height != native_height:
         raise SystemExit(f"{directory}: Linux fbdev dimensions must match the panel")
-    nx, ny, nw, nh = native_rect(values)
+    nx, ny, nw, nh = native_rect(values, "linux_fbdev_rotation")
     if min(nx, ny) < 0 or nx + nw > linux_width or ny + nh > linux_height:
         raise SystemExit(f"{directory}: native logo rectangle is out of bounds")
     expected_payload = nw * nh * 4
-    payload_bytes = bounded_int(values, "logo_payload_bytes", 1, 1 << 30)
+    payload_bytes = bounded_int(
+        values, "linux_fbdev_logo_payload_bytes", 1, 1 << 30
+    )
     logo_bytes = logo.read_bytes()
     if payload_bytes != expected_payload or len(logo_bytes) != 64 + payload_bytes:
         raise SystemExit(f"{directory}: logo payload size mismatch")
-    if not re.fullmatch(r"[0-9a-f]{64}", values["logo_payload_sha256"]):
+    if not re.fullmatch(
+        r"[0-9a-f]{64}", values["linux_fbdev_logo_payload_sha256"]
+    ):
         raise SystemExit(f"{directory}: malformed logo payload hash")
     magic, header_bytes, logo_width, logo_height, logo_format, header_payload_bytes, header_hash, reserved = struct.unpack(
         "<8sIIIII32sI", logo_bytes[:64]
@@ -155,7 +166,7 @@ def load_profile(directory: Path) -> dict:
         or header_payload_bytes != payload_bytes
         or reserved != 0
         or header_hash.hex() != payload_hash
-        or values["logo_payload_sha256"] != payload_hash
+        or values["linux_fbdev_logo_payload_sha256"] != payload_hash
     ):
         raise SystemExit(f"{directory}: logo header or payload hash mismatch")
     return {
@@ -169,7 +180,10 @@ def load_profile(directory: Path) -> dict:
         "logo_y": ny,
         "logo_width": nw,
         "logo_height": nh,
-        "logo_path": f"/usr/share/consoleos/boot-display/profiles/{profile_id}/logo.bgra",
+        "logo_path": (
+            f"/usr/share/consoleos/boot-display/profiles/{profile_id}/"
+            "logo-linux-fbdev.bgra"
+        ),
     }
 
 

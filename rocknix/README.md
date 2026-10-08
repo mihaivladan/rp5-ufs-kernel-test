@@ -21,8 +21,11 @@ The extra diagnostics do not provide electrical power measurements for every com
 The initramfs early-display helper is built once per SoC-family kernel, not
 once per panel. Device geometry is generated from the ConsoleOS platform
 manifest into `boot-display/profiles/<profile-id>/device.cfg` and
-`logo.bgra`. `generate-early-display-profiles.py` embeds a table of all of
-those profiles in the helper.
+`logo-linux-fbdev.bgra`. The UEFI app and Linux fbdev helper may require
+different physical rotations for the same panel, so the manifest stores both
+rotations and the deterministic asset generator emits a payload for each
+scanout convention. `generate-early-display-profiles.py` embeds a table of all
+Linux profiles in the helper.
 
 At runtime the helper selects exactly one profile using the exact
 NUL-separated strings in `/proc/device-tree/compatible`, then validates the
