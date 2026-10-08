@@ -148,28 +148,38 @@ for line in Path(sys.argv[1]).read_text(encoding='ascii').splitlines():
         continue
     key, value = line.split('=', 1)
     values[key] = value
-# device.cfg records the logo in landscape design coordinates.  The generated
-# native payload is rotated 270 degrees, so use the deterministic native rect
-# from the same profile: x=canvas_height-y-height, y=x, w=height, h=width.
+# Apply the same deterministic canvas -> native transform as the shared asset
+# generator.  The helper source remains device-agnostic; a device build only
+# supplies a different generated profile and logo payload.
+x = int(values['logo_x'], 0)
+y = int(values['logo_y'], 0)
+width = int(values['logo_width'], 0)
+height = int(values['logo_height'], 0)
+canvas_width = int(values['canvas_width'], 0)
+canvas_height = int(values['canvas_height'], 0)
+rotation = int(values['rotation'], 0)
+if rotation == 0:
+    nx, ny, nw, nh = x, y, width, height
+elif rotation == 90:
+    nx, ny, nw, nh = y, canvas_width - x - width, height, width
+elif rotation == 180:
+    nx, ny, nw, nh = canvas_width - x - width, canvas_height - y - height, width, height
+elif rotation == 270:
+    nx, ny, nw, nh = canvas_height - y - height, x, height, width
+else:
+    raise SystemExit(f'unsupported boot-display rotation: {rotation}')
+native_width = int(values['native_width'], 0)
+native_height = int(values['native_height'], 0)
+if min(nx, ny, nw, nh) < 0 or nx + nw > native_width or ny + nh > native_height:
+    raise SystemExit('generated native logo rectangle lies outside the framebuffer')
 native = {
-    'CONSOLEOS_NATIVE_WIDTH': int(values['native_width'], 0),
-    'CONSOLEOS_NATIVE_HEIGHT': int(values['native_height'], 0),
-    'CONSOLEOS_LOGO_X': int(values['canvas_height'], 0) - int(values['logo_y'], 0) - int(values['logo_height'], 0),
-    'CONSOLEOS_LOGO_Y': int(values['logo_x'], 0),
-    'CONSOLEOS_LOGO_WIDTH': int(values['logo_height'], 0),
-    'CONSOLEOS_LOGO_HEIGHT': int(values['logo_width'], 0),
+    'CONSOLEOS_NATIVE_WIDTH': native_width,
+    'CONSOLEOS_NATIVE_HEIGHT': native_height,
+    'CONSOLEOS_LOGO_X': nx,
+    'CONSOLEOS_LOGO_Y': ny,
+    'CONSOLEOS_LOGO_WIDTH': nw,
+    'CONSOLEOS_LOGO_HEIGHT': nh,
 }
-if int(values['rotation'], 0) != 270:
-    raise SystemExit('RP5 early-display build requires the generated rotation=270 profile')
-if native != {
-    'CONSOLEOS_NATIVE_WIDTH': 1080,
-    'CONSOLEOS_NATIVE_HEIGHT': 1920,
-    'CONSOLEOS_LOGO_X': 421,
-    'CONSOLEOS_LOGO_Y': 607,
-    'CONSOLEOS_LOGO_WIDTH': 238,
-    'CONSOLEOS_LOGO_HEIGHT': 705,
-}:
-    raise SystemExit(f'unexpected RP5 native boot-display geometry: {native}')
 for key, value in native.items():
     print(f'-D{key}={value}')
 PY
