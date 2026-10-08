@@ -138,7 +138,7 @@ echo '34206cf6b22644b657d35cd99f965938528c37537f0e8fdf2d28f8b8f2838f10  logo.bgr
     (cd "${boot_display_source}" && sha256sum -c -)
 cp "${boot_display_source}/device.cfg" "${boot_display_target}/device.cfg"
 cp "${boot_display_source}/logo.bgra" "${boot_display_target}/logo.bgra"
-mapfile -t early_profile_flags < <(python3 - "${boot_display_source}/device.cfg" <<'PY'
+early_profile_flags_text=$(python3 - "${boot_display_source}/device.cfg" <<'PY'
 from pathlib import Path
 import sys
 
@@ -150,12 +150,12 @@ for line in Path(sys.argv[1]).read_text(encoding='ascii').splitlines():
     values[key] = value
 # device.cfg records the logo in landscape design coordinates.  The generated
 # native payload is rotated 270 degrees, so use the deterministic native rect
-# from the same profile: x=y, y=canvas_width-x-width, w=height, h=width.
+# from the same profile: x=canvas_height-y-height, y=x, w=height, h=width.
 native = {
     'CONSOLEOS_NATIVE_WIDTH': int(values['native_width'], 0),
     'CONSOLEOS_NATIVE_HEIGHT': int(values['native_height'], 0),
-    'CONSOLEOS_LOGO_X': int(values['logo_y'], 0),
-    'CONSOLEOS_LOGO_Y': int(values['canvas_width'], 0) - int(values['logo_x'], 0) - int(values['logo_width'], 0),
+    'CONSOLEOS_LOGO_X': int(values['canvas_height'], 0) - int(values['logo_y'], 0) - int(values['logo_height'], 0),
+    'CONSOLEOS_LOGO_Y': int(values['logo_x'], 0),
     'CONSOLEOS_LOGO_WIDTH': int(values['logo_height'], 0),
     'CONSOLEOS_LOGO_HEIGHT': int(values['logo_width'], 0),
 }
@@ -174,6 +174,7 @@ for key, value in native.items():
     print(f'-D{key}={value}')
 PY
 )
+mapfile -t early_profile_flags <<< "${early_profile_flags_text}"
 read -r -a host_cc_command <<< "${host_cc}"
 "${host_cc_command[@]}" -O2 -Wall -Wextra -Werror \
     "${early_profile_flags[@]}" \
