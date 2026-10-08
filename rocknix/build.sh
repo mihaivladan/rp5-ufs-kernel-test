@@ -128,6 +128,25 @@ echo 'f9fef3d14c0df53819026f4be74459835c2a0b0dcbf5b5bbd9ea19f0829402b3  linux.ta
 tar -xf linux.tar.xz
 source_dir="${work}/linux-7.2"
 python3 "${kit}/rocknix/prepare.py" release.tar "${work}" "${source_dir}" "${kit}/upstream-rocknix" "${out}"
+initramfs_busybox="${work}/busybox"
+cpio -i --quiet --to-stdout usr/bin/busybox < "${work}/initramfs.cpio" \
+    > "${initramfs_busybox}"
+chmod 0755 "${initramfs_busybox}"
+"${initramfs_busybox}" --list > "${out}/consoleos-initramfs-busybox-applets.txt"
+for applet in ash cat poweroff sha256sum sleep; do
+    grep -Fx "${applet}" "${out}/consoleos-initramfs-busybox-applets.txt" >/dev/null
+done
+{
+    sha256sum "${initramfs_busybox}"
+    for builtin in cd exit read printf test; do
+        "${initramfs_busybox}" ash -c "type ${builtin}"
+    done
+    if grep -Fx echo "${out}/consoleos-initramfs-busybox-applets.txt" >/dev/null; then
+        printf 'echo_applet=present\n'
+    else
+        printf 'echo_applet=absent\n'
+    fi
+} > "${out}/consoleos-initramfs-busybox-selector-preflight.txt"
 early_splash_overlay="${work}/consoleos-early-splash-overlay"
 boot_display_source="${kit}/rocknix/boot-display"
 boot_display_target="${early_splash_overlay}/usr/share/consoleos/boot-display"
@@ -142,27 +161,33 @@ read -r -a host_cc_command <<< "${host_cc}"
     -I"${work}" \
     "${kit}/rocknix/consoleos-early-splash.c" \
     -o "${early_splash_overlay}/usr/bin/consoleos-early-splash"
+echo 'd5aabb18e4f166069917958593f250144152d528d724a9dc61f91829f5308a5d  '"${early_splash_overlay}/usr/bin/consoleos-early-splash" | \
+    sha256sum -c -
 # Start the continuity helper as soon as devtmpfs/sysfs and /run exist.  It
-# snapshots the firmware-owned simpledrm framebuffer, waits for msm-drm fbdev,
-# redraws the same pixels, and exits before userspace starts Sway.  Keep stdout
-# and stderr detached from /dev/console: normal boot must not write text over
-# the retained firmware frame.
+# chooses a hash-verified external bundle when present and otherwise uses this
+# exact embedded fallback. Keep stdout and stderr detached from /dev/console:
+# normal boot must not write text over the retained firmware frame.
 cpio -i --quiet --to-stdout init < "${work}/initramfs.cpio" \
     > "${early_splash_overlay}/init"
-python3 - "${early_splash_overlay}/init" <<'PY'
+python3 - "${early_splash_overlay}/init" \
+    "${early_splash_overlay}/usr/bin/consoleos-early-display-selector" <<'PY'
 from pathlib import Path
 import sys
 
 path = Path(sys.argv[1])
+selector = Path(sys.argv[2])
 source = path.read_text()
 marker = "/usr/bin/busybox mount -t tmpfs -o mode=755,size=20%,nr_inodes=800k,nosuid,nodev,strictatime tmpfs /run\n"
 insertion = marker + """
 
-# Preserve the display through the simpledrm -> msm-drm handoff.  The helper
-# never writes to the console.  Its exact profile and logo payload are embedded
-# in the initramfs from the same generated device assets used by UEFI and the
-# later compositor.
-/usr/bin/consoleos-early-splash --handoff >/dev/null 2>&1 &
+# Preserve the display through the simpledrm -> msm-drm handoff.  A selector
+# validates the optional external bundle without ever replacing the embedded
+# helper.  A selector parse/runtime error is caught here and starts the frozen
+# embedded helper.  Neither path writes to the normal boot console.
+(
+  /usr/bin/busybox ash /usr/bin/consoleos-early-display-selector >/dev/null 2>&1 || \
+    /usr/bin/consoleos-early-splash --handoff >/dev/null 2>&1
+) &
 CONSOLEOS_EARLY_DISPLAY_PID=$!
 """
 if source.count(marker) != 1:
@@ -210,9 +235,78 @@ replacement = """[ -z "${MACHINE_UID}" ] && MACHINE_UID="$(cat /sys/class/net/et
 if source.count(unconditional) != 1:
     raise SystemExit("Expected one unconditional initramfs clear")
 path.write_text(source.replace(unconditional, replacement))
+
+selector.write_text("""#!/usr/bin/busybox ash
+# The selected helper is initialized to the embedded fallback before any
+# external path is examined.  This script deliberately uses no `echo`.
+CONSOLEOS_EMBEDDED_HELPER=/usr/bin/consoleos-early-splash
+CONSOLEOS_EXTERNAL_ROOT=/consoleos/early-display-external
+CONSOLEOS_EXTERNAL_HELPER=$CONSOLEOS_EXTERNAL_ROOT/usr/bin/consoleos-early-splash
+CONSOLEOS_SELECTED_HELPER=$CONSOLEOS_EMBEDDED_HELPER
+CONSOLEOS_SELECTOR_RESULT=embedded-missing
+CONSOLEOS_SELECTOR_START=unavailable
+CONSOLEOS_SELECTOR_END=unavailable
+
+IFS=' ' read -r CONSOLEOS_SELECTOR_START CONSOLEOS_SELECTOR_REST </proc/uptime || \
+  CONSOLEOS_SELECTOR_START=unavailable
+if test -x "$CONSOLEOS_EXTERNAL_HELPER" && \
+   test -f "$CONSOLEOS_EXTERNAL_ROOT/SHA256SUMS"; then
+  if (cd "$CONSOLEOS_EXTERNAL_ROOT" && \
+      /usr/bin/busybox sha256sum -c SHA256SUMS) \
+      >/run/consoleos-early-display-bundle-hash.log 2>&1; then
+    CONSOLEOS_SELECTED_HELPER=$CONSOLEOS_EXTERNAL_HELPER
+    CONSOLEOS_SELECTOR_RESULT=external-valid
+  else
+    CONSOLEOS_SELECTOR_RESULT=embedded-invalid
+  fi
+fi
+IFS=' ' read -r CONSOLEOS_SELECTOR_END CONSOLEOS_SELECTOR_REST </proc/uptime || \
+  CONSOLEOS_SELECTOR_END=unavailable
+printf 'start=%s end=%s selected=%s helper=%s\\n' \
+  "$CONSOLEOS_SELECTOR_START" "$CONSOLEOS_SELECTOR_END" \
+  "$CONSOLEOS_SELECTOR_RESULT" "$CONSOLEOS_SELECTED_HELPER" \
+  >/run/consoleos-early-display-selector.log
+
+# QEMU exercises this exact production selector and /init.  This dormant hook
+# runs only under the explicit validation command line and never on the RP5.
+CONSOLEOS_CMDLINE=
+IFS= read -r CONSOLEOS_CMDLINE </proc/cmdline || CONSOLEOS_CMDLINE=
+case " $CONSOLEOS_CMDLINE " in
+  *" consoleos_early_display_selector_test=1 "*)
+    printf 'consoleos-selector-test result=%s helper=%s\\n' \
+      "$CONSOLEOS_SELECTOR_RESULT" "$CONSOLEOS_SELECTED_HELPER" >/dev/console
+    /usr/bin/busybox cat /run/consoleos-early-display-selector.log >/dev/console
+    /usr/bin/busybox cat /run/consoleos-early-display-bundle-hash.log \
+      >/dev/console 2>/dev/null
+    /usr/bin/busybox poweroff -f
+    /usr/bin/busybox sleep 10
+    exit 0
+    ;;
+esac
+
+"$CONSOLEOS_SELECTED_HELPER" --handoff
+CONSOLEOS_HELPER_RC=$?
+case "$CONSOLEOS_SELECTOR_RESULT:$CONSOLEOS_HELPER_RC" in
+  external-valid:0) ;;
+  external-valid:*)
+    "$CONSOLEOS_EMBEDDED_HELPER" --handoff >/dev/null 2>&1
+    ;;
+esac
+# The /init wrapper is reserved for selector failures, not a second retry when
+# the embedded display helper itself cannot activate the device.
+exit 0
+""")
 PY
 chmod 0755 "${early_splash_overlay}/init" \
-    "${early_splash_overlay}/usr/bin/consoleos-early-splash"
+    "${early_splash_overlay}/usr/bin/consoleos-early-splash" \
+    "${early_splash_overlay}/usr/bin/consoleos-early-display-selector"
+"${initramfs_busybox}" ash -n \
+    "${early_splash_overlay}/usr/bin/consoleos-early-display-selector"
+if grep -E '^[[:space:]]*echo([[:space:]]|$)' \
+    "${early_splash_overlay}/usr/bin/consoleos-early-display-selector" >/dev/null; then
+    printf 'Selector must not invoke the unavailable echo applet\n' >&2
+    exit 1
+fi
 (
     cd "${early_splash_overlay}"
     find . -print0 | LC_ALL=C sort -z | \
@@ -220,10 +314,19 @@ chmod 0755 "${early_splash_overlay}/init" \
 )
 sha256sum "${early_splash_overlay}/usr/bin/consoleos-early-splash" \
     > "${out}/consoleos-early-splash.sha256"
+sha256sum "${early_splash_overlay}/usr/bin/consoleos-early-display-selector" \
+    > "${out}/consoleos-early-display-selector.sha256"
 (
     cd "${boot_display_target}"
     find profiles -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum
 ) > "${out}/consoleos-boot-display-assets.sha256"
+python3 "${kit}/rocknix/build-early-display-bundle.py" \
+    --source "${kit}/rocknix" \
+    --output "${out}/redika-early-display.cpio" \
+    --report "${out}/redika-early-display-bundle.json" \
+    --cc "${host_cc}"
+sha256sum "${out}/redika-early-display.cpio" \
+    > "${out}/redika-early-display.cpio.sha256"
 bash "${source_dir}/scripts/extract-ikconfig" "${work}/KERNEL" > "${out}/stock.config"
 unsquashfs -d "${work}/stock-root" "${work}/SYSTEM" usr/lib/kernel-overlays/base/lib/firmware
 cd "${source_dir}"

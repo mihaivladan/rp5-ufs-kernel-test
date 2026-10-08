@@ -13,12 +13,19 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <linux/fb.h>
+#ifdef CONSOLEOS_EXTERNAL_BUNDLE
+#include <linux/netlink.h>
+#include <poll.h>
+#endif
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/ioctl.h>
 #include <sys/mman.h>
+#ifdef CONSOLEOS_EXTERNAL_BUNDLE
+#include <sys/socket.h>
+#endif
 #include <sys/stat.h>
 #include <time.h>
 #include <unistd.h>
@@ -524,6 +531,9 @@ static int draw_redika(struct framebuffer *fb,
 	       activation->mode_matches && activation->connector_enabled ? 0 : -1;
 }
 
+#ifdef CONSOLEOS_EXTERNAL_BUNDLE
+__attribute__((unused))
+#endif
 static int handoff_firmware_frame(void)
 {
 	const struct boot_display_profile *profile;
@@ -640,6 +650,240 @@ out:
 	return result;
 }
 
+#ifdef CONSOLEOS_EXTERNAL_BUNDLE
+#define EXTERNAL_HANDOFF_TIMEOUT_MS 10000
+#define UEVENT_BUFFER_BYTES 4096
+
+static uint64_t monotonic_ns(void)
+{
+	struct timespec now;
+
+	if (clock_gettime(CLOCK_MONOTONIC, &now))
+		return 0;
+	return (uint64_t)now.tv_sec * 1000000000ULL + (uint64_t)now.tv_nsec;
+}
+
+static void log_external_stage(FILE *log, const char *stage, uint64_t started)
+{
+	uint64_t now = monotonic_ns();
+
+	if (!log)
+		return;
+	if (!now || !started)
+		fprintf(log, "external-stage %s elapsed_us=unavailable\n", stage);
+	else
+		fprintf(log, "external-stage %s elapsed_us=%llu\n", stage,
+			(unsigned long long)((now - started) / 1000ULL));
+	fflush(log);
+}
+
+static int open_uevent_socket(void)
+{
+	struct sockaddr_nl address;
+	int fd;
+
+	fd = socket(AF_NETLINK, SOCK_DGRAM | SOCK_CLOEXEC,
+		    NETLINK_KOBJECT_UEVENT);
+	if (fd < 0)
+		return -1;
+	memset(&address, 0, sizeof(address));
+	address.nl_family = AF_NETLINK;
+	address.nl_pid = (uint32_t)getpid();
+	address.nl_groups = 1;
+	if (bind(fd, (struct sockaddr *)&address, sizeof(address))) {
+		close(fd);
+		return -1;
+	}
+	return fd;
+}
+
+static int wait_for_uevent(int fd, int timeout_ms)
+{
+	struct pollfd descriptor = {
+		.fd = fd,
+		.events = POLLIN,
+	};
+	char buffer[UEVENT_BUFFER_BYTES];
+	int result;
+
+	do {
+		result = poll(&descriptor, 1, timeout_ms);
+	} while (result < 0 && errno == EINTR);
+	if (result <= 0)
+		return result;
+	if (!(descriptor.revents & POLLIN))
+		return -1;
+	if (recv(fd, buffer, sizeof(buffer), MSG_DONTWAIT) < 0 &&
+	    errno != EAGAIN && errno != EWOULDBLOCK)
+		return -1;
+	return 1;
+}
+
+static int draw_redika_external(struct framebuffer *fb,
+				const struct boot_display_profile *profile,
+				const uint8_t *logo, FILE *log,
+				uint64_t framebuffer_ready)
+{
+	struct fb_var_screeninfo requested;
+	struct fb_var_screeninfo readback;
+	unsigned int bytes_per_pixel = (fb->var.bits_per_pixel + 7U) / 8U;
+	unsigned int x;
+	unsigned int y;
+	int unblank = FB_BLANK_UNBLANK;
+	int put_rc;
+	int put_errno;
+	int pan_rc;
+	int pan_errno;
+	int unblank_rc;
+	int unblank_errno;
+	int get_rc;
+	int get_errno;
+	int mode_matches = 0;
+	int connector_enabled;
+
+	if (!framebuffer_matches_profile(fb, profile))
+		return -1;
+
+	/*
+	 * Populate the scanout before the first forced modeset.  The accepted
+	 * embedded fallback activates first and writes second; the external path
+	 * removes that avoidable setup from the panel-power-on critical path.
+	 * The mmap is the DRM fbdev scanout itself, so a synchronous msync adds no
+	 * visibility guarantee; the following ioctls provide the commit ordering.
+	 */
+	memset(fb->mapping, 0, fb->mapping_size);
+	for (y = 0; y < profile->logo_height; y++) {
+		uint8_t *row = fb->mapping +
+			(size_t)(profile->logo_y + y + fb->var.yoffset) *
+				fb->fix.line_length +
+			(size_t)(profile->logo_x + fb->var.xoffset) *
+				bytes_per_pixel;
+		for (x = 0; x < profile->logo_width; x++) {
+			size_t input = ((size_t)y * profile->logo_width + x) * 4U;
+			uint32_t value = pixel_value(logo[input + 2], logo[input + 1],
+						   logo[input], &fb->var);
+			store_pixel(row + (size_t)x * bytes_per_pixel, value,
+				    bytes_per_pixel);
+		}
+	}
+	log_external_stage(log, "pixels-ready", framebuffer_ready);
+
+	requested = fb->var;
+	requested.activate = FB_ACTIVATE_NOW | FB_ACTIVATE_FORCE;
+	errno = 0;
+	put_rc = ioctl(fb->fd, FBIOPUT_VSCREENINFO, &requested);
+	put_errno = put_rc < 0 ? errno : 0;
+	log_external_stage(log, "put-complete", framebuffer_ready);
+	errno = 0;
+	pan_rc = ioctl(fb->fd, FBIOPAN_DISPLAY, &requested);
+	pan_errno = pan_rc < 0 ? errno : 0;
+	log_external_stage(log, "pan-complete", framebuffer_ready);
+	errno = 0;
+	unblank_rc = ioctl(fb->fd, FBIOBLANK, unblank);
+	unblank_errno = unblank_rc < 0 ? errno : 0;
+	log_external_stage(log, "unblank-complete", framebuffer_ready);
+	errno = 0;
+	get_rc = ioctl(fb->fd, FBIOGET_VSCREENINFO, &readback);
+	get_errno = get_rc < 0 ? errno : 0;
+	if (!get_rc)
+		mode_matches = readback.xres == requested.xres &&
+			readback.yres == requested.yres &&
+			readback.xoffset == requested.xoffset &&
+			readback.yoffset == requested.yoffset &&
+			readback.bits_per_pixel == requested.bits_per_pixel;
+	connector_enabled = dsi_connector_enabled();
+	if (log) {
+		fprintf(log,
+			"external-activation put=%d:%d pan=%d:%d unblank=%d:%d "
+			"get=%d:%d mode_matches=%d connector_enabled=%d\n",
+			put_rc, put_errno, pan_rc, pan_errno,
+			unblank_rc, unblank_errno, get_rc, get_errno,
+			mode_matches, connector_enabled);
+		fflush(log);
+	}
+	log_external_stage(log, "verification-complete", framebuffer_ready);
+	return unblank_rc == 0 && (put_rc == 0 || pan_rc == 0) &&
+		mode_matches && connector_enabled ? 0 : -1;
+}
+
+static int handoff_external_frame(void)
+{
+	const struct boot_display_profile *profile;
+	struct framebuffer target;
+	uint8_t *logo = NULL;
+	uint64_t deadline;
+	FILE *log;
+	int uevent_fd = -1;
+	int result = 1;
+
+	log = fopen("/run/consoleos-early-display.log", "w");
+	log_marker(log, "start-external", NULL);
+	profile = select_display_profile(log);
+	if (!profile || read_logo_asset(profile, &logo))
+		goto out;
+	log_marker(log, "asset-ready-external", NULL);
+	uevent_fd = open_uevent_socket();
+	if (uevent_fd < 0) {
+		if (log) {
+			fprintf(log, "uevent-socket-failed errno=%d\n", errno);
+			fflush(log);
+		}
+		goto out;
+	}
+	deadline = monotonic_ns() +
+		(uint64_t)EXTERNAL_HANDOFF_TIMEOUT_MS * 1000000ULL;
+	for (;;) {
+		int index;
+
+		for (index = 0; index < 4; index++) {
+			char path[16];
+			uint64_t ready;
+
+			snprintf(path, sizeof(path), "/dev/fb%d", index);
+			if (open_framebuffer(path, &target))
+				continue;
+			if (!is_msm_framebuffer(&target)) {
+				close_framebuffer(&target);
+				continue;
+			}
+			ready = monotonic_ns();
+			log_marker(log, "msm-fb-ready", &target);
+			if (!draw_redika_external(&target, profile, logo, log, ready)) {
+				log_marker(log, "activated-msm", &target);
+				result = 0;
+			} else {
+				log_marker(log, "activation-failed-msm", &target);
+			}
+			close_framebuffer(&target);
+			goto out;
+		}
+
+		{
+			uint64_t now = monotonic_ns();
+			uint64_t remaining;
+			int timeout_ms;
+
+			if (!now || now >= deadline)
+				break;
+			remaining = deadline - now;
+			timeout_ms = (int)((remaining + 999999ULL) / 1000000ULL);
+			if (wait_for_uevent(uevent_fd, timeout_ms) <= 0)
+				break;
+		}
+	}
+
+out:
+	if (result)
+		log_marker(log, "failed", NULL);
+	if (uevent_fd >= 0)
+		close(uevent_fd);
+	if (log)
+		fclose(log);
+	free(logo);
+	return result;
+}
+#endif
+
 static int wait_for_fb(void)
 {
 	struct timespec delay = { .tv_nsec = 100000000 };
@@ -677,7 +921,11 @@ int main(int argc, char **argv)
 	int result = 1;
 
 	if (argc == 2 && !strcmp(argv[1], "--handoff"))
+#ifdef CONSOLEOS_EXTERNAL_BUNDLE
+		return handoff_external_frame();
+#else
 		return handoff_firmware_frame();
+#endif
 	if (argc != 2) {
 		fprintf(stderr, "usage: %s --handoff | IMAGE.bmp\n", argv[0]);
 		return 2;

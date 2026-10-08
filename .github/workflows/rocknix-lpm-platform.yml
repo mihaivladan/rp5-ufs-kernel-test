@@ -6,6 +6,7 @@ on:
     paths:
       - '.github/workflows/rocknix-lpm-platform.yml'
       - 'rocknix/build.sh'
+      - 'rocknix/build-early-display-bundle.py'
       - 'rocknix/prepare.py'
       - 'rocknix/consoleos-early-splash.c'
       - 'rocknix/generate-early-display-profiles.py'

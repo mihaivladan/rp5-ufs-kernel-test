@@ -62,6 +62,19 @@ Included kernel changes:
 - Retroid gamepad and HTR3212 bound-driver system PM for the shared rail.
 - opt-in pwm-fan startup policy, with RP5 starting at 0% rather than
   ROCKNIX's fixed PWM 70 probe policy.
+- `CONFIG_RAID6_PQ_BENCHMARK=n`; the unused boot-time RAID6 implementation
+  benchmark is not run.
+
+The kernel keeps the accepted early-display helper and its assets embedded as
+a frozen fallback.  Normal boot may additionally load
+`/boot/redika/redika-early-display.cpio`.  That archive unpacks only below
+`/consoleos/early-display-external`, so a missing, truncated, or partially
+unpacked archive cannot overwrite the fallback.  The embedded `/init` selects
+the external helper only after its complete `SHA256SUMS` passes with the exact
+initramfs BusyBox.  A selector error or external-helper failure runs the
+embedded helper.  The external CPIO is reproducible and self-contained, which
+makes later helper or artwork releases one hash-locked file replacement rather
+than another kernel build.
 
 The DT is source-built from the proven Phase 4A wireless baseline, enables
 exactly the accepted Phase 4AT product stack, and removes only

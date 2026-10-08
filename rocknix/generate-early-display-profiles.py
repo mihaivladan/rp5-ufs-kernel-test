@@ -102,7 +102,7 @@ def native_rect(
     raise SystemExit(f"unsupported rotation: {rotation}")
 
 
-def load_profile(directory: Path) -> dict:
+def load_profile(directory: Path, asset_root: str) -> dict:
     cfg = directory / "device.cfg"
     logo = directory / "logo-linux-fbdev.bgra"
     if not cfg.is_file() or not logo.is_file():
@@ -181,7 +181,7 @@ def load_profile(directory: Path) -> dict:
         "logo_width": nw,
         "logo_height": nh,
         "logo_path": (
-            f"/usr/share/consoleos/boot-display/profiles/{profile_id}/"
+            f"{asset_root}/{profile_id}/"
             "logo-linux-fbdev.bgra"
         ),
     }
@@ -191,12 +191,24 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--profiles", required=True, type=Path)
     parser.add_argument("--output", required=True, type=Path)
+    parser.add_argument(
+        "--asset-root",
+        default="/usr/share/consoleos/boot-display/profiles",
+    )
     args = parser.parse_args()
+
+    if (
+        not args.asset_root.startswith("/")
+        or args.asset_root.endswith("/")
+        or not args.asset_root.isascii()
+        or any(ord(char) < 0x20 for char in args.asset_root)
+    ):
+        raise SystemExit("asset root must be a normalized absolute ASCII path")
 
     directories = sorted(path for path in args.profiles.iterdir() if path.is_dir())
     if not directories or len(directories) > MAX_PROFILES:
         raise SystemExit(f"expected 1..{MAX_PROFILES} device profiles")
-    profiles = [load_profile(path) for path in directories]
+    profiles = [load_profile(path, args.asset_root) for path in directories]
     owners: dict[str, str] = {}
     for profile in profiles:
         for compatible in profile["compatibles"]:
