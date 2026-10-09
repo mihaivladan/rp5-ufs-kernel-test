@@ -148,6 +148,8 @@ def main() -> None:
     if candidate[f"{PANEL_MIPI_VDD}/regulator-boot-on"] != b"" or \
        candidate[f"{PANEL_MIPI_VDD}/enable-active-high"] != b"":
         raise SystemExit("GPIO28 panel MIPI-VDD regulator policy mismatch")
+    if candidate[f"{PANEL_MIPI_VDD}/phandle"] != struct.pack(">I", 0x10001):
+        raise SystemExit("GPIO28 panel MIPI-VDD regulator phandle is not stable")
     tlmm_phandle = candidate["/soc@0/pinctrl@f100000/phandle"]
     if candidate[f"{PANEL_MIPI_VDD}/gpio"] != \
        tlmm_phandle + struct.pack(">II", 28, 0):

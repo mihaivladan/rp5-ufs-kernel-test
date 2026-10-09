@@ -567,6 +567,7 @@ elif profile in ('adsp-no-auto-ab', 'lpass-devote-fix', 'lpass-pm-clock', 'audio
                 'CONFIG_FTRACE=y', 'CONFIG_FUNCTION_TRACER=y',
                 'CONFIG_FUNCTION_GRAPH_TRACER=y', 'CONFIG_DYNAMIC_FTRACE=y',
                 'CONFIG_KPROBES=y', 'CONFIG_KPROBE_EVENTS=y',
+                'CONFIG_UPROBES=y', 'CONFIG_UPROBE_EVENTS=y',
                 'CONFIG_FTRACE_SYSCALLS=y', 'CONFIG_SCHED_TRACER=y',
                 'CONFIG_DYNAMIC_DEBUG=y', 'CONFIG_BPF_EVENTS=y',
                 'CONFIG_DEBUG_INFO_DWARF_TOOLCHAIN_DEFAULT=y',

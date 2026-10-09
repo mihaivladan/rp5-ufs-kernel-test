@@ -12,6 +12,8 @@
 
 / {
 	consoleos_panel_mipi_vdd: consoleos-panel-mipi-vdd-regulator {
+		/* Keep every inherited RP5 phandle stable across this one-node delta. */
+		phandle = <0x10001>;
 		compatible = "regulator-fixed";
 		regulator-name = "consoleos_panel_mipi_vdd";
 		regulator-boot-on;
