@@ -1044,11 +1044,11 @@ if [[ "${profile}" == consoleos-rc1-diagnostic ]]; then
 fi
 if [[ "${profile}" == consoleos-rc1 ]]; then
     printf '%s\n' \
-        'ConsoleOS RC17 productpm6 passed: runtime-gated PM timing support, blocking fuel-gauge diagnostics absent, ordered single-attempt deferred QCA/QRTR restore, SDAM built-in, corrected panel/Type-C DT, ARM64 zstd EFI zboot format, modules, DTB and external helper bundle. Not installed or device-tested.' \
+        'ConsoleOS RC17 productpm7 passed: runtime-gated PM timing support, blocking fuel-gauge diagnostics absent, ordered single-attempt deferred QCA/QRTR restore, background input resume, SDAM built-in, corrected panel/Type-C DT, ARM64 zstd EFI zboot format, modules, DTB and external helper bundle. Not installed or device-tested.' \
         > BUILD-SUCCESS.txt
 elif [[ "${profile}" == consoleos-rc1-diagnostic ]]; then
     printf '%s\n' \
-        'ConsoleOS RC17 productpm6 diagnostic pair passed: exact product source/DT/config plus pinned debug overlay and PM8150B coulomb-counter patch. Not installed or device-tested.' \
+        'ConsoleOS RC17 productpm7 diagnostic pair passed: exact product source/DT/config plus pinned debug overlay and PM8150B coulomb-counter patch. Not installed or device-tested.' \
         > BUILD-SUCCESS.txt
 else
     printf '%s\n' "Build and artifact checks passed for ${profile}. Not installed or boot-tested." > BUILD-SUCCESS.txt
