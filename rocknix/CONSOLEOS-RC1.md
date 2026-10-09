@@ -64,7 +64,9 @@ Included kernel changes:
 - endpoint-absent PCIe resource suspend with fail-closed downstream-device
   detection;
 - Android-style PCIe0 `default`/`sleep` pinctrl switching for GPIO80;
-- PM8150B Gen4 coulomb-counter diagnostics;
+- the PM8150B Gen4 coulomb-counter diagnostic patch is deliberately excluded
+  from the product profile: its synchronous `charge_counter` read blocks the
+  battery `uevent` path for repeated timeouts during early userspace startup;
 - Retroid gamepad rumble-device cleanup on serdev unbind/rebind;
 - RPMh regulator SLEEP/WAKE support and ACTIVE-to-SLEEP cache mirroring;
 - regulator-core application of existing `state_mem` policy during s2idle;

@@ -151,7 +151,7 @@ def apply_patches(repo, source, fix, profile):
                 "2c57942a2912ac64460386283b926f5cd7a245770b14f4c073b2d7a178bdce2f",
                 "Qualcomm PCIe offline pinctrl patch checksum mismatch")
         extra_patches.extend((offline_fix, pinctrl_fix))
-    if profile in ("fg-coulomb-counter", "consoleos-rc1"):
+    if profile == "fg-coulomb-counter":
         fg_counter = Path(__file__).resolve().parent / "qcom-fg-gen4-coulomb-counter.patch"
         require(fg_counter.is_file(), "Missing PM8150B Gen4 coulomb-counter patch")
         require(hashlib.sha256(fg_counter.read_bytes()).hexdigest() ==
@@ -550,7 +550,7 @@ def main():
         ),
         "pm8150b_gen4_coulomb_diagnostics": (
             "Revision-selected raw CC_SOC/CC_SOC_SW/BATT_SOC plus derived microamp-hours"
-            if profile in ("fg-coulomb-counter", "consoleos-rc1") else None
+            if profile == "fg-coulomb-counter" else None
         ),
         "consoleos_rc1_policy": (
             "Accepted Phase 4AT full stack; shared MCU/RGB/gamepad rail controllable; "

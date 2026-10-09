@@ -96,16 +96,16 @@ jobs:
       - name: Prepare ConsoleOS RP5 product zboot source
         run: |
           set -euo pipefail
-          bash rocknix/build.sh prepare 2>&1 | tee rocknix-consoleos-rc17-productpm3-prepare.log
+          bash rocknix/build.sh prepare 2>&1 | tee rocknix-consoleos-rc17-productpm4-prepare.log
       - name: Build ConsoleOS RP5 product zboot kernel and modules
         run: |
           set -euo pipefail
-          bash rocknix/build.sh compile 2>&1 | tee rocknix-consoleos-rc17-productpm3-compile.log
+          bash rocknix/build.sh compile 2>&1 | tee rocknix-consoleos-rc17-productpm4-compile.log
       - name: Report kernel compiler cache
         if: always()
         run: |
           if command -v ccache >/dev/null 2>&1; then
-            ccache --show-stats --verbose | tee rocknix-consoleos-rc17-productpm3-ccache.log
+            ccache --show-stats --verbose | tee rocknix-consoleos-rc17-productpm4-ccache.log
           fi
       - name: Save successful kernel compiler cache
         if: success()
@@ -117,12 +117,12 @@ jobs:
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
-          name: rocknix-rp5-consoleos-rc17-productpm3-zboot
+          name: rocknix-rp5-consoleos-rc17-productpm4-zboot
           retention-days: 14
           compression-level: 0
           if-no-files-found: error
           path: |
             rocknix-out/
-            rocknix-consoleos-rc17-productpm3-prepare.log
-            rocknix-consoleos-rc17-productpm3-compile.log
-            rocknix-consoleos-rc17-productpm3-ccache.log
+            rocknix-consoleos-rc17-productpm4-prepare.log
+            rocknix-consoleos-rc17-productpm4-compile.log
+            rocknix-consoleos-rc17-productpm4-ccache.log

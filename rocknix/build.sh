@@ -53,7 +53,7 @@ fg-coulomb-counter)
     ;;
 consoleos-rc1)
     config_fragment="${kit}/rocknix/consoleos-rc1.config"
-    expected_release='7.2.0-consoleos-rc17-productpm3'
+    expected_release='7.2.0-consoleos-rc17-productpm4'
     artifact_name="rocknix-${expected_release}.tar.zst"
     dtb_name='sm8250-retroidpocket-rp5-consoleos-rc1'
     ;;
@@ -489,7 +489,7 @@ elif sys.argv[2] in ('adsp-no-auto-ab', 'lpass-devote-fix', 'lpass-pm-clock', 'a
             raise SystemExit('PCIe DRV PM ordering markers missing')
         if not all(marker in transport for marker in required_transport):
             raise SystemExit('PCIe DRV wire-protocol markers missing')
-    if sys.argv[2] in ('fg-coulomb-counter', 'consoleos-rc1'):
+    if sys.argv[2] == 'fg-coulomb-counter':
         fg = Path('drivers/power/supply/qcom_fg.c').read_text()
         required_fg = (
             'POWER_SUPPLY_PROP_CHARGE_COUNTER,',
@@ -503,6 +503,15 @@ elif sys.argv[2] in ('adsp-no-auto-ab', 'lpass-devote-fix', 'lpass-pm-clock', 'a
         if not all(marker in fg for marker in required_fg):
             raise SystemExit('PM8150B Gen4 coulomb diagnostic markers missing')
     if sys.argv[2] == 'consoleos-rc1':
+        fg = Path('drivers/power/supply/qcom_fg.c').read_text()
+        forbidden_fg = (
+            'POWER_SUPPLY_PROP_CHARGE_COUNTER,',
+            'static int qcom_fg_gen4_read_diag(',
+            'static DEVICE_ATTR_RO(gen4_diagnostics);',
+        )
+        present_fg = [marker for marker in forbidden_fg if marker in fg]
+        if present_fg:
+            raise SystemExit('Product fuel-gauge diagnostics still present: ' + ', '.join(present_fg))
         required_product = {
             'CONFIG_DEBUG_INFO_NONE=y',
             'CONFIG_EFI_ZBOOT=y',
@@ -926,7 +935,7 @@ if [[ "${profile}" == pcie-drv-handoff || "${profile}" == audio-pcie-integration
     objdump -drS drivers/pci/controller/dwc/pcie-qcom.o > "${out}/pcie-qcom-disassembly.txt"
     objdump -drS drivers/pci/controller/dwc/pcie-qcom-drv.o > "${out}/pcie-qcom-drv-disassembly.txt"
 fi
-if [[ "${profile}" == fg-coulomb-counter || "${profile}" == consoleos-rc1 ]]; then
+if [[ "${profile}" == fg-coulomb-counter ]]; then
     cp drivers/power/supply/qcom_fg.c drivers/power/supply/qcom_fg.o "${out}/"
     objdump -drS drivers/power/supply/qcom_fg.o > "${out}/qcom-fg-disassembly.txt"
 fi
@@ -969,7 +978,7 @@ cd "${out}"
 sha256sum "${artifact_name}" > SHA256SUMS
 if [[ "${profile}" == consoleos-rc1 ]]; then
     printf '%s\n' \
-        'ConsoleOS RC17 productpm3 passed: product debug/tracing exclusions, RAID6 benchmark disabled, ARM64 zstd EFI zboot format, modules, DTB and external helper bundle. Not installed or device-tested.' \
+        'ConsoleOS RC17 productpm4 passed: product debug/tracing exclusions, blocking fuel-gauge diagnostics absent, RAID6 benchmark disabled, ARM64 zstd EFI zboot format, modules, DTB and external helper bundle. Not installed or device-tested.' \
         > BUILD-SUCCESS.txt
 else
     printf '%s\n' "Build and artifact checks passed for ${profile}. Not installed or boot-tested." > BUILD-SUCCESS.txt
