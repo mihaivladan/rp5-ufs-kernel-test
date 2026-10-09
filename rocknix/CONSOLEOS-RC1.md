@@ -1,5 +1,14 @@
 # ConsoleOS RP5 RC17 product-PM kernel
 
+## Product PM3 kernel packaging
+
+The product build emits Linux 7.2's ARM64 `vmlinuz.efi` zboot image with a
+zstd-compressed payload as `boot/KERNEL`. The resolved config must disable the
+RAID6 boot benchmark and the product-excluded debug/tracing families: DWARF and
+BTF debug info, `KALLSYMS_ALL`, ftrace, kprobes, uprobes, BPF events, dynamic
+debug and PM debug. `KALLSYMS`, `DEBUG_FS`, ordinary BPF networking support,
+the built-in early-display fallback and the external helper bundle remain.
+
 This profile consolidates the device-tested native Linux fixes on the ROCKNIX
 20260901 / Linux 7.2 baseline. It deliberately excludes diagnostic changes
 that failed, had no measurable effect, or widened the test matrix.

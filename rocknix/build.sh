@@ -53,7 +53,7 @@ fg-coulomb-counter)
     ;;
 consoleos-rc1)
     config_fragment="${kit}/rocknix/consoleos-rc1.config"
-    expected_release='7.2.0-consoleos-rc17-productpm2'
+    expected_release='7.2.0-consoleos-rc17-productpm3'
     artifact_name="rocknix-${expected_release}.tar.zst"
     dtb_name='sm8250-retroidpocket-rp5-consoleos-rc1'
     ;;
@@ -503,6 +503,30 @@ elif sys.argv[2] in ('adsp-no-auto-ab', 'lpass-devote-fix', 'lpass-pm-clock', 'a
         if not all(marker in fg for marker in required_fg):
             raise SystemExit('PM8150B Gen4 coulomb diagnostic markers missing')
     if sys.argv[2] == 'consoleos-rc1':
+        required_product = {
+            'CONFIG_DEBUG_INFO_NONE=y',
+            'CONFIG_EFI_ZBOOT=y',
+            'CONFIG_KERNEL_ZSTD=y',
+        }
+        absent_product = sorted(required_product - actual)
+        if absent_product:
+            raise SystemExit('Product/zboot settings missing: ' + ', '.join(absent_product))
+        forbidden_product = {
+            'CONFIG_PM_DEBUG', 'CONFIG_PM_ADVANCED_DEBUG', 'CONFIG_PM_SLEEP_DEBUG',
+            'CONFIG_KALLSYMS_ALL', 'CONFIG_FTRACE', 'CONFIG_FUNCTION_TRACER',
+            'CONFIG_FUNCTION_GRAPH_TRACER', 'CONFIG_DYNAMIC_FTRACE',
+            'CONFIG_KPROBES', 'CONFIG_KPROBE_EVENTS', 'CONFIG_UPROBES',
+            'CONFIG_UPROBE_EVENTS', 'CONFIG_FTRACE_SYSCALLS', 'CONFIG_SCHED_TRACER',
+            'CONFIG_DYNAMIC_DEBUG', 'CONFIG_DEBUG_INFO',
+            'CONFIG_DEBUG_INFO_DWARF_TOOLCHAIN_DEFAULT', 'CONFIG_DEBUG_INFO_DWARF4',
+            'CONFIG_DEBUG_INFO_DWARF5', 'CONFIG_DEBUG_INFO_REDUCED',
+            'CONFIG_DEBUG_INFO_SPLIT', 'CONFIG_DEBUG_INFO_BTF',
+            'CONFIG_DEBUG_INFO_BTF_MODULES', 'CONFIG_BPF_EVENTS',
+            'CONFIG_RAID6_PQ_BENCHMARK',
+        }
+        enabled_forbidden = sorted(forbidden_product & enabled)
+        if enabled_forbidden:
+            raise SystemExit('Forbidden product settings enabled: ' + ', '.join(enabled_forbidden))
         pcie = Path('drivers/pci/controller/dwc/pcie-qcom.c').read_text()
         required_pcie_offline = (
             'bool drv_offline;',
@@ -824,10 +848,44 @@ if [[ "${profile}" == diagnostic || "${profile}" == gpu-rpmh-fix || "${profile}"
     # The previous build exposed an uninitialized cstate pointer in this file.
     printf '\nCFLAGS_dpu_crtc.o += -Werror=uninitialized -Werror=maybe-uninitialized\n' >> drivers/gpu/drm/msm/disp/dpu1/Makefile
 fi
-make "${make_args[@]}" -j"$(nproc)" Image modules
+kernel_target=Image
+kernel_source=arch/arm64/boot/Image
+if [[ "${profile}" == consoleos-rc1 ]]; then
+    kernel_target=vmlinuz.efi
+    kernel_source=arch/arm64/boot/vmlinuz.efi
+fi
+make "${make_args[@]}" -j"$(nproc)" "${kernel_target}" modules
 stage="${work}/stage"
 mkdir -p "${stage}/boot" "${stage}/lib/modules"
-cp arch/arm64/boot/Image "${stage}/boot/KERNEL"
+cp "${kernel_source}" "${stage}/boot/KERNEL"
+if [[ "${profile}" == consoleos-rc1 ]]; then
+    python3 - "${kernel_source}" arch/arm64/boot/Image <<'PY'
+from pathlib import Path
+import struct
+import sys
+
+zboot = Path(sys.argv[1]).read_bytes()
+image = Path(sys.argv[2]).read_bytes()
+if zboot[:2] != b'MZ':
+    raise SystemExit('EFI zboot image is missing DOS MZ signature')
+pe = struct.unpack_from('<I', zboot, 0x3c)[0]
+if zboot[pe:pe + 4] != b'PE\0\0':
+    raise SystemExit('EFI zboot image is missing PE signature')
+machine = struct.unpack_from('<H', zboot, pe + 4)[0]
+if machine != 0xaa64:
+    raise SystemExit(f'EFI zboot machine is not ARM64: 0x{machine:04x}')
+if b'zstd' not in zboot[:4096]:
+    raise SystemExit('EFI zboot header does not declare zstd compression')
+if len(zboot) >= len(image):
+    raise SystemExit('EFI zboot image is not smaller than the raw Image')
+print(f'EFI zboot verified: {len(zboot)} bytes; raw Image: {len(image)} bytes')
+PY
+    {
+        wc -c arch/arm64/boot/Image arch/arm64/boot/vmlinuz.efi
+        file arch/arm64/boot/vmlinuz.efi
+        objdump -f arch/arm64/boot/vmlinuz.efi
+    } > "${out}/kernel-image-sizes-and-format.txt"
+fi
 cp "arch/arm64/boot/dts/qcom/${dtb_name}.dtb" "${stage}/boot/"
 make "${make_args[@]}" INSTALL_MOD_PATH="${stage}" INSTALL_MOD_STRIP=1 modules_install
 rm -f "${stage}/lib/modules/${release}/build" "${stage}/lib/modules/${release}/source"
@@ -892,7 +950,7 @@ if [[ "${profile}" == consoleos-rc1 ]]; then
     objdump -drS drivers/gpu/drm/msm/msm_mdss.o \
         > "${out}/msm-mdss-disassembly.txt"
 fi
-if [[ "${profile}" == diagnostic || "${profile}" == gpu-rpmh-fix || "${profile}" == sleepstate-handshake || "${profile}" == adsp-no-auto-ab || "${profile}" == lpass-devote-fix || "${profile}" == lpass-pm-clock || "${profile}" == audio-pcie-integration || "${profile}" == fg-coulomb-counter || "${profile}" == consoleos-rc1 || "${profile}" == pcie-drv-handoff || "${profile}" == slpi-integrated || "${profile}" == lpm-platform ]]; then
+if [[ "${profile}" == diagnostic || "${profile}" == gpu-rpmh-fix || "${profile}" == sleepstate-handshake || "${profile}" == adsp-no-auto-ab || "${profile}" == lpass-devote-fix || "${profile}" == lpass-pm-clock || "${profile}" == audio-pcie-integration || "${profile}" == fg-coulomb-counter || "${profile}" == pcie-drv-handoff || "${profile}" == slpi-integrated || "${profile}" == lpm-platform ]]; then
     objcopy --dump-section .BTF="${out}/vmlinux.btf" vmlinux
     cp drivers/gpu/drm/msm/disp/dpu1/dpu_crtc.c drivers/gpu/drm/msm/disp/dpu1/dpu_crtc.o "${out}/"
     objdump -drS drivers/gpu/drm/msm/disp/dpu1/dpu_crtc.o > "${out}/dpu_crtc-disassembly.txt"
@@ -901,10 +959,16 @@ elif [[ "${profile}" == gmu-clock-reset ]]; then
 fi
 test -s "${stage}/boot/KERNEL"
 test -s "${stage}/lib/modules/${release}/modules.dep"
-if [[ "${profile}" == diagnostic || "${profile}" == gpu-rpmh-fix || "${profile}" == sleepstate-handshake || "${profile}" == adsp-no-auto-ab || "${profile}" == lpass-devote-fix || "${profile}" == lpass-pm-clock || "${profile}" == audio-pcie-integration || "${profile}" == fg-coulomb-counter || "${profile}" == consoleos-rc1 || "${profile}" == pcie-drv-handoff || "${profile}" == slpi-integrated || "${profile}" == lpm-platform ]]; then
+if [[ "${profile}" == diagnostic || "${profile}" == gpu-rpmh-fix || "${profile}" == sleepstate-handshake || "${profile}" == adsp-no-auto-ab || "${profile}" == lpass-devote-fix || "${profile}" == lpass-pm-clock || "${profile}" == audio-pcie-integration || "${profile}" == fg-coulomb-counter || "${profile}" == pcie-drv-handoff || "${profile}" == slpi-integrated || "${profile}" == lpm-platform ]]; then
     test -s "${out}/vmlinux.btf"
 fi
 tar -C "${stage}" -cf - boot lib | zstd -T0 -10 -o "${out}/${artifact_name}"
 cd "${out}"
 sha256sum "${artifact_name}" > SHA256SUMS
-printf '%s\n' "Build and artifact checks passed for ${profile}. Not installed or boot-tested." > BUILD-SUCCESS.txt
+if [[ "${profile}" == consoleos-rc1 ]]; then
+    printf '%s\n' \
+        'ConsoleOS RC17 productpm3 passed: product debug/tracing exclusions, RAID6 benchmark disabled, ARM64 zstd EFI zboot format, modules, DTB and external helper bundle. Not installed or device-tested.' \
+        > BUILD-SUCCESS.txt
+else
+    printf '%s\n' "Build and artifact checks passed for ${profile}. Not installed or boot-tested." > BUILD-SUCCESS.txt
+fi
