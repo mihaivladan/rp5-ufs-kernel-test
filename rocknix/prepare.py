@@ -211,7 +211,7 @@ def apply_patches(repo, source, fix, profile):
         require(deferred_qca_v2.is_file(),
                 "Missing ordered QCA6390 restore follow-up patch")
         require(hashlib.sha256(deferred_qca_v2.read_bytes()).hexdigest() ==
-                "9fc1690c5f641293fa73b1f14119731806d56d014ef75c29095673fb020aaf10",
+                "5396e34a616d6cea7414cca8fe5fe85f9c4a7d53074e4fbf31ce55159d084d87",
                 "Ordered QCA6390 restore follow-up checksum mismatch")
         extra_patches.append(deferred_qca_v2)
         gamepad_pm = (Path(__file__).resolve().parent /
@@ -222,6 +222,14 @@ def apply_patches(repo, source, fix, profile):
                 "caf4eafad145953f77de899102d984b36f8f5c7963d9a4b5ae8a1b3b5cac35a0",
                 "Retroid MCU/RGB system PM patch checksum mismatch")
         extra_patches.append(gamepad_pm)
+        input_background_resume = (Path(__file__).resolve().parent /
+                                   "input-background-resume.patch")
+        require(input_background_resume.is_file(),
+                "Missing RP5 background input-resume patch")
+        require(hashlib.sha256(input_background_resume.read_bytes()).hexdigest() ==
+                "a81bf77b6cde3f0a2a4c3cd68c3214d1cea151aeba68e37be38e2eb43e9e9f56",
+                "RP5 background input-resume patch checksum mismatch")
+        extra_patches.append(input_background_resume)
         fan_startup = (Path(__file__).resolve().parent /
                        "pwm-fan-configurable-startup.patch")
         require(fan_startup.is_file(),
@@ -346,15 +354,27 @@ def apply_patches(repo, source, fix, profile):
                 "CH13726A GPIO28 supply or 20 ms post-reset policy missing")
         ath11k_pci = (source /
                       "drivers/net/wireless/ath/ath11k/pci.c").read_text()
+        mhi_pm = (source / "drivers/bus/mhi/host/pm.c").read_text()
         qrtr_mhi = (source / "net/qrtr/mhi.c").read_text()
         require("module_param_cb(orderly_qca_restore," in ath11k_pci and
                 "module_param_cb(qca_restore_pending," in ath11k_pci and
                 "MHI_CHANNEL_SUSPEND_DEFERRED" in ath11k_pci and
                 "orderly_restore_failed" in ath11k_pci and
                 "QCA resume deferred; skipping blocking MHI/firmware resume" in ath11k_pci and
+                "mhi_notify_mission_mode" in mhi_pm and
+                "mhi_notify(to_mhi_device(dev), MHI_CB_EE_MISSION_MODE);" in mhi_pm and
                 "deferred autoqueue restore completed" in qrtr_mhi and
                 ".status_cb = qcom_mhi_qrtr_status_cb," in qrtr_mhi,
                 "Ordered deferred QCA/QRTR restore ownership markers missing")
+        gamepad = (source / "drivers/input/joystick/retroid.c").read_text()
+        touch = (source / "drivers/input/touchscreen/edt-ft5x06.c").read_text()
+        require("background MCU restore completed" in gamepad and
+                "queue_work(system_dfl_wq, &gamepad_dev->resume_work);" in gamepad and
+                "cancel_work_sync(&gamepad_dev->resume_work);" in gamepad and
+                "background touch restore completed" in touch and
+                "queue_work(system_dfl_wq, &tsdata->resume_work);" in touch and
+                "cancel_work_sync(&tsdata->resume_work);" in touch,
+                "RP5 background input-resume ownership markers missing")
         rpmh_regulator = (source / "drivers/regulator/qcom-rpmh-regulator.c").read_text()
         regulator_core = (source / "drivers/regulator/core.c").read_text()
         required_rpmh = (
@@ -609,7 +629,11 @@ def main():
             if profile in ("consoleos-rc1", "consoleos-rc1-diagnostic") else None
         ),
         "qca6390_orderly_poweroff": (
-            "Opt-in firmware OFF, WLAON shutdown, MHI down, PCIe L23 and true-zero ICC release; foreground-first restore with MHI mission-mode QRTR ordering and fail-closed single attempt"
+            "Opt-in firmware OFF, WLAON shutdown, MHI down, PCIe L23 and true-zero ICC release; foreground-first restore with controller-to-client MHI mission-mode notification, QRTR ordering and fail-closed single attempt"
+            if profile in ("consoleos-rc1", "consoleos-rc1-diagnostic") else None
+        ),
+        "background_input_resume": (
+            "Gamepad MCU and powered-off EDT touch restore on system_dfl_wq after thaw; suspend and remove synchronously drain work"
             if profile in ("consoleos-rc1", "consoleos-rc1-diagnostic") else None
         ),
         "diagnostic_delta": (

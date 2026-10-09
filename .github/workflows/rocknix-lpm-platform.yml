@@ -29,6 +29,7 @@ on:
       - 'rocknix/qcom-pcie-orderly-icc-release.patch'
       - 'rocknix/qca6390-deferred-restore.patch'
       - 'rocknix/qca6390-deferred-restore-v2.patch'
+      - 'rocknix/input-background-resume.patch'
       - 'rocknix/ch13726a-panel-product-fixes.patch'
       - 'rocknix/rpmh-regulator-suspend-state.patch'
       - 'rocknix/regulator-core-s2idle-state-mem.patch'
@@ -54,11 +55,11 @@ jobs:
       matrix:
         include:
           - profile: consoleos-rc1
-            label: productpm6
-            artifact: rocknix-rp5-consoleos-rc17-productpm6-zboot
+            label: productpm7
+            artifact: rocknix-rp5-consoleos-rc17-productpm7-zboot
           - profile: consoleos-rc1-diagnostic
-            label: productpm6-diagcc2
-            artifact: rocknix-rp5-consoleos-rc17-productpm6-diagcc2-zboot
+            label: productpm7-diagcc3
+            artifact: rocknix-rp5-consoleos-rc17-productpm7-diagcc3-zboot
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 150
     env:

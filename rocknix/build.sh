@@ -53,14 +53,14 @@ fg-coulomb-counter)
     ;;
 consoleos-rc1)
     config_fragment="${kit}/rocknix/consoleos-rc1.config"
-    expected_release='7.2.0-consoleos-rc17-productpm6'
+    expected_release='7.2.0-consoleos-rc17-productpm7'
     artifact_name="rocknix-${expected_release}.tar.zst"
     dtb_name='sm8250-retroidpocket-rp5-consoleos-rc1'
     ;;
 consoleos-rc1-diagnostic)
     config_fragment="${kit}/rocknix/consoleos-rc1.config"
     config_overlay="${kit}/rocknix/consoleos-rc1-diagnostic.delta.config"
-    expected_release='7.2.0-consoleos-rc17-productpm6-diagcc2'
+    expected_release='7.2.0-consoleos-rc17-productpm7-diagcc3'
     artifact_name="rocknix-${expected_release}.tar.zst"
     dtb_name='sm8250-retroidpocket-rp5-consoleos-rc1'
     ;;
@@ -598,10 +598,21 @@ elif profile in ('adsp-no-auto-ab', 'lpass-devote-fix', 'lpass-pm-clock', 'audio
             'static int gamepad_mcu_uart_suspend(struct device *dev)',
             'static int gamepad_mcu_uart_resume(struct device *dev)',
             'devm_regulator_get(dev, "vdd")',
+            'queue_work(system_dfl_wq, &gamepad_dev->resume_work);',
+            'background MCU restore completed',
+            'cancel_work_sync(&gamepad_dev->resume_work);',
             '.pm = pm_sleep_ptr(&gamepad_mcu_uart_pm_ops),',
         )
         if not all(marker in gamepad for marker in required_gamepad):
             raise SystemExit('Retroid gamepad lifecycle PM markers missing')
+        touch = Path('drivers/input/touchscreen/edt-ft5x06.c').read_text()
+        required_touch = (
+            'queue_work(system_dfl_wq, &tsdata->resume_work);',
+            'background touch restore completed',
+            'cancel_work_sync(&tsdata->resume_work);',
+        )
+        if not all(marker in touch for marker in required_touch):
+            raise SystemExit('EDT background touch-resume markers missing')
         htr3212 = Path('drivers/leds/leds-htr3212.c').read_text()
         required_htr3212 = (
             'static int htr3212_suspend(struct device *dev)',
@@ -983,12 +994,17 @@ if [[ "${profile}" == consoleos-rc1 || "${profile}" == consoleos-rc1-diagnostic 
     cp drivers/net/wireless/ath/ath11k/pci.h \
         "${out}/consoleos-ath11k-pci.h"
     cp net/qrtr/mhi.c "${out}/consoleos-qrtr-mhi.c"
+    cp drivers/bus/mhi/host/pm.c "${out}/consoleos-mhi-host-pm.c"
     cp drivers/input/joystick/retroid.c drivers/input/joystick/retroid.o "${out}/"
+    cp drivers/input/touchscreen/edt-ft5x06.c \
+        drivers/input/touchscreen/edt-ft5x06.o "${out}/"
     cp drivers/leds/leds-htr3212.c drivers/leds/leds-htr3212.o "${out}/"
     cp drivers/hwmon/pwm-fan.c "${out}/"
     cp drivers/regulator/qcom-rpmh-regulator.c drivers/regulator/qcom-rpmh-regulator.o \
         drivers/regulator/core.c "${out}/"
     objdump -drS drivers/input/joystick/retroid.o > "${out}/retroid-gamepad-disassembly.txt"
+    objdump -drS drivers/input/touchscreen/edt-ft5x06.o \
+        > "${out}/edt-ft5x06-disassembly.txt"
     objdump -drS drivers/leds/leds-htr3212.o > "${out}/htr3212-disassembly.txt"
     objdump -drS drivers/regulator/qcom-rpmh-regulator.o \
         > "${out}/qcom-rpmh-regulator-disassembly.txt"

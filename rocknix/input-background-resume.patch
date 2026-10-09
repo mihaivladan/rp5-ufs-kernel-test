@@ -1,0 +1,306 @@
+From: ConsoleOS <consoleos@localhost>
+Date: Sat, 10 Oct 2026 00:00:00 +0000
+Subject: [PATCH] input: finish slow RP5 controller restores after thaw
+
+The RP5 gamepad MCU and EDT touch controller need about 840 ms and 344 ms
+respectively to restore after system sleep. Both callbacks run before the PM
+core thaws userspace, so they unnecessarily delay first light even though
+their input devices can remain temporarily quiescent.
+
+Keep the complete power-off sequences and all hardware settle times, but run
+the slow restore portions on the default workqueue after the system resume
+callbacks return. IRQ delivery for touch and the gamepad UART remain disabled
+until their respective restore completes. A subsequent suspend or driver
+removal synchronously cancels or drains the work before powering down.
+---
+diff --git a/drivers/input/joystick/retroid.c b/drivers/input/joystick/retroid.c
+--- a/drivers/input/joystick/retroid.c
++++ b/drivers/input/joystick/retroid.c
+@@ -22,6 +22,7 @@
+ #include <linux/serdev.h>
+ #include <linux/slab.h>
+ #include <linux/platform_device.h>
++#include <linux/workqueue.h>
+ #include <uapi/linux/sched/types.h>
+ 
+ #define DRIVER_NAME "retroid-pocket-gamepad"
+@@ -64,6 +65,7 @@ struct gamepad_device {
+ 	struct input_dev *dev_input;
+ 	struct platform_device *platform_dev;
+ 	struct regulator *vdd;
++	struct work_struct resume_work;
+ 	unsigned long prev_states;
+ 	bool serial_open;
+ 	bool vdd_enabled;
+@@ -373,6 +375,8 @@ static ssize_t rumble_enable_store(struct device *dev,
+ 
+ static DEVICE_ATTR_RW(rumble_enable);
+ 
++static void gamepad_mcu_resume_work(struct work_struct *work);
++
+ static void gamepad_mcu_disable(void *data)
+ {
+ 	struct gamepad_device *gamepad_dev = data;
+@@ -422,6 +426,7 @@ static int gamepad_mcu_uart_probe(struct serdev_device *serdev)
+ 	if (!gamepad_dev)
+ 		return dev_err_probe(dev, -ENOMEM, "could not allocate memory for device data\n");
+ 	gamepad_dev->dev = dev;
++	INIT_WORK(&gamepad_dev->resume_work, gamepad_mcu_resume_work);
+ 
+ 	gamepad_dev->vdd = devm_regulator_get(dev, "vdd");
+ 	if (IS_ERR(gamepad_dev->vdd))
+@@ -572,6 +577,8 @@ static void gamepad_mcu_uart_remove(struct serdev_device *serdev)
+ {
+ 	struct gamepad_device *gamepad_dev = serdev_device_get_drvdata(serdev);
+ 
++	if (gamepad_dev)
++		cancel_work_sync(&gamepad_dev->resume_work);
+ 	if (!gamepad_dev || IS_ERR_OR_NULL(gamepad_dev->platform_dev))
+ 		return;
+ 
+@@ -587,6 +594,7 @@ static int gamepad_mcu_uart_suspend(struct device *dev)
+ 	struct gamepad_device *gamepad_dev = serdev_device_get_drvdata(serdev);
+ 	int enabled;
+ 
++	cancel_work_sync(&gamepad_dev->resume_work);
+ 	input_reset_device(gamepad_dev->dev_input);
+ 	gamepad_dev->prev_states = 0;
+ 	gamepad_mcu_disable(gamepad_dev);
+@@ -596,15 +604,14 @@ static int gamepad_mcu_uart_suspend(struct device *dev)
+ 	return 0;
+ }
+ 
+-static int gamepad_mcu_uart_resume(struct device *dev)
++static int gamepad_mcu_restore(struct gamepad_device *gamepad_dev)
+ {
+-	struct serdev_device *serdev = to_serdev_device(dev);
+-	struct gamepad_device *gamepad_dev = serdev_device_get_drvdata(serdev);
++	struct serdev_device *serdev = to_serdev_device(gamepad_dev->dev);
+ 	int ret;
+ 
+ 	ret = gamepad_mcu_enable_supply(gamepad_dev);
+ 	if (ret)
+-		return dev_err_probe(dev, ret, "Unable to restore MCU supply\n");
++		return ret;
+ 
+ 	if (gamepad_dev->boot_gpio)
+ 		gpiod_set_value_cansleep(gamepad_dev->boot_gpio, 0);
+@@ -634,9 +641,33 @@ static int gamepad_mcu_uart_resume(struct device *dev)
+ 
+ err_disable:
+ 	gamepad_mcu_disable(gamepad_dev);
+-	return dev_err_probe(dev, ret, "Unable to restore MCU UART\n");
++	return ret;
+ }
+ 
++static void gamepad_mcu_resume_work(struct work_struct *work)
++{
++	struct gamepad_device *gamepad_dev =
++		container_of(work, struct gamepad_device, resume_work);
++	int ret;
++
++	ret = gamepad_mcu_restore(gamepad_dev);
++	if (ret)
++		dev_err(gamepad_dev->dev,
++			"background MCU restore failed: %d\n", ret);
++	else
++		dev_info(gamepad_dev->dev,
++			 "background MCU restore completed\n");
++}
++
++static int gamepad_mcu_uart_resume(struct device *dev)
++{
++	struct serdev_device *serdev = to_serdev_device(dev);
++	struct gamepad_device *gamepad_dev = serdev_device_get_drvdata(serdev);
++
++	queue_work(system_dfl_wq, &gamepad_dev->resume_work);
++	return 0;
++}
++
+ static DEFINE_SIMPLE_DEV_PM_OPS(gamepad_mcu_uart_pm_ops,
+ 				 gamepad_mcu_uart_suspend,
+ 				 gamepad_mcu_uart_resume);
+diff --git a/drivers/input/touchscreen/edt-ft5x06.c b/drivers/input/touchscreen/edt-ft5x06.c
+--- a/drivers/input/touchscreen/edt-ft5x06.c
++++ b/drivers/input/touchscreen/edt-ft5x06.c
+@@ -31,6 +31,7 @@
+ #include <linux/regulator/consumer.h>
+ #include <linux/slab.h>
+ #include <linux/uaccess.h>
++#include <linux/workqueue.h>
+ 
+ #include <linux/unaligned.h>
+ 
+@@ -125,6 +126,7 @@ struct edt_ft5x06_ts_data {
+ #endif
+ 
+ 	struct mutex mutex;
++	struct work_struct resume_work;
+ 	bool factory_mode;
+ 	enum edt_pmode suspend_mode;
+ 	int threshold;
+@@ -152,6 +154,8 @@ struct edt_i2c_chip_data {
+ 	int  max_support_points;
+ };
+ 
++static void edt_ft5x06_ts_resume_work(struct work_struct *work);
++
+ static const struct regmap_config edt_ft5x06_i2c_regmap_config = {
+ 	.reg_bits = 8,
+ 	.val_bits = 8,
+@@ -1131,6 +1135,7 @@ static int edt_ft5x06_ts_probe(struct i2c_client *client)
+ 		dev_err(&client->dev, "failed to allocate driver data.\n");
+ 		return -ENOMEM;
+ 	}
++	INIT_WORK(&tsdata->resume_work, edt_ft5x06_ts_resume_work);
+ 
+ 	tsdata->regmap = regmap_init_i2c(client, &edt_ft5x06_i2c_regmap_config);
+ 	if (IS_ERR(tsdata->regmap)) {
+@@ -1340,6 +1345,7 @@ static void edt_ft5x06_ts_remove(struct i2c_client *client)
+ {
+ 	struct edt_ft5x06_ts_data *tsdata = i2c_get_clientdata(client);
+ 
++	cancel_work_sync(&tsdata->resume_work);
+ 	edt_ft5x06_ts_teardown_debugfs(tsdata);
+ }
+ 
+@@ -1350,6 +1356,7 @@ static int edt_ft5x06_ts_suspend(struct device *dev)
+ 	struct gpio_desc *reset_gpio = tsdata->reset_gpio;
+ 	int ret;
+ 
++	cancel_work_sync(&tsdata->resume_work);
+ 	if (device_may_wakeup(dev))
+ 		return 0;
+ 
+@@ -1386,66 +1393,85 @@ static int edt_ft5x06_ts_suspend(struct device *dev)
+ 	return 0;
+ }
+ 
+-static int edt_ft5x06_ts_resume(struct device *dev)
++static int edt_ft5x06_ts_restore_poweroff(struct edt_ft5x06_ts_data *tsdata)
+ {
+-	struct i2c_client *client = to_i2c_client(dev);
+-	struct edt_ft5x06_ts_data *tsdata = i2c_get_clientdata(client);
++	struct device *dev = &tsdata->client->dev;
++	struct gpio_desc *reset_gpio = tsdata->reset_gpio;
+ 	int ret = 0;
+ 
+-	if (device_may_wakeup(dev))
+-		return 0;
+-
+-	if (tsdata->suspend_mode == EDT_PMODE_NOT_SUPPORTED)
+-		return 0;
++	/*
++	 * We can't check if the regulator is a dummy or a real regulator. Keep
++	 * the specified 5 ms reset time and 300 ms power-up time, but perform it
++	 * after the system has thawed so it cannot delay first light.
++	 */
++	gpiod_set_value_cansleep(reset_gpio, 1);
++	usleep_range(5000, 6000);
+ 
+-	if (tsdata->suspend_mode == EDT_PMODE_POWEROFF) {
+-		struct gpio_desc *reset_gpio = tsdata->reset_gpio;
++	ret = regulator_enable(tsdata->iovcc);
++	if (ret) {
++		dev_err(dev, "Failed to enable iovcc\n");
++		return ret;
++	}
+ 
+-		/*
+-		 * We can't check if the regulator is a dummy or a real
+-		 * regulator. So we need to specify the 5ms reset time (T_rst)
+-		 * here instead of the 100us T_rtp time. We also need to wait
+-		 * 300ms in case it was a real supply and the power was cutted
+-		 * of. Toggle the reset pin is also a way to exit the hibernate
+-		 * mode.
+-		 */
+-		gpiod_set_value_cansleep(reset_gpio, 1);
+-		usleep_range(5000, 6000);
++	/* Delay enabling VCC for > 10us (T_ivd) after IOVCC */
++	usleep_range(10, 100);
+ 
+-		ret = regulator_enable(tsdata->iovcc);
+-		if (ret) {
+-			dev_err(dev, "Failed to enable iovcc\n");
+-			return ret;
+-		}
++	ret = regulator_enable(tsdata->vcc);
++	if (ret) {
++		dev_err(dev, "Failed to enable vcc\n");
++		regulator_disable(tsdata->iovcc);
++		return ret;
++	}
+ 
+-		/* Delay enabling VCC for > 10us (T_ivd) after IOVCC */
+-		usleep_range(10, 100);
++	usleep_range(1000, 2000);
++	gpiod_set_value_cansleep(reset_gpio, 0);
++	msleep(300);
+ 
+-		ret = regulator_enable(tsdata->vcc);
+-		if (ret) {
+-			dev_err(dev, "Failed to enable vcc\n");
+-			regulator_disable(tsdata->iovcc);
+-			return ret;
+-		}
++	edt_ft5x06_restore_reg_parameters(tsdata);
++	enable_irq(tsdata->client->irq);
+ 
+-		usleep_range(1000, 2000);
+-		gpiod_set_value_cansleep(reset_gpio, 0);
+-		msleep(300);
++	if (tsdata->factory_mode)
++		ret = edt_ft5x06_factory_mode(tsdata);
+ 
+-		edt_ft5x06_restore_reg_parameters(tsdata);
+-		enable_irq(tsdata->client->irq);
++	return ret;
++}
+ 
+-		if (tsdata->factory_mode)
+-			ret = edt_ft5x06_factory_mode(tsdata);
+-	} else {
+-		struct gpio_desc *wake_gpio = tsdata->wake_gpio;
++static void edt_ft5x06_ts_resume_work(struct work_struct *work)
++{
++	struct edt_ft5x06_ts_data *tsdata =
++		container_of(work, struct edt_ft5x06_ts_data, resume_work);
++	int ret;
+ 
+-		gpiod_set_value_cansleep(wake_gpio, 0);
+-		usleep_range(5000, 6000);
+-		gpiod_set_value_cansleep(wake_gpio, 1);
++	ret = edt_ft5x06_ts_restore_poweroff(tsdata);
++	if (ret)
++		dev_err(&tsdata->client->dev,
++			"background touch restore failed: %d\n", ret);
++	else
++		dev_info(&tsdata->client->dev,
++			 "background touch restore completed\n");
++}
++
++static int edt_ft5x06_ts_resume(struct device *dev)
++{
++	struct i2c_client *client = to_i2c_client(dev);
++	struct edt_ft5x06_ts_data *tsdata = i2c_get_clientdata(client);
++	struct gpio_desc *wake_gpio;
++
++	if (device_may_wakeup(dev) ||
++	    tsdata->suspend_mode == EDT_PMODE_NOT_SUPPORTED)
++		return 0;
++
++	if (tsdata->suspend_mode == EDT_PMODE_POWEROFF) {
++		queue_work(system_dfl_wq, &tsdata->resume_work);
++		return 0;
+ 	}
+ 
+-	return ret;
++	wake_gpio = tsdata->wake_gpio;
++	gpiod_set_value_cansleep(wake_gpio, 0);
++	usleep_range(5000, 6000);
++	gpiod_set_value_cansleep(wake_gpio, 1);
++
++	return 0;
+ }
+ 
+ static DEFINE_SIMPLE_DEV_PM_OPS(edt_ft5x06_ts_pm_ops,

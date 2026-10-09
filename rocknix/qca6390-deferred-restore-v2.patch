@@ -7,6 +7,33 @@ diff --git a/include/linux/mhi.h b/include/linux/mhi.h
 +	MHI_CHANNEL_SUSPEND_DEFERRED,
  	MHI_CHANNEL_SUSPEND_RESET,
  };
+
+diff --git a/drivers/bus/mhi/host/pm.c b/drivers/bus/mhi/host/pm.c
+--- a/drivers/bus/mhi/host/pm.c
++++ b/drivers/bus/mhi/host/pm.c
+@@ -390,6 +390,14 @@ int mhi_pm_m3_transition(struct mhi_controller *mhi_cntrl)
+ 	return 0;
+ }
+ 
++static int mhi_notify_mission_mode(struct device *dev, void *unused)
++{
++	(void)unused;
++	mhi_notify(to_mhi_device(dev), MHI_CB_EE_MISSION_MODE);
++
++	return 0;
++}
++
+ /* Handle device Mission Mode transition */
+ static int mhi_pm_mission_mode_transition(struct mhi_controller *mhi_cntrl)
+ {
+@@ -458,6 +467,8 @@ static int mhi_pm_mission_mode_transition(struct mhi_controller *mhi_cntrl)
+ 	 * Execution Environment (EE) to either SBL or AMSS states
+ 	 */
+ 	mhi_create_devices(mhi_cntrl);
++	device_for_each_child(&mhi_cntrl->mhi_dev->dev, NULL,
++			      mhi_notify_mission_mode);
+ 
+ 	read_lock_bh(&mhi_cntrl->pm_lock);
  
 diff --git a/drivers/net/wireless/ath/ath11k/pci.h b/drivers/net/wireless/ath/ath11k/pci.h
 --- a/drivers/net/wireless/ath/ath11k/pci.h
@@ -141,7 +168,7 @@ diff --git a/net/qrtr/mhi.c b/net/qrtr/mhi.c
 +
 +	if (qdev && callback == MHI_CB_EE_MISSION_MODE &&
 +	    atomic_read(&qdev->resume_deferred))
-+		schedule_work(&qdev->resume_work);
++		queue_work(system_dfl_wq, &qdev->resume_work);
 +}
 +
  static int qcom_mhi_qrtr_probe(struct mhi_device *mhi_dev,
@@ -183,7 +210,7 @@ diff --git a/net/qrtr/mhi.c b/net/qrtr/mhi.c
 +	    channel_state == MHI_CHANNEL_SUSPEND_RESET) {
 +		atomic_set(&qdev->resume_deferred, 1);
 +		if (state == MHI_STATE_M0)
-+			schedule_work(&qdev->resume_work);
++			queue_work(system_dfl_wq, &qdev->resume_work);
 +		dev_info(dev, "deferring autoqueue restore until MHI mission mode\n");
 +		return 0;
 +	}
