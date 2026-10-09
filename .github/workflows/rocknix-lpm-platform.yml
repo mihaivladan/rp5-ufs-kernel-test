@@ -1,4 +1,4 @@
-name: ConsoleOS RP5 product zboot
+name: ConsoleOS RP5 paired product and diagnostic zboot
 on:
   workflow_dispatch:
   push:
@@ -47,10 +47,21 @@ permissions:
   contents: read
 jobs:
   kernel:
+    name: ${{ matrix.label }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - profile: consoleos-rc1
+            label: productpm5
+            artifact: rocknix-rp5-consoleos-rc17-productpm5-zboot
+          - profile: consoleos-rc1-diagnostic
+            label: productpm5-diagcc1
+            artifact: rocknix-rp5-consoleos-rc17-productpm5-diagcc1-zboot
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 150
     env:
-      ROCKNIX_PROFILE: consoleos-rc1
+      ROCKNIX_PROFILE: ${{ matrix.profile }}
       CCACHE_DIR: ${{ github.workspace }}/.ccache
       CCACHE_MAXSIZE: 6G
       CCACHE_COMPRESS: 'true'
@@ -87,7 +98,7 @@ jobs:
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
         with:
           path: .ccache
-          key: rp5-linux-7.2-gcc14-${{ runner.os }}-${{ runner.arch }}-${{ github.run_id }}
+          key: rp5-linux-7.2-gcc14-${{ runner.os }}-${{ runner.arch }}-${{ github.run_id }}-${{ matrix.profile }}
           restore-keys: |
             rp5-linux-7.2-gcc14-${{ runner.os }}-${{ runner.arch }}-
       - name: Configure kernel compiler cache
@@ -96,36 +107,36 @@ jobs:
           ccache --zero-stats
           ccache --show-config
           printf 'cache_restore=%s\n' '${{ steps.kernel-compiler-cache.outputs.cache-hit }}'
-      - name: Prepare ConsoleOS RP5 product zboot source
+      - name: Prepare paired kernel source
         run: |
           set -euo pipefail
-          bash rocknix/build.sh prepare 2>&1 | tee rocknix-consoleos-rc17-productpm5-prepare.log
-      - name: Build ConsoleOS RP5 product zboot kernel and modules
+          bash rocknix/build.sh prepare 2>&1 | tee "rocknix-${{ matrix.label }}-prepare.log"
+      - name: Build paired zboot kernel and modules
         run: |
           set -euo pipefail
-          bash rocknix/build.sh compile 2>&1 | tee rocknix-consoleos-rc17-productpm5-compile.log
+          bash rocknix/build.sh compile 2>&1 | tee "rocknix-${{ matrix.label }}-compile.log"
       - name: Report kernel compiler cache
         if: always()
         run: |
           if command -v ccache >/dev/null 2>&1; then
-            ccache --show-stats --verbose | tee rocknix-consoleos-rc17-productpm5-ccache.log
+            ccache --show-stats --verbose | tee "rocknix-${{ matrix.label }}-ccache.log"
           fi
       - name: Save successful kernel compiler cache
         if: success()
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
         with:
           path: .ccache
-          key: rp5-linux-7.2-gcc14-${{ runner.os }}-${{ runner.arch }}-${{ github.run_id }}
+          key: rp5-linux-7.2-gcc14-${{ runner.os }}-${{ runner.arch }}-${{ github.run_id }}-${{ matrix.profile }}
       - name: Upload build and evidence
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
-          name: rocknix-rp5-consoleos-rc17-productpm5-zboot
+          name: ${{ matrix.artifact }}
           retention-days: 14
           compression-level: 0
           if-no-files-found: error
           path: |
             rocknix-out/
-            rocknix-consoleos-rc17-productpm5-prepare.log
-            rocknix-consoleos-rc17-productpm5-compile.log
-            rocknix-consoleos-rc17-productpm5-ccache.log
+            rocknix-${{ matrix.label }}-prepare.log
+            rocknix-${{ matrix.label }}-compile.log
+            rocknix-${{ matrix.label }}-ccache.log
