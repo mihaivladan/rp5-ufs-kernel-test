@@ -124,7 +124,7 @@ index 465d9f7a..55adf1a4 100644
  		dev_info(dev,
  			 "orderly QCA power-off: skipping ADSP handoff\n");
  		return 0;
-@@ -2616,43 +2710,9 @@ static int qcom_pcie_resume_noirq(struct device *dev)
+@@ -2616,43 +2710,44 @@ static int qcom_pcie_resume_noirq(struct device *dev)
  	if (!pcie)
  		return 0;
  	if (pcie->orderly_poweroff) {
@@ -163,10 +163,45 @@ index 465d9f7a..55adf1a4 100644
 -			return ret;
 -		}
 -
++		if (!pcie->pci->suspended)
++			return 0;
++
++		ret = pinctrl_pm_select_default_state(dev);
++		if (ret) {
++			dev_err(dev,
++				"orderly QCA power-off: failed to restore default pins: %d\n",
++				ret);
++			return ret;
++		}
++
++		ret = icc_enable(pcie->icc_cpu);
++		if (ret) {
++			dev_err(dev,
++				"orderly QCA power-off: failed to restore CPU-PCIe vote: %d\n",
++				ret);
++			return ret;
++		}
++
++		ret = icc_enable(pcie->icc_mem);
++		if (ret) {
++			dev_err(dev,
++				"orderly QCA power-off: failed to restore PCIe-MEM vote: %d\n",
++				ret);
++			icc_disable(pcie->icc_cpu);
++			return ret;
++		}
++
++		ret = dw_pcie_resume_noirq(pcie->pci);
++		if (ret) {
++			icc_disable(pcie->icc_mem);
++			icc_disable(pcie->icc_cpu);
++			return ret;
++		}
++
 +		pcie->orderly_restore_pending = true;
  		dev_info(dev,
 -			 "orderly QCA power-off: ICC votes, root complex and endpoint rails restored\n");
-+			 "orderly QCA restore pending; deferring PCIe/QCA bring-up until userspace thaw\n");
++			 "orderly QCA PCIe transport restored; MHI/firmware restore pending\n");
  		return 0;
  	}
  	if (pcie->drv_armed || pcie->drv_offline) {
@@ -450,4 +485,3 @@ index 8f798da8..034e20af 100644
  	ret = ath11k_core_resume_early(ab);
  	if (ret)
  		ath11k_warn(ab, "failed to early resume core: %d\n", ret);
-

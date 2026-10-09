@@ -53,14 +53,14 @@ fg-coulomb-counter)
     ;;
 consoleos-rc1)
     config_fragment="${kit}/rocknix/consoleos-rc1.config"
-    expected_release='7.2.0-consoleos-rc17-productpm7'
+    expected_release='7.2.0-consoleos-rc17-productpm8'
     artifact_name="rocknix-${expected_release}.tar.zst"
     dtb_name='sm8250-retroidpocket-rp5-consoleos-rc1'
     ;;
 consoleos-rc1-diagnostic)
     config_fragment="${kit}/rocknix/consoleos-rc1.config"
     config_overlay="${kit}/rocknix/consoleos-rc1-diagnostic.delta.config"
-    expected_release='7.2.0-consoleos-rc17-productpm7-diagcc3'
+    expected_release='7.2.0-consoleos-rc17-productpm8-diagcc4'
     artifact_name="rocknix-${expected_release}.tar.zst"
     dtb_name='sm8250-retroidpocket-rp5-consoleos-rc1'
     ;;
@@ -1044,11 +1044,11 @@ if [[ "${profile}" == consoleos-rc1-diagnostic ]]; then
 fi
 if [[ "${profile}" == consoleos-rc1 ]]; then
     printf '%s\n' \
-        'ConsoleOS RC17 productpm7 passed: runtime-gated PM timing support, blocking fuel-gauge diagnostics absent, ordered single-attempt deferred QCA/QRTR restore, background input resume, SDAM built-in, corrected panel/Type-C DT, ARM64 zstd EFI zboot format, modules, DTB and external helper bundle. Not installed or device-tested.' \
+        'ConsoleOS RC17 productpm8 passed: runtime-gated PM timing support, blocking fuel-gauge diagnostics absent, synchronous PCIe transport plus deferred MHI/firmware QCA restore, background input resume, SDAM built-in, corrected panel/Type-C DT, ARM64 zstd EFI zboot format, modules, DTB and external helper bundle. Not installed or device-tested.' \
         > BUILD-SUCCESS.txt
 elif [[ "${profile}" == consoleos-rc1-diagnostic ]]; then
     printf '%s\n' \
-        'ConsoleOS RC17 productpm7 diagnostic pair passed: exact product source/DT/config plus pinned debug overlay and PM8150B coulomb-counter patch. Not installed or device-tested.' \
+        'ConsoleOS RC17 productpm8 diagnostic pair passed: exact product source/DT/config plus pinned debug overlay and PM8150B coulomb-counter patch. Not installed or device-tested.' \
         > BUILD-SUCCESS.txt
 else
     printf '%s\n' "Build and artifact checks passed for ${profile}. Not installed or boot-tested." > BUILD-SUCCESS.txt

@@ -203,7 +203,7 @@ def apply_patches(repo, source, fix, profile):
         require(deferred_qca.is_file(),
                 "Missing deferred QCA6390 restore patch")
         require(hashlib.sha256(deferred_qca.read_bytes()).hexdigest() ==
-                "ce33f459620b220c777e30e021926376559a07533e0302863ef43a09c8424306",
+                "89f76d7b755d4f4248f8bbc078a63ee13ad2b4ea1aa8c4f4629e9a43061b2ae8",
                 "Deferred QCA6390 restore patch checksum mismatch")
         extra_patches.append(deferred_qca)
         deferred_qca_v2 = (Path(__file__).resolve().parent /
@@ -434,7 +434,7 @@ def apply_patches(repo, source, fix, profile):
                 "qcom_pcie_orderly_poweroff_arm" in qcom_pcie and
                 "pci_pwrctrl_power_off_devices(pci->dev);" in qcom_pcie and
                 "orderly QCA power-off: root complex suspended, ICC votes zero" in qcom_pcie and
-                "orderly QCA restore pending; deferring PCIe/QCA bring-up until userspace thaw" in qcom_pcie and
+                "orderly QCA PCIe transport restored; MHI/firmware restore pending" in qcom_pcie and
                 "orderly QCA restore: ICC, root complex and endpoint rails restored asynchronously" in qcom_pcie,
                 "Guarded Qualcomm PCIe orderly power-off markers missing")
     if profile == "lpm-platform":
