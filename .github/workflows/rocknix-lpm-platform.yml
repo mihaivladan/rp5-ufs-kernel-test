@@ -12,6 +12,7 @@ on:
       - 'rocknix/generate-early-display-profiles.py'
       - 'rocknix/boot-display/profiles/**'
       - 'rocknix/consoleos-rc1.config'
+      - 'rocknix/consoleos-rc1-diagnostic.delta.config'
       - 'rocknix/CONSOLEOS-RC1.md'
       - 'rocknix/sm8250-adsp-no-auto-boot.patch'
       - 'rocknix/q6afe-lpass-hw-vote-handle.patch'
@@ -26,6 +27,8 @@ on:
       - 'rocknix/qcom-pmic-typec-pdphy-attach-gating.patch'
       - 'rocknix/qca6390-orderly-poweroff.patch'
       - 'rocknix/qcom-pcie-orderly-icc-release.patch'
+      - 'rocknix/qca6390-deferred-restore.patch'
+      - 'rocknix/ch13726a-panel-product-fixes.patch'
       - 'rocknix/rpmh-regulator-suspend-state.patch'
       - 'rocknix/regulator-core-s2idle-state-mem.patch'
       - 'rocknix/rpmh-regulator-suspend-trace.patch'
@@ -96,16 +99,16 @@ jobs:
       - name: Prepare ConsoleOS RP5 product zboot source
         run: |
           set -euo pipefail
-          bash rocknix/build.sh prepare 2>&1 | tee rocknix-consoleos-rc17-productpm4-prepare.log
+          bash rocknix/build.sh prepare 2>&1 | tee rocknix-consoleos-rc17-productpm5-prepare.log
       - name: Build ConsoleOS RP5 product zboot kernel and modules
         run: |
           set -euo pipefail
-          bash rocknix/build.sh compile 2>&1 | tee rocknix-consoleos-rc17-productpm4-compile.log
+          bash rocknix/build.sh compile 2>&1 | tee rocknix-consoleos-rc17-productpm5-compile.log
       - name: Report kernel compiler cache
         if: always()
         run: |
           if command -v ccache >/dev/null 2>&1; then
-            ccache --show-stats --verbose | tee rocknix-consoleos-rc17-productpm4-ccache.log
+            ccache --show-stats --verbose | tee rocknix-consoleos-rc17-productpm5-ccache.log
           fi
       - name: Save successful kernel compiler cache
         if: success()
@@ -117,12 +120,12 @@ jobs:
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
-          name: rocknix-rp5-consoleos-rc17-productpm4-zboot
+          name: rocknix-rp5-consoleos-rc17-productpm5-zboot
           retention-days: 14
           compression-level: 0
           if-no-files-found: error
           path: |
             rocknix-out/
-            rocknix-consoleos-rc17-productpm4-prepare.log
-            rocknix-consoleos-rc17-productpm4-compile.log
-            rocknix-consoleos-rc17-productpm4-ccache.log
+            rocknix-consoleos-rc17-productpm5-prepare.log
+            rocknix-consoleos-rc17-productpm5-compile.log
+            rocknix-consoleos-rc17-productpm5-ccache.log

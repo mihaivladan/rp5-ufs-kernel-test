@@ -1,0 +1,453 @@
+diff --git a/drivers/pci/controller/dwc/pcie-qcom.c b/drivers/pci/controller/dwc/pcie-qcom.c
+index 465d9f7a..55adf1a4 100644
+--- a/drivers/pci/controller/dwc/pcie-qcom.c
++++ b/drivers/pci/controller/dwc/pcie-qcom.c
+@@ -299,6 +299,7 @@ struct qcom_pcie {
+ 	bool drv_armed;
+ 	bool drv_offline;
+ 	bool orderly_poweroff;
++	bool orderly_restore_pending;
+ 	bool drv_resources_suspended;
+ 	bool drv_clocks_disabled;
+ 	bool drv_supplies_disabled;
+@@ -2292,6 +2293,7 @@ static void qcom_pcie_orderly_poweroff_clear(struct qcom_pcie *pcie)
+ 
+ 	pcie->orderly_endpoint = NULL;
+ 	pcie->orderly_poweroff = false;
++	pcie->orderly_restore_pending = false;
+ 	if (pdev)
+ 		pci_dev_put(pdev);
+ }
+@@ -2347,6 +2349,96 @@ void qcom_pcie_orderly_poweroff_disarm(struct pci_dev *pdev)
+ }
+ EXPORT_SYMBOL_GPL(qcom_pcie_orderly_poweroff_disarm);
+ 
++bool qcom_pcie_orderly_restore_pending(struct pci_dev *pdev)
++{
++	struct pci_host_bridge *bridge;
++	struct qcom_pcie *pcie;
++
++	if (!pdev)
++		return false;
++
++	bridge = pci_find_host_bridge(pdev->bus);
++	if (!bridge || !bridge->dev.parent)
++		return false;
++
++	pcie = dev_get_drvdata(bridge->dev.parent);
++	return pcie && pcie->orderly_endpoint == pdev &&
++	       pcie->orderly_restore_pending;
++}
++EXPORT_SYMBOL_GPL(qcom_pcie_orderly_restore_pending);
++
++int qcom_pcie_orderly_restore_root(struct pci_dev *pdev)
++{
++	struct pci_host_bridge *bridge;
++	struct qcom_pcie *pcie;
++	struct device *dev;
++	int ret;
++
++	if (!pdev)
++		return -ENODEV;
++
++	bridge = pci_find_host_bridge(pdev->bus);
++	if (!bridge || !bridge->dev.parent)
++		return -ENODEV;
++
++	dev = bridge->dev.parent;
++	pcie = dev_get_drvdata(dev);
++	if (!pcie || pcie->orderly_endpoint != pdev ||
++	    !pcie->orderly_poweroff || !pcie->orderly_restore_pending)
++		return -EALREADY;
++	if (!pcie->pci->suspended)
++		return 0;
++
++	ret = pinctrl_pm_select_default_state(dev);
++	if (ret)
++		return ret;
++
++	ret = icc_enable(pcie->icc_cpu);
++	if (ret)
++		return ret;
++
++	ret = icc_enable(pcie->icc_mem);
++	if (ret) {
++		icc_disable(pcie->icc_cpu);
++		return ret;
++	}
++
++	ret = dw_pcie_resume_noirq(pcie->pci);
++	if (ret) {
++		icc_disable(pcie->icc_mem);
++		icc_disable(pcie->icc_cpu);
++		return ret;
++	}
++
++	dev_info(dev,
++		 "orderly QCA restore: ICC, root complex and endpoint rails restored asynchronously\n");
++	return 0;
++}
++EXPORT_SYMBOL_GPL(qcom_pcie_orderly_restore_root);
++
++void qcom_pcie_orderly_restore_complete(struct pci_dev *pdev)
++{
++	struct pci_host_bridge *bridge;
++	struct qcom_pcie *pcie;
++
++	if (!pdev)
++		return;
++
++	bridge = pci_find_host_bridge(pdev->bus);
++	if (!bridge || !bridge->dev.parent)
++		return;
++
++	pcie = dev_get_drvdata(bridge->dev.parent);
++	if (!pcie || pcie->orderly_endpoint != pdev ||
++	    !pcie->orderly_restore_pending || pcie->pci->suspended)
++		return;
++
++	qcom_pcie_orderly_poweroff_clear(pcie);
++	qcom_pcie_icc_opp_update(pcie);
++	dev_info(pcie->pci->dev, "orderly QCA restore: completed\n");
++}
++EXPORT_SYMBOL_GPL(qcom_pcie_orderly_restore_complete);
++
+ static int qcom_pcie_suspend_late(struct device *dev)
+ {
+ 	struct qcom_pcie *pcie = dev_get_drvdata(dev);
+@@ -2358,6 +2450,8 @@ static int qcom_pcie_suspend_late(struct device *dev)
+ 		return 0;
+ 
+ 	if (pcie->orderly_poweroff) {
++		if (pcie->orderly_restore_pending)
++			return -EBUSY;
+ 		dev_info(dev,
+ 			 "orderly QCA power-off: skipping ADSP handoff\n");
+ 		return 0;
+@@ -2616,43 +2710,9 @@ static int qcom_pcie_resume_noirq(struct device *dev)
+ 	if (!pcie)
+ 		return 0;
+ 	if (pcie->orderly_poweroff) {
+-		if (!pcie->pci->suspended)
+-			return 0;
+-
+-		ret = pinctrl_pm_select_default_state(dev);
+-		if (ret) {
+-			dev_err(dev,
+-				"orderly QCA power-off: failed to restore default pins: %d\n",
+-				ret);
+-			return ret;
+-		}
+-
+-		ret = icc_enable(pcie->icc_cpu);
+-		if (ret) {
+-			dev_err(dev,
+-				"orderly QCA power-off: failed to restore CPU-PCIe vote: %d\n",
+-				ret);
+-			return ret;
+-		}
+-
+-		ret = icc_enable(pcie->icc_mem);
+-		if (ret) {
+-			dev_err(dev,
+-				"orderly QCA power-off: failed to restore PCIe-MEM vote: %d\n",
+-				ret);
+-			icc_disable(pcie->icc_cpu);
+-			return ret;
+-		}
+-
+-		ret = dw_pcie_resume_noirq(pcie->pci);
+-		if (ret) {
+-			icc_disable(pcie->icc_mem);
+-			icc_disable(pcie->icc_cpu);
+-			return ret;
+-		}
+-
++		pcie->orderly_restore_pending = true;
+ 		dev_info(dev,
+-			 "orderly QCA power-off: ICC votes, root complex and endpoint rails restored\n");
++			 "orderly QCA restore pending; deferring PCIe/QCA bring-up until userspace thaw\n");
+ 		return 0;
+ 	}
+ 	if (pcie->drv_armed || pcie->drv_offline) {
+@@ -2732,6 +2792,8 @@ static int qcom_pcie_resume_early(struct device *dev)
+ 		return 0;
+ 
+ 	if (pcie->orderly_poweroff) {
++		if (pcie->orderly_restore_pending)
++			return 0;
+ 		if (pcie->pci->suspended) {
+ 			dev_err(dev,
+ 				"orderly QCA power-off: resume incomplete; keeping state armed\n");
+diff --git a/include/linux/pci-qcom.h b/include/linux/pci-qcom.h
+index a6a7c721..8c67f964 100644
+--- a/include/linux/pci-qcom.h
++++ b/include/linux/pci-qcom.h
+@@ -10,6 +10,9 @@ struct pci_dev;
+ #if IS_ENABLED(CONFIG_PCIE_QCOM)
+ int qcom_pcie_orderly_poweroff_arm(struct pci_dev *pdev);
+ void qcom_pcie_orderly_poweroff_disarm(struct pci_dev *pdev);
++bool qcom_pcie_orderly_restore_pending(struct pci_dev *pdev);
++int qcom_pcie_orderly_restore_root(struct pci_dev *pdev);
++void qcom_pcie_orderly_restore_complete(struct pci_dev *pdev);
+ #else
+ static inline int qcom_pcie_orderly_poweroff_arm(struct pci_dev *pdev)
+ {
+@@ -19,6 +22,20 @@ static inline int qcom_pcie_orderly_poweroff_arm(struct pci_dev *pdev)
+ static inline void qcom_pcie_orderly_poweroff_disarm(struct pci_dev *pdev)
+ {
+ }
++
++static inline bool qcom_pcie_orderly_restore_pending(struct pci_dev *pdev)
++{
++	return false;
++}
++
++static inline int qcom_pcie_orderly_restore_root(struct pci_dev *pdev)
++{
++	return -EOPNOTSUPP;
++}
++
++static inline void qcom_pcie_orderly_restore_complete(struct pci_dev *pdev)
++{
++}
+ #endif
+ 
+ #endif /* _LINUX_PCI_QCOM_H */
+diff --git a/drivers/net/wireless/ath/ath11k/pci.h b/drivers/net/wireless/ath/ath11k/pci.h
+index 5230b9b2..7f36613f 100644
+--- a/drivers/net/wireless/ath/ath11k/pci.h
++++ b/drivers/net/wireless/ath/ath11k/pci.h
+@@ -75,6 +75,9 @@ struct ath11k_pci {
+ 	unsigned long flags;
+ 	u16 link_ctl;
+ 	u64 dma_mask;
++	bool orderly_restore_pending;
++	bool orderly_restore_running;
++	struct delayed_work orderly_restore_work;
+ };
+ 
+ static inline struct ath11k_pci *ath11k_pci_priv(struct ath11k_base *ab)
+diff --git a/drivers/net/wireless/ath/ath11k/pci.c b/drivers/net/wireless/ath/ath11k/pci.c
+index 8f798da8..034e20af 100644
+--- a/drivers/net/wireless/ath/ath11k/pci.c
++++ b/drivers/net/wireless/ath/ath11k/pci.c
+@@ -9,6 +9,8 @@
+ #include <linux/pci.h>
+ #include <linux/of.h>
+ #include <linux/pci-qcom.h>
++#include <linux/jiffies.h>
++#include <linux/sysfs.h>
+ #include <linux/time.h>
+ #include <linux/vmalloc.h>
+ 
+@@ -31,6 +33,7 @@
+ #define QCA6390_DEVICE_ID		0x1101
+ #define QCN9074_DEVICE_ID		0x1104
+ #define WCN6855_DEVICE_ID		0x1103
++#define ORDERLY_RESTORE_FALLBACK_MS	30000
+ 
+ #define TCSR_SOC_HW_SUB_VER	0x1910010
+ 
+@@ -39,6 +42,75 @@ module_param(orderly_qca_poweroff, bool, 0644);
+ MODULE_PARM_DESC(orderly_qca_poweroff,
+ 		 "Use the guarded QCA6390 firmware/MHI/PCIe/rail shutdown sequence");
+ 
++static bool defer_qca_resume;
++module_param(defer_qca_resume, bool, 0644);
++MODULE_PARM_DESC(defer_qca_resume,
++		 "Defer QCA6390 MHI/firmware resume until userspace requests restore");
++
++static DEFINE_MUTEX(orderly_qca_restore_lock);
++static struct ath11k_pci *orderly_qca_restore_target;
++static bool orderly_qca_restore;
++
++static int qca_restore_pending_get(char *buffer,
++				   const struct kernel_param *kp)
++{
++	struct ath11k_pci *ab_pci;
++	bool pending = false;
++
++	(void)kp;
++	mutex_lock(&orderly_qca_restore_lock);
++	ab_pci = orderly_qca_restore_target;
++	if (ab_pci)
++		pending = READ_ONCE(ab_pci->orderly_restore_pending);
++	mutex_unlock(&orderly_qca_restore_lock);
++
++	return sysfs_emit(buffer, "%c\n", pending ? 'Y' : 'N');
++}
++
++static const struct kernel_param_ops qca_restore_pending_ops = {
++	.get = qca_restore_pending_get,
++};
++
++module_param_cb(qca_restore_pending, &qca_restore_pending_ops, NULL, 0444);
++MODULE_PARM_DESC(qca_restore_pending,
++		 "Whether QCA6390 MHI/firmware restore is pending");
++
++static int orderly_qca_restore_set(const char *val,
++				   const struct kernel_param *kp)
++{
++	struct ath11k_pci *ab_pci;
++	int ret;
++
++	ret = param_set_bool(val, kp);
++	if (ret || !orderly_qca_restore)
++		return ret;
++
++	mutex_lock(&orderly_qca_restore_lock);
++	ab_pci = orderly_qca_restore_target;
++	if (!ab_pci) {
++		ret = -ENODEV;
++	} else if (!READ_ONCE(ab_pci->orderly_restore_pending)) {
++		orderly_qca_restore = false;
++	} else if (!ab_pci->orderly_restore_running) {
++		mod_delayed_work(system_wq, &ab_pci->orderly_restore_work, 0);
++	}
++	if (ret)
++		orderly_qca_restore = false;
++	mutex_unlock(&orderly_qca_restore_lock);
++
++	return ret;
++}
++
++static const struct kernel_param_ops orderly_qca_restore_ops = {
++	.set = orderly_qca_restore_set,
++	.get = param_get_bool,
++};
++
++module_param_cb(orderly_qca_restore, &orderly_qca_restore_ops,
++		&orderly_qca_restore, 0644);
++MODULE_PARM_DESC(orderly_qca_restore,
++		 "Trigger deferred QCA6390 PCIe/MHI/firmware restore after system resume");
++
+ static const struct pci_device_id ath11k_pci_id_table[] = {
+ 	{ PCI_VDEVICE(QCOM, QCA6390_DEVICE_ID) },
+ 	{ PCI_VDEVICE(QCOM, WCN6855_DEVICE_ID) },
+@@ -920,6 +992,47 @@ static int ath11k_pci_orderly_power_down(struct ath11k_base *ab)
+ 	return 0;
+ }
+ 
++static void ath11k_pci_orderly_restore_work(struct work_struct *work)
++{
++	struct ath11k_pci *ab_pci =
++		container_of(to_delayed_work(work), struct ath11k_pci,
++			     orderly_restore_work);
++	struct ath11k_base *ab = ab_pci->ab;
++	bool restore_root;
++	bool retry;
++	int ret;
++
++	mutex_lock(&orderly_qca_restore_lock);
++	ab_pci->orderly_restore_running = true;
++	mutex_unlock(&orderly_qca_restore_lock);
++
++	restore_root = qcom_pcie_orderly_restore_pending(ab_pci->pdev);
++	ret = 0;
++	if (restore_root)
++		ret = qcom_pcie_orderly_restore_root(ab_pci->pdev);
++	if (!ret)
++		ret = ath11k_core_resume_early(ab);
++	if (!ret)
++		ret = ath11k_core_resume(ab);
++	if (ret) {
++		ath11k_err(ab, "deferred orderly QCA restore failed: %d\n", ret);
++	} else {
++		if (restore_root)
++			qcom_pcie_orderly_restore_complete(ab_pci->pdev);
++		WRITE_ONCE(ab_pci->orderly_restore_pending, false);
++		ath11k_info(ab, "deferred orderly QCA restore completed\n");
++	}
++
++	mutex_lock(&orderly_qca_restore_lock);
++	ab_pci->orderly_restore_running = false;
++	orderly_qca_restore = false;
++	retry = ret && orderly_qca_restore_target == ab_pci;
++	if (retry)
++		queue_delayed_work(system_wq, &ab_pci->orderly_restore_work,
++				   msecs_to_jiffies(ORDERLY_RESTORE_FALLBACK_MS));
++	mutex_unlock(&orderly_qca_restore_lock);
++}
++
+ static int ath11k_pci_hif_suspend(struct ath11k_base *ab)
+ {
+ 	struct ath11k_pci *ar_pci = ath11k_pci_priv(ab);
+@@ -1035,6 +1148,8 @@ static int ath11k_pci_probe(struct pci_dev *pdev,
+ 	ab->fw_mode = ATH11K_FIRMWARE_MODE_NORMAL;
+ 	pci_set_drvdata(pdev, ab);
+ 	spin_lock_init(&ab_pci->window_lock);
++	INIT_DELAYED_WORK(&ab_pci->orderly_restore_work,
++			  ath11k_pci_orderly_restore_work);
+ 
+ 	/* Set fixed_mem_region to true for platforms support reserved memory
+ 	 * from DT. If memory is reserved from DT for FW, ath11k driver need not
+@@ -1206,6 +1321,11 @@ static int ath11k_pci_probe(struct pci_dev *pdev,
+ 		goto err_free_irq;
+ 	}
+ 	ath11k_qmi_fwreset_from_cold_boot(ab);
++	if (ab_pci->dev_id == QCA6390_DEVICE_ID) {
++		mutex_lock(&orderly_qca_restore_lock);
++		orderly_qca_restore_target = ab_pci;
++		mutex_unlock(&orderly_qca_restore_lock);
++	}
+ 	return 0;
+ 
+ err_free_irq:
+@@ -1242,6 +1362,12 @@ static void ath11k_pci_remove(struct pci_dev *pdev)
+ 	struct ath11k_base *ab = pci_get_drvdata(pdev);
+ 	struct ath11k_pci *ab_pci = ath11k_pci_priv(ab);
+ 
++	mutex_lock(&orderly_qca_restore_lock);
++	if (orderly_qca_restore_target == ab_pci)
++		orderly_qca_restore_target = NULL;
++	mutex_unlock(&orderly_qca_restore_lock);
++	cancel_delayed_work_sync(&ab_pci->orderly_restore_work);
++
+ 	ath11k_pci_set_irq_affinity_hint(ab_pci, NULL);
+ 
+ 	if (test_bit(ATH11K_FLAG_QMI_FAIL, &ab->dev_flags)) {
+@@ -1318,8 +1444,15 @@ static __maybe_unused int ath11k_pci_pm_suspend(struct device *dev)
+ static __maybe_unused int ath11k_pci_pm_resume(struct device *dev)
+ {
+ 	struct ath11k_base *ab = dev_get_drvdata(dev);
++	struct ath11k_pci *ab_pci = ath11k_pci_priv(ab);
+ 	int ret;
+ 
++	if (READ_ONCE(ab_pci->orderly_restore_pending)) {
++		ath11k_info(ab,
++			    "orderly QCA restore pending; skipping blocking system resume\n");
++		return 0;
++	}
++
+ 	if (test_bit(ATH11K_FLAG_QMI_FAIL, &ab->dev_flags)) {
+ 		ath11k_dbg(ab, ATH11K_DBG_BOOT, "boot skipping pci resume as qmi is not initialised\n");
+ 		return 0;
+@@ -1353,8 +1486,26 @@ static __maybe_unused int ath11k_pci_pm_suspend_late(struct device *dev)
+ static __maybe_unused int ath11k_pci_pm_resume_early(struct device *dev)
+ {
+ 	struct ath11k_base *ab = dev_get_drvdata(dev);
++	struct ath11k_pci *ab_pci = ath11k_pci_priv(ab);
+ 	int ret;
+ 
++	if (qcom_pcie_orderly_restore_pending(ab_pci->pdev)) {
++		WRITE_ONCE(ab_pci->orderly_restore_pending, true);
++		mod_delayed_work(system_wq, &ab_pci->orderly_restore_work,
++				 msecs_to_jiffies(ORDERLY_RESTORE_FALLBACK_MS));
++		return 0;
++	}
++
++	if (defer_qca_resume && ab_pci->dev_id == QCA6390_DEVICE_ID &&
++	    ab->actual_pm_policy == ATH11K_PM_DEFAULT) {
++		WRITE_ONCE(ab_pci->orderly_restore_pending, true);
++		mod_delayed_work(system_wq, &ab_pci->orderly_restore_work,
++				 msecs_to_jiffies(ORDERLY_RESTORE_FALLBACK_MS));
++		ath11k_info(ab,
++			    "QCA resume deferred; skipping blocking MHI/firmware resume (30 s fallback armed)\n");
++		return 0;
++	}
++
+ 	ret = ath11k_core_resume_early(ab);
+ 	if (ret)
+ 		ath11k_warn(ab, "failed to early resume core: %d\n", ret);
+

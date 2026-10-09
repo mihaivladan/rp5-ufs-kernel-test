@@ -97,7 +97,7 @@ def apply_patches(repo, source, fix, profile):
                 "91e28ba23946dae574a2fc86e534f143c598a4ac044540e7bdfd38ab20f0d588",
                 "GMU clock-reset patch checksum mismatch")
         extra_patches.append(gmu_reset)
-    elif profile in ("gpu-rpmh-fix", "sleepstate-handshake", "adsp-no-auto-ab", "lpass-devote-fix", "lpass-pm-clock", "audio-pcie-integration", "fg-coulomb-counter", "consoleos-rc1", "pcie-drv-handoff", "slpi-integrated", "lpm-platform"):
+    elif profile in ("gpu-rpmh-fix", "sleepstate-handshake", "adsp-no-auto-ab", "lpass-devote-fix", "lpass-pm-clock", "audio-pcie-integration", "fg-coulomb-counter", "consoleos-rc1", "consoleos-rc1-diagnostic", "pcie-drv-handoff", "slpi-integrated", "lpm-platform"):
         rpmh_fix = Path(__file__).resolve().parent / "a6xx-stale-rpmh-votes.patch"
         require(rpmh_fix.is_file(), "Missing upstream stale RPMh vote fix")
         require(hashlib.sha256(rpmh_fix.read_bytes()).hexdigest() ==
@@ -111,35 +111,35 @@ def apply_patches(repo, source, fix, profile):
                 "f8d91b9aa78409f838dc4b38a1b25ce46ed0979e7daf9484d30c43e5ef8dd112",
                 "SMP2P sleep-state patch checksum mismatch")
         extra_patches.append(sleepstate_fix)
-    if profile in ("adsp-no-auto-ab", "lpass-devote-fix", "lpass-pm-clock", "audio-pcie-integration", "fg-coulomb-counter", "consoleos-rc1", "pcie-drv-handoff", "slpi-integrated", "lpm-platform"):
+    if profile in ("adsp-no-auto-ab", "lpass-devote-fix", "lpass-pm-clock", "audio-pcie-integration", "fg-coulomb-counter", "consoleos-rc1", "consoleos-rc1-diagnostic", "pcie-drv-handoff", "slpi-integrated", "lpm-platform"):
         no_auto = Path(__file__).resolve().parent / "sm8250-adsp-no-auto-boot.patch"
         require(no_auto.is_file(), "Missing SM8250 ADSP no-auto-boot patch")
         require(hashlib.sha256(no_auto.read_bytes()).hexdigest() ==
                 "27a92a7e9bc3a37e1954efa97e518cb7808505cc04dc4eb246803ca07da61805",
                 "SM8250 ADSP no-auto-boot patch checksum mismatch")
         extra_patches.append(no_auto)
-    if profile in ("lpass-devote-fix", "lpass-pm-clock", "audio-pcie-integration", "fg-coulomb-counter", "consoleos-rc1"):
+    if profile in ("lpass-devote-fix", "lpass-pm-clock", "audio-pcie-integration", "fg-coulomb-counter", "consoleos-rc1", "consoleos-rc1-diagnostic"):
         devote_fix = Path(__file__).resolve().parent / "q6afe-lpass-hw-vote-handle.patch"
         require(devote_fix.is_file(), "Missing Q6AFE LPASS vote-handle patch")
         require(hashlib.sha256(devote_fix.read_bytes()).hexdigest() ==
                 "3104d397cd7a9be8e09c5c66e12411e9d6ea9fe6c1fbef6016f9cf6586076238",
                 "Q6AFE LPASS vote-handle patch checksum mismatch")
         extra_patches.append(devote_fix)
-    if profile in ("lpass-pm-clock", "audio-pcie-integration", "fg-coulomb-counter", "consoleos-rc1"):
+    if profile in ("lpass-pm-clock", "audio-pcie-integration", "fg-coulomb-counter", "consoleos-rc1", "consoleos-rc1-diagnostic"):
         macro_pm = Path(__file__).resolve().parent / "lpass-macro-pm-clock-backport.patch"
         require(macro_pm.is_file(), "Missing upstream LPASS macro PM-clock backport")
         require(hashlib.sha256(macro_pm.read_bytes()).hexdigest() ==
                 "83d363a201162f24325aca249bd9f4bff58765bdb0da5f1a0b0636ea4c8c29ab",
                 "LPASS macro PM-clock backport checksum mismatch")
         extra_patches.append(macro_pm)
-    if profile in ("pcie-drv-handoff", "audio-pcie-integration", "fg-coulomb-counter", "consoleos-rc1"):
+    if profile in ("pcie-drv-handoff", "audio-pcie-integration", "fg-coulomb-counter", "consoleos-rc1", "consoleos-rc1-diagnostic"):
         drv_fix = Path(__file__).resolve().parent / "qcom-pcie-drv-handoff.patch"
         require(drv_fix.is_file(), "Missing Qualcomm PCIe DRV handoff patch")
         require(hashlib.sha256(drv_fix.read_bytes()).hexdigest() ==
                 "dd753274154ed05388a367087dce9c27cc3da0e01390c785640b1cd4af2ddfdd",
                 "Qualcomm PCIe DRV handoff patch checksum mismatch")
         extra_patches.append(drv_fix)
-    if profile == "consoleos-rc1":
+    if profile in ("consoleos-rc1", "consoleos-rc1-diagnostic"):
         offline_fix = Path(__file__).resolve().parent / "qcom-pcie-drv-offline-suspend.patch"
         pinctrl_fix = Path(__file__).resolve().parent / "qcom-pcie-offline-pinctrl.patch"
         require(offline_fix.is_file() and pinctrl_fix.is_file(),
@@ -151,14 +151,14 @@ def apply_patches(repo, source, fix, profile):
                 "2c57942a2912ac64460386283b926f5cd7a245770b14f4c073b2d7a178bdce2f",
                 "Qualcomm PCIe offline pinctrl patch checksum mismatch")
         extra_patches.extend((offline_fix, pinctrl_fix))
-    if profile == "fg-coulomb-counter":
+    if profile in ("fg-coulomb-counter", "consoleos-rc1-diagnostic"):
         fg_counter = Path(__file__).resolve().parent / "qcom-fg-gen4-coulomb-counter.patch"
         require(fg_counter.is_file(), "Missing PM8150B Gen4 coulomb-counter patch")
         require(hashlib.sha256(fg_counter.read_bytes()).hexdigest() ==
                 "87bd94920f1f24722cb55a8c7bb2068599103469797188cd284c1ad28b6e50e8",
                 "PM8150B Gen4 coulomb-counter patch checksum mismatch")
         extra_patches.append(fg_counter)
-    if profile == "consoleos-rc1":
+    if profile in ("consoleos-rc1", "consoleos-rc1-diagnostic"):
         gamepad_remove = Path(__file__).resolve().parent / "retroid-gamepad-remove.patch"
         require(gamepad_remove.is_file(), "Missing Retroid gamepad cleanup patch")
         require(hashlib.sha256(gamepad_remove.read_bytes()).hexdigest() ==
@@ -198,6 +198,14 @@ def apply_patches(repo, source, fix, profile):
                 "abdbd431d328d0efcd1acc29aff128f5b8a67163ba51cb1838fedb491bbcf961",
                 "Orderly PCIe ICC release patch checksum mismatch")
         extra_patches.append(orderly_icc)
+        deferred_qca = (Path(__file__).resolve().parent /
+                        "qca6390-deferred-restore.patch")
+        require(deferred_qca.is_file(),
+                "Missing deferred QCA6390 restore patch")
+        require(hashlib.sha256(deferred_qca.read_bytes()).hexdigest() ==
+                "ce33f459620b220c777e30e021926376559a07533e0302863ef43a09c8424306",
+                "Deferred QCA6390 restore patch checksum mismatch")
+        extra_patches.append(deferred_qca)
         gamepad_pm = (Path(__file__).resolve().parent /
                       "retroid-mcu-rgb-system-pm.patch")
         require(gamepad_pm.is_file(),
@@ -214,6 +222,13 @@ def apply_patches(repo, source, fix, profile):
                 "7353398d93dac4db25363a7bc09e6b519f24aeb609f5061a02d037bd63b0eee7",
                 "PWM-fan startup patch checksum mismatch")
         extra_patches.append(fan_startup)
+        panel_fix = (Path(__file__).resolve().parent /
+                     "ch13726a-panel-product-fixes.patch")
+        require(panel_fix.is_file(), "Missing CH13726A product panel patch")
+        require(hashlib.sha256(panel_fix.read_bytes()).hexdigest() ==
+                "60eea00a7a44c671c6b331cb091674549897d92e1ff0cef2912f75d692435598",
+                "CH13726A product panel patch checksum mismatch")
+        extra_patches.append(panel_fix)
     if profile == "lpm-platform":
         lpm_fix = Path(__file__).resolve().parent / "qcom-lpm-platform-suspend.patch"
         require(lpm_fix.is_file(), "Missing exact-state platform suspend patch")
@@ -231,7 +246,7 @@ def apply_patches(repo, source, fix, profile):
         subprocess.run(args, input=payload, text=True, cwd=source, check=True)
         records.append({"path": str(patch.relative_to(repo)) if patch in patches else patch.name,
                         "sha256": hashlib.sha256(patch.read_bytes()).hexdigest()})
-    if profile in ("gpu-rpmh-fix", "sleepstate-handshake", "adsp-no-auto-ab", "lpass-devote-fix", "lpass-pm-clock", "audio-pcie-integration", "fg-coulomb-counter", "consoleos-rc1", "pcie-drv-handoff", "slpi-integrated", "lpm-platform"):
+    if profile in ("gpu-rpmh-fix", "sleepstate-handshake", "adsp-no-auto-ab", "lpass-devote-fix", "lpass-pm-clock", "audio-pcie-integration", "fg-coulomb-counter", "consoleos-rc1", "consoleos-rc1-diagnostic", "pcie-drv-handoff", "slpi-integrated", "lpm-platform"):
         gmu_source = (source / "drivers/gpu/drm/msm/adreno/a6xx_gmu.c").read_text()
         require("if (!test_and_clear_bit(GMU_STATUS_FW_START, &gmu->status))" in gmu_source,
                 "Corrected GMU firmware-start condition missing")
@@ -243,20 +258,20 @@ def apply_patches(repo, source, fix, profile):
                 "case PM_POST_SUSPEND:" in sleepstate_source and
                 "PROC_AWAKE_ID\t12" in sleepstate_source,
                 "SMP2P sleep-state handshake implementation missing")
-    if profile in ("adsp-no-auto-ab", "lpass-devote-fix", "lpass-pm-clock", "audio-pcie-integration", "fg-coulomb-counter", "consoleos-rc1", "pcie-drv-handoff", "slpi-integrated", "lpm-platform"):
+    if profile in ("adsp-no-auto-ab", "lpass-devote-fix", "lpass-pm-clock", "audio-pcie-integration", "fg-coulomb-counter", "consoleos-rc1", "consoleos-rc1-diagnostic", "pcie-drv-handoff", "slpi-integrated", "lpm-platform"):
         pas_source = (source / "drivers/remoteproc/qcom_q6v5_pas.c").read_text()
         start = pas_source.index("static const struct qcom_pas_data sm8250_adsp_resource = {")
         end = pas_source.index("\n};", start)
         block = pas_source[start:end]
         require(block.count(".auto_boot = false,") == 1 and ".auto_boot = true," not in block,
                 "SM8250 ADSP auto-boot override missing")
-    if profile in ("lpass-devote-fix", "lpass-pm-clock", "audio-pcie-integration", "fg-coulomb-counter", "consoleos-rc1"):
+    if profile in ("lpass-devote-fix", "lpass-pm-clock", "audio-pcie-integration", "fg-coulomb-counter", "consoleos-rc1", "consoleos-rc1-diagnostic"):
         afe_source = (source / "sound/soc/qcom/qdsp6/q6afe.c").read_text()
         require("afe->lpass_hw_client_handle = *(const u32 *)data->payload;" in afe_source and
                 "refusing LPASS HW devote with zero handle" in afe_source and
                 "LPASS HW devote complete: block=%u handle=%u" in afe_source,
                 "Q6AFE LPASS vote-handle repair missing")
-    if profile in ("lpass-pm-clock", "audio-pcie-integration", "fg-coulomb-counter", "consoleos-rc1"):
+    if profile in ("lpass-pm-clock", "audio-pcie-integration", "fg-coulomb-counter", "consoleos-rc1", "consoleos-rc1-diagnostic"):
         for path, name in {
             "sound/soc/codecs/lpass-wsa-macro.c": "wsa",
             "sound/soc/codecs/lpass-va-macro.c": "va",
@@ -277,7 +292,7 @@ def apply_patches(repo, source, fix, profile):
             require(f"clk_prepare_enable({name}->macro)" not in macro_source and
                     f"clk_prepare_enable({name}->dcodec)" not in macro_source,
                     f"LPASS {name.upper()} still directly enables vote clocks")
-    if profile == "consoleos-rc1":
+    if profile in ("consoleos-rc1", "consoleos-rc1-diagnostic"):
         pcie_source = (source / "drivers/pci/controller/dwc/pcie-qcom.c").read_text()
         required_pcie_offline = (
             "bool drv_offline;",
@@ -315,6 +330,23 @@ def apply_patches(repo, source, fix, profile):
                 "state->duty_cycle = 0;" in pwm_fan and
                 "pwm_fan_update_state(ctx, initial_pwm);" in pwm_fan,
                 "Configurable PWM-fan startup implementation missing")
+        panel = (source /
+                 "drivers/gpu/drm/panel/panel-ddic-ch13726a.c").read_text()
+        require("struct regulator_bulk_data supplies[5];" in panel and
+                'ctx->supplies[4].supply = "mipi-vdd";' in panel and
+                "msleep(20);" in panel and "msleep(28);" not in panel,
+                "CH13726A GPIO28 supply or 20 ms post-reset policy missing")
+        ath11k_pci = (source /
+                      "drivers/net/wireless/ath/ath11k/pci.c").read_text()
+        require("module_param_cb(orderly_qca_restore," in ath11k_pci and
+                "module_param_cb(qca_restore_pending," in ath11k_pci and
+                "module_param(defer_qca_resume, bool, 0644);" in ath11k_pci and
+                "ORDERLY_RESTORE_FALLBACK_MS\t30000" in ath11k_pci and
+                "mod_delayed_work(system_wq, &ab_pci->orderly_restore_work" in ath11k_pci and
+                "qcom_pcie_orderly_restore_root(ab_pci->pdev);" in ath11k_pci and
+                "QCA resume deferred; skipping blocking MHI/firmware resume" in ath11k_pci and
+                "skipping blocking system resume" in ath11k_pci,
+                "Deferred QCA restore ownership markers missing")
         rpmh_regulator = (source / "drivers/regulator/qcom-rpmh-regulator.c").read_text()
         regulator_core = (source / "drivers/regulator/core.c").read_text()
         required_rpmh = (
@@ -374,7 +406,8 @@ def apply_patches(repo, source, fix, profile):
                 "qcom_pcie_orderly_poweroff_arm" in qcom_pcie and
                 "pci_pwrctrl_power_off_devices(pci->dev);" in qcom_pcie and
                 "orderly QCA power-off: root complex suspended, ICC votes zero" in qcom_pcie and
-                "orderly QCA power-off: ICC votes, root complex and endpoint rails restored" in qcom_pcie,
+                "orderly QCA restore pending; deferring PCIe/QCA bring-up until userspace thaw" in qcom_pcie and
+                "orderly QCA restore: ICC, root complex and endpoint rails restored asynchronously" in qcom_pcie,
                 "Guarded Qualcomm PCIe orderly power-off markers missing")
     if profile == "lpm-platform":
         lpm_source = (source / "drivers/soc/qcom/qcom_lpm_platform_suspend.c").read_text()
@@ -400,7 +433,7 @@ def apply_patches(repo, source, fix, profile):
             reference = Path(__file__).resolve().parent / "sm8250-retroidpocket-rp5-minsleep4.dts"
             require(reference.is_file(), "Missing minsleep4 reference DTS")
             shutil.copyfile(reference, source / "arch/arm64/boot/dts/qcom" / reference.name)
-    elif profile in ("reenable-matrix", "sleepstate-handshake", "adsp-no-auto-ab", "lpass-devote-fix", "lpass-pm-clock", "audio-pcie-integration", "fg-coulomb-counter", "consoleos-rc1", "pcie-drv-handoff", "slpi-integrated", "lpm-platform"):
+    elif profile in ("reenable-matrix", "sleepstate-handshake", "adsp-no-auto-ab", "lpass-devote-fix", "lpass-pm-clock", "audio-pcie-integration", "fg-coulomb-counter", "consoleos-rc1", "consoleos-rc1-diagnostic", "pcie-drv-handoff", "slpi-integrated", "lpm-platform"):
         root = Path(__file__).resolve().parent
         for filename in (
             "sm8250-retroidpocket-rp5-minsleep4.dts",
@@ -429,14 +462,14 @@ def apply_patches(repo, source, fix, profile):
                 sleepstate_dts,
                 source / "arch/arm64/boot/dts/qcom" / sleepstate_dts.name,
             )
-        elif profile in ("pcie-drv-handoff", "audio-pcie-integration", "fg-coulomb-counter", "consoleos-rc1"):
+        elif profile in ("pcie-drv-handoff", "audio-pcie-integration", "fg-coulomb-counter", "consoleos-rc1", "consoleos-rc1-diagnostic"):
             drv_dts = root / "sm8250-retroidpocket-rp5-phase4a-wireless-adsp-pcie-drv.dts"
             require(drv_dts.is_file(), "Missing RP5 PCIe DRV handoff DTS")
             shutil.copyfile(
                 drv_dts,
                 source / "arch/arm64/boot/dts/qcom" / drv_dts.name,
             )
-            if profile == "consoleos-rc1":
+            if profile in ("consoleos-rc1", "consoleos-rc1-diagnostic"):
                 rc_dts = root / "sm8250-retroidpocket-rp5-consoleos-rc1.dts"
                 require(rc_dts.is_file(), "Missing ConsoleOS RC1 DTS")
                 shutil.copyfile(
@@ -476,12 +509,12 @@ def apply_patches(repo, source, fix, profile):
         names.append("sm8250-retroidpocket-rp5-adsp-sleepstate")
     elif profile in ("adsp-no-auto-ab", "lpass-devote-fix", "lpass-pm-clock"):
         names.append("sm8250-retroidpocket-rp5-reenable-display-gpu-gamepad-active-only-ufs-wireless-usb-typec-dp-adsp")
-    elif profile in ("pcie-drv-handoff", "audio-pcie-integration", "fg-coulomb-counter", "consoleos-rc1"):
+    elif profile in ("pcie-drv-handoff", "audio-pcie-integration", "fg-coulomb-counter", "consoleos-rc1", "consoleos-rc1-diagnostic"):
         names.extend([
             "sm8250-retroidpocket-rp5-reenable-display-gpu-gamepad-active-only-ufs-wireless",
             "sm8250-retroidpocket-rp5-phase4a-wireless-adsp-pcie-drv",
         ])
-        if profile == "consoleos-rc1":
+        if profile in ("consoleos-rc1", "consoleos-rc1-diagnostic"):
             names.append("sm8250-retroidpocket-rp5-consoleos-rc1")
     elif profile == "slpi-integrated":
         names.append("sm8250-retroidpocket-rp5-adsp-slpi-sleepstate")
@@ -507,7 +540,7 @@ def main():
     require(profile in (
         "diagnostic", "minimal-sleep", "cpu-icc-off", "stock-pruned",
         "reenable-matrix", "gmu-clock-reset", "gpu-rpmh-fix",
-        "sleepstate-handshake", "adsp-no-auto-ab", "lpass-devote-fix", "lpass-pm-clock", "audio-pcie-integration", "fg-coulomb-counter", "consoleos-rc1", "pcie-drv-handoff", "slpi-integrated", "lpm-platform",
+        "sleepstate-handshake", "adsp-no-auto-ab", "lpass-devote-fix", "lpass-pm-clock", "audio-pcie-integration", "fg-coulomb-counter", "consoleos-rc1", "consoleos-rc1-diagnostic", "pcie-drv-handoff", "slpi-integrated", "lpm-platform",
     ),
             f"Unsupported ROCKNIX_PROFILE: {profile}")
     records = apply_patches(
@@ -515,14 +548,19 @@ def main():
         Path(__file__).resolve().parent.parent / "ufs-lane-clocks.patch",
         profile,
     )
+    kit = Path(__file__).resolve().parent.parent
+    recipe_commit = subprocess.check_output(
+        ["git", "-C", str(kit), "rev-parse", "HEAD"], text=True
+    ).strip()
     dt_only = profile in ("cpu-icc-off", "stock-pruned", "reenable-matrix")
     (out / "provenance.json").write_text(json.dumps({
+        "kernel_recipe_commit": recipe_commit,
         "rocknix_revision": REVISION, "stock_kernel_sha256": STOCK_KERNEL_SHA,
         "initramfs_sha256": initramfs_sha, "patches": records,
         "fix_commit": "f07317a8d57f382ec505597816271dd72ffa20c7",
         "gpu_rpmh_fix_commit": (
             "d9108bfdb746"
-            if profile in ("gpu-rpmh-fix", "sleepstate-handshake", "adsp-no-auto-ab", "lpass-devote-fix", "lpass-pm-clock", "audio-pcie-integration", "fg-coulomb-counter", "consoleos-rc1", "pcie-drv-handoff", "slpi-integrated", "lpm-platform") else None
+            if profile in ("gpu-rpmh-fix", "sleepstate-handshake", "adsp-no-auto-ab", "lpass-devote-fix", "lpass-pm-clock", "audio-pcie-integration", "fg-coulomb-counter", "consoleos-rc1", "consoleos-rc1-diagnostic", "pcie-drv-handoff", "slpi-integrated", "lpm-platform") else None
         ),
         "sleepstate_handshake": (
             "Qualcomm downstream SMP2P awake bit 12 over the RP5 DSPS/SLPI channel"
@@ -530,11 +568,11 @@ def main():
         ),
         "adsp_no_auto_boot": (
             "SM8250 ADSP remoteproc registered offline until explicit sysfs start"
-            if profile in ("adsp-no-auto-ab", "lpass-devote-fix", "lpass-pm-clock", "audio-pcie-integration", "fg-coulomb-counter", "consoleos-rc1", "pcie-drv-handoff", "slpi-integrated", "lpm-platform") else None
+            if profile in ("adsp-no-auto-ab", "lpass-devote-fix", "lpass-pm-clock", "audio-pcie-integration", "fg-coulomb-counter", "consoleos-rc1", "consoleos-rc1-diagnostic", "pcie-drv-handoff", "slpi-integrated", "lpm-platform") else None
         ),
         "lpass_devote_fix": (
             "Preserve DSP LPASS hardware-vote handles and synchronously validate DEVOTE"
-            if profile in ("lpass-devote-fix", "lpass-pm-clock", "audio-pcie-integration", "fg-coulomb-counter", "consoleos-rc1") else None
+            if profile in ("lpass-devote-fix", "lpass-pm-clock", "audio-pcie-integration", "fg-coulomb-counter", "consoleos-rc1", "consoleos-rc1-diagnostic") else None
         ),
         "lpass_macro_pm_clock_backport": (
             [
@@ -542,29 +580,42 @@ def main():
                 "eb667d0fbdd38d5a800b9e7aafc9a6c14530b9bf",
                 "b9b23e72abef91ab4689f1467cefc2517042ab26",
                 "b05482e7ce1b110f86b08a99768ac41e4c9e4dfa",
-            ] if profile in ("lpass-pm-clock", "audio-pcie-integration", "fg-coulomb-counter", "consoleos-rc1") else None
+            ] if profile in ("lpass-pm-clock", "audio-pcie-integration", "fg-coulomb-counter", "consoleos-rc1", "consoleos-rc1-diagnostic") else None
         ),
         "pcie_drv_handoff": (
             "ACK-validated ADSP pcie_drv ownership transfer around SM8250 PCIe RC0 resource release"
-            if profile in ("pcie-drv-handoff", "audio-pcie-integration", "fg-coulomb-counter", "consoleos-rc1") else None
+            if profile in ("pcie-drv-handoff", "audio-pcie-integration", "fg-coulomb-counter", "consoleos-rc1", "consoleos-rc1-diagnostic") else None
         ),
         "pm8150b_gen4_coulomb_diagnostics": (
             "Revision-selected raw CC_SOC/CC_SOC_SW/BATT_SOC plus derived microamp-hours"
-            if profile == "fg-coulomb-counter" else None
+            if profile in ("fg-coulomb-counter", "consoleos-rc1-diagnostic") else None
         ),
         "consoleos_rc1_policy": (
             "Accepted Phase 4AT full stack; shared MCU/RGB/gamepad rail controllable; "
             "gamepad unbind cleanup; RP5 fan silent at kernel probe; failed/no-effect "
             "RPMh, endpoint-off and exact-state diagnostics excluded"
-            if profile == "consoleos-rc1" else None
+            if profile in ("consoleos-rc1", "consoleos-rc1-diagnostic") else None
         ),
         "pm8150b_pdphy_attach_gating": (
             "Keep CC detection active; power PD PHY and L2A only during an attached session"
-            if profile == "consoleos-rc1" else None
+            if profile in ("consoleos-rc1", "consoleos-rc1-diagnostic") else None
         ),
         "qca6390_orderly_poweroff": (
-            "Opt-in firmware OFF, WLAON shutdown, MHI down, PCIe L23, true-zero ICC release, host resources and endpoint rails"
-            if profile == "consoleos-rc1" else None
+            "Opt-in firmware OFF, WLAON shutdown, MHI down, PCIe L23, true-zero ICC release, then foreground-first deferred restore"
+            if profile in ("consoleos-rc1", "consoleos-rc1-diagnostic") else None
+        ),
+        "diagnostic_delta": (
+            {
+                "config": "consoleos-rc1-diagnostic.delta.config",
+                "config_sha256": hashlib.sha256(
+                    (kit / "rocknix/consoleos-rc1-diagnostic.delta.config").read_bytes()
+                ).hexdigest(),
+                "patch": "qcom-fg-gen4-coulomb-counter.patch",
+                "patch_sha256": hashlib.sha256(
+                    (kit / "rocknix/qcom-fg-gen4-coulomb-counter.patch").read_bytes()
+                ).hexdigest(),
+            }
+            if profile == "consoleos-rc1-diagnostic" else None
         ),
         "platform_suspend": (
             "Memory-only suspend entry using exact Android SM8250 composite PSCI state 0x4100c244"

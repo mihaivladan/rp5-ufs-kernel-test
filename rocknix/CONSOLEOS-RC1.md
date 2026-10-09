@@ -1,12 +1,15 @@
 # ConsoleOS RP5 RC17 product-PM kernel
 
-## Product PM3 kernel packaging
+## Product PM5 kernel packaging
 
 The product build emits Linux 7.2's ARM64 `vmlinuz.efi` zboot image with a
 zstd-compressed payload as `boot/KERNEL`. The resolved config must disable the
 RAID6 boot benchmark and the product-excluded debug/tracing families: DWARF and
 BTF debug info, `KALLSYMS_ALL`, ftrace, kprobes, uprobes, BPF events, dynamic
-debug and PM debug. `KALLSYMS`, `DEBUG_FS`, ordinary BPF networking support,
+debug. `CONFIG_PM_DEBUG` and `CONFIG_PM_SLEEP_DEBUG` remain built in but are
+silent until enabled at runtime, so the shipping kernel can produce per-device
+suspend/resume timings without a diagnostic-kernel swap. `KALLSYMS`,
+`DEBUG_FS`, ordinary BPF networking support,
 the built-in early-display fallback and the external helper bundle remain.
 The generic ARM PL011 UART and its console are built in solely so the exact
 device KERNEL can produce boot evidence on QEMU's standard ARM `virt` machine;
@@ -76,6 +79,14 @@ Included kernel changes:
 - Retroid gamepad and HTR3212 bound-driver system PM for the shared rail.
 - opt-in pwm-fan startup policy, with RP5 starting at 0% rather than
   ROCKNIX's fixed PWM 70 probe policy.
+- opt-in stage-1 and stage-2 QCA6390 resume deferral. Stage 1 defers
+  ath11k/MHI/firmware; stage 2 additionally defers PCIe root and rail restore.
+  Userspace can request immediate restore, a readable pending flag supports
+  crash recovery, and a 30-second kernel delayed-work fallback prevents an
+  orphaned restore.
+- built-in PM8150B SDAM NVMEM support, the CH13726A panel's GPIO28 MIPI-VDD
+  supply, a 20 ms post-reset wait, and static disablement of the misidentified
+  `15-001c` Type-C mux node.
 - `CONFIG_RAID6_PQ_BENCHMARK=n`; the unused boot-time RAID6 implementation
   benchmark is not run.
 
@@ -99,4 +110,14 @@ PCIe PHY power-off, or the failed exact-PSCI-state platform driver.
 
 This profile retains the fuel-gauge interface and the read-only Qualcomm sleep
 residency files needed by the product validation matrix. Product-excluded BTF,
-ftrace, kprobes and PM debug facilities are disabled.
+ftrace and kprobes remain disabled.
+
+## Paired diagnostic kernel
+
+`consoleos-rc1-diagnostic` is built from the exact same repository commit,
+patch stack, product config and DT as PM5. Its only deltas are the pinned
+`consoleos-rc1-diagnostic.delta.config` debug/tracing overlay and the pinned
+PM8150B Gen4 coulomb-counter patch. It has a distinct `-diagcc1` release suffix
+and is retained for the 2–4 hour product-path drain gate; it is not deployed
+for normal product qualification. Both workflows use the same established
+GitHub Actions ccache key family and record cache statistics.

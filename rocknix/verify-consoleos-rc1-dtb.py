@@ -33,6 +33,9 @@ PWM_FAN = "/pwm-fan"
 MCU_ALWAYS_ON = "/vreg-mcu-3v3-regulator/regulator-always-on"
 PCIE_SLEEP = "/soc@0/pinctrl@f100000/pcie0-sleep-state"
 PCIE_SLEEP_CLKREQ = f"{PCIE_SLEEP}/clkreq-pins"
+PANEL = "/soc@0/display-subsystem@ae00000/dsi@ae94000/panel@0"
+PANEL_MIPI_VDD = "/consoleos-panel-mipi-vdd-regulator"
+TYPEC_MUX_1C = "/soc@0/geniqup@8c0000/i2c@884000/typec-mux@1c"
 STATIC_EXPECTED = {f"{node}/status" for node in STATUS_NODES} | {
     f"{PCIE}/qcom,drv-supported", f"{PCIE}/qcom,drv-dev-id",
     f"{PCIE}/qcom,drv-l1ss-timeout-us", f"{PCIE}/pinctrl-names",
@@ -42,6 +45,10 @@ STATIC_EXPECTED = {f"{node}/status" for node in STATUS_NODES} | {
     f"{PCIE_SLEEP}/phandle", f"{PCIE_SLEEP_CLKREQ}/pins",
     f"{PCIE_SLEEP_CLKREQ}/function", f"{PCIE_SLEEP_CLKREQ}/drive-strength",
     f"{PCIE_SLEEP_CLKREQ}/bias-pull-up",
+    f"{PANEL}/mipi-vdd-supply", f"{TYPEC_MUX_1C}/status",
+    f"{PANEL_MIPI_VDD}/compatible", f"{PANEL_MIPI_VDD}/regulator-name",
+    f"{PANEL_MIPI_VDD}/regulator-boot-on", f"{PANEL_MIPI_VDD}/gpio",
+    f"{PANEL_MIPI_VDD}/enable-active-high", f"{PANEL_MIPI_VDD}/phandle",
 }
 
 
@@ -132,6 +139,22 @@ def main() -> None:
         raise SystemExit("wrong PCIe interconnect providers, endpoints or tags")
     if candidate[f"{PWM_FAN}/fan-startup-percent"] != struct.pack(">I", 0):
         raise SystemExit("RP5 fan does not request a silent kernel startup")
+    if status(candidate[f"{TYPEC_MUX_1C}/status"]) != b"disabled":
+        raise SystemExit("misidentified 15-001c node is not statically disabled")
+    if candidate[f"{PANEL_MIPI_VDD}/compatible"] != b"regulator-fixed\0" or \
+       candidate[f"{PANEL_MIPI_VDD}/regulator-name"] != \
+       b"consoleos_panel_mipi_vdd\0":
+        raise SystemExit("GPIO28 panel MIPI-VDD regulator identity mismatch")
+    if candidate[f"{PANEL_MIPI_VDD}/regulator-boot-on"] != b"" or \
+       candidate[f"{PANEL_MIPI_VDD}/enable-active-high"] != b"":
+        raise SystemExit("GPIO28 panel MIPI-VDD regulator policy mismatch")
+    tlmm_phandle = candidate["/soc@0/pinctrl@f100000/phandle"]
+    if candidate[f"{PANEL_MIPI_VDD}/gpio"] != \
+       tlmm_phandle + struct.pack(">II", 28, 0):
+        raise SystemExit("panel MIPI-VDD regulator does not own active-high GPIO28")
+    if candidate[f"{PANEL}/mipi-vdd-supply"] != \
+       candidate[f"{PANEL_MIPI_VDD}/phandle"]:
+        raise SystemExit("CH13726A panel is not linked to the GPIO28 MIPI-VDD supply")
     if candidate[f"{PCIE}/pinctrl-names"] != b"default\0sleep\0":
         raise SystemExit("wrong PCIe pinctrl state names")
     sleep_phandle = candidate[f"{PCIE_SLEEP}/phandle"]
@@ -161,7 +184,7 @@ def main() -> None:
     ):
         if status(candidate[f"{node}/status"]) != b"disabled":
             raise SystemExit(f"unvalidated subsystem enabled: {node}")
-    print("VERIFIED: RC17 full stack plus bound-driver MCU/RGB rail PM and exact GPIO80 pinctrl")
+    print("VERIFIED: product stack plus MCU/RGB PM, GPIO80, GPIO28 panel supply and disabled 15-001c")
 
 
 if __name__ == "__main__":

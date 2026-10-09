@@ -53,7 +53,14 @@ fg-coulomb-counter)
     ;;
 consoleos-rc1)
     config_fragment="${kit}/rocknix/consoleos-rc1.config"
-    expected_release='7.2.0-consoleos-rc17-productpm4'
+    expected_release='7.2.0-consoleos-rc17-productpm5'
+    artifact_name="rocknix-${expected_release}.tar.zst"
+    dtb_name='sm8250-retroidpocket-rp5-consoleos-rc1'
+    ;;
+consoleos-rc1-diagnostic)
+    config_fragment="${kit}/rocknix/consoleos-rc1.config"
+    config_overlay="${kit}/rocknix/consoleos-rc1-diagnostic.delta.config"
+    expected_release='7.2.0-consoleos-rc17-productpm5-diagcc1'
     artifact_name="rocknix-${expected_release}.tar.zst"
     dtb_name='sm8250-retroidpocket-rp5-consoleos-rc1'
     ;;
@@ -348,17 +355,28 @@ print('Reused stock firmware:', firmware)
 PY
 rm -rf "${work}/stock-root"
 rm "${work}/release.tar" "${work}/SYSTEM" "${work}/linux.tar.xz"
-bash scripts/kconfig/merge_config.sh -m .config "${config_fragment}"
+config_fragments=("${config_fragment}")
+if [[ -n "${config_overlay:-}" ]]; then
+    config_fragments+=("${config_overlay}")
+fi
+bash scripts/kconfig/merge_config.sh -m .config "${config_fragments[@]}"
 scripts/config --set-str INITRAMFS_SOURCE "${work}/initramfs.cpio"
 scripts/config --set-str EXTRA_FIRMWARE_DIR "${source_dir}/external-firmware"
 make "${make_args[@]}" olddefconfig
 cp .config "${out}/kernel.config"
-python3 - "${config_fragment}" "${profile}" <<'PY'
+python3 - "${profile}" "${config_fragments[@]}" <<'PY'
 from pathlib import Path
 import sys
 actual = set(Path('.config').read_text().splitlines())
-requested = [line for line in Path(sys.argv[1]).read_text().splitlines()
-             if line.startswith('CONFIG_') or line.startswith('# CONFIG_')]
+profile = sys.argv[1]
+requested_by_symbol = {}
+for fragment in map(Path, sys.argv[2:]):
+    for line in fragment.read_text().splitlines():
+        if line.startswith('CONFIG_'):
+            requested_by_symbol[line.split('=', 1)[0]] = line
+        elif line.startswith('# CONFIG_') and line.endswith(' is not set'):
+            requested_by_symbol[line[2:-11]] = line
+requested = requested_by_symbol.values()
 enabled = {line.split('=', 1)[0] for line in actual if line.startswith('CONFIG_')}
 missing = []
 for line in requested:
@@ -376,7 +394,7 @@ if missing:
 genpd = Path('drivers/pmdomain/core.c').read_text()
 if '#ifdef CONFIG_DEBUG_FS' not in genpd or '"pm_genpd_summary"' not in genpd:
     raise SystemExit('Expected Linux 7.2 power-domain debugfs implementation missing')
-if sys.argv[2] == 'minimal-sleep':
+if profile == 'minimal-sleep':
     required = {
         'CONFIG_ARM_PSCI_CPUIDLE=y', 'CONFIG_ARM_PSCI_CPUIDLE_DOMAIN=y',
         'CONFIG_INPUT_PM8941_PWRKEY=y', 'CONFIG_MMC_SDHCI_MSM=y',
@@ -389,7 +407,7 @@ if sys.argv[2] == 'minimal-sleep':
     absent = sorted(required - actual)
     if absent:
         raise SystemExit('Minimal boot requirements missing: ' + ', '.join(absent))
-elif sys.argv[2] == 'gmu-clock-reset':
+elif profile == 'gmu-clock-reset':
     gmu = Path('drivers/gpu/drm/msm/adreno/a6xx_gmu.c').read_text()
     marker = 'WARN_ON_ONCE(clk_set_rate(gmu->core_clk, 19200000));'
     if gmu.count(marker) != 1:
@@ -400,7 +418,7 @@ elif sys.argv[2] == 'gmu-clock-reset':
     power_put = gmu.index('pm_runtime_put_sync(gmu->dev);', reset)
     if not stop < disable < reset < power_put:
         raise SystemExit('GMU clock reset is outside the guarded suspend window')
-elif sys.argv[2] == 'sleepstate-handshake':
+elif profile == 'sleepstate-handshake':
     required = {
         'CONFIG_QCOM_SMP2P=y', 'CONFIG_QCOM_SMP2P_SLEEPSTATE=y',
         'CONFIG_PM_SLEEP=y', 'CONFIG_PM=y',
@@ -419,14 +437,14 @@ elif sys.argv[2] == 'sleepstate-handshake':
     absent_driver = sorted(required_driver - set(driver.splitlines()))
     if absent_driver:
         raise SystemExit('Sleep-state driver markers missing: ' + ', '.join(absent_driver))
-elif sys.argv[2] in ('adsp-no-auto-ab', 'lpass-devote-fix', 'lpass-pm-clock', 'audio-pcie-integration', 'fg-coulomb-counter', 'consoleos-rc1'):
+elif profile in ('adsp-no-auto-ab', 'lpass-devote-fix', 'lpass-pm-clock', 'audio-pcie-integration', 'fg-coulomb-counter', 'consoleos-rc1', 'consoleos-rc1-diagnostic'):
     pas = Path('drivers/remoteproc/qcom_q6v5_pas.c').read_text()
     start = pas.index('static const struct qcom_pas_data sm8250_adsp_resource = {')
     end = pas.index('\n};', start)
     block = pas[start:end]
     if block.count('.auto_boot = false,') != 1 or '.auto_boot = true,' in block:
         raise SystemExit('SM8250 ADSP auto-boot was not disabled exactly once')
-    if sys.argv[2] in ('lpass-devote-fix', 'lpass-pm-clock', 'audio-pcie-integration', 'fg-coulomb-counter', 'consoleos-rc1'):
+    if profile in ('lpass-devote-fix', 'lpass-pm-clock', 'audio-pcie-integration', 'fg-coulomb-counter', 'consoleos-rc1', 'consoleos-rc1-diagnostic'):
         afe = Path('sound/soc/qcom/qdsp6/q6afe.c').read_text()
         required_afe = (
             'u32 lpass_hw_client_handle;',
@@ -438,7 +456,7 @@ elif sys.argv[2] in ('adsp-no-auto-ab', 'lpass-devote-fix', 'lpass-pm-clock', 'a
         )
         if not all(marker in afe for marker in required_afe):
             raise SystemExit('LPASS hardware vote-handle repair markers missing')
-    if sys.argv[2] in ('lpass-pm-clock', 'audio-pcie-integration', 'fg-coulomb-counter', 'consoleos-rc1'):
+    if profile in ('lpass-pm-clock', 'audio-pcie-integration', 'fg-coulomb-counter', 'consoleos-rc1', 'consoleos-rc1-diagnostic'):
         macro_sources = {
             'sound/soc/codecs/lpass-wsa-macro.c': 'wsa',
             'sound/soc/codecs/lpass-va-macro.c': 'va',
@@ -460,7 +478,7 @@ elif sys.argv[2] in ('adsp-no-auto-ab', 'lpass-devote-fix', 'lpass-pm-clock', 'a
             if f'clk_prepare_enable({name}->macro)' in source or \
                f'clk_prepare_enable({name}->dcodec)' in source:
                 raise SystemExit(f'LPASS {name.upper()} still directly enables vote clocks')
-    if sys.argv[2] in ('audio-pcie-integration', 'fg-coulomb-counter', 'consoleos-rc1'):
+    if profile in ('audio-pcie-integration', 'fg-coulomb-counter', 'consoleos-rc1', 'consoleos-rc1-diagnostic'):
         required = {
             'CONFIG_PCIE_QCOM=y', 'CONFIG_PCIE_QCOM_DRV=y', 'CONFIG_RPMSG=y',
             'CONFIG_PM_SLEEP=y', 'CONFIG_PM=y',
@@ -489,7 +507,7 @@ elif sys.argv[2] in ('adsp-no-auto-ab', 'lpass-devote-fix', 'lpass-pm-clock', 'a
             raise SystemExit('PCIe DRV PM ordering markers missing')
         if not all(marker in transport for marker in required_transport):
             raise SystemExit('PCIe DRV wire-protocol markers missing')
-    if sys.argv[2] == 'fg-coulomb-counter':
+    if profile in ('fg-coulomb-counter', 'consoleos-rc1-diagnostic'):
         fg = Path('drivers/power/supply/qcom_fg.c').read_text()
         required_fg = (
             'POWER_SUPPLY_PROP_CHARGE_COUNTER,',
@@ -502,42 +520,61 @@ elif sys.argv[2] in ('adsp-no-auto-ab', 'lpass-devote-fix', 'lpass-pm-clock', 'a
         )
         if not all(marker in fg for marker in required_fg):
             raise SystemExit('PM8150B Gen4 coulomb diagnostic markers missing')
-    if sys.argv[2] == 'consoleos-rc1':
-        fg = Path('drivers/power/supply/qcom_fg.c').read_text()
-        forbidden_fg = (
-            'POWER_SUPPLY_PROP_CHARGE_COUNTER,',
-            'static int qcom_fg_gen4_read_diag(',
-            'static DEVICE_ATTR_RO(gen4_diagnostics);',
-        )
-        present_fg = [marker for marker in forbidden_fg if marker in fg]
-        if present_fg:
-            raise SystemExit('Product fuel-gauge diagnostics still present: ' + ', '.join(present_fg))
+    if profile in ('consoleos-rc1', 'consoleos-rc1-diagnostic'):
         required_product = {
-            'CONFIG_DEBUG_INFO_NONE=y',
             'CONFIG_EFI_ZBOOT=y',
             'CONFIG_KERNEL_ZSTD=y',
+            'CONFIG_PM_DEBUG=y',
+            'CONFIG_PM_SLEEP_DEBUG=y',
+            'CONFIG_NVMEM_SPMI_SDAM=y',
             'CONFIG_SERIAL_AMBA_PL011=y',
             'CONFIG_SERIAL_AMBA_PL011_CONSOLE=y',
         }
         absent_product = sorted(required_product - actual)
         if absent_product:
             raise SystemExit('Product/zboot settings missing: ' + ', '.join(absent_product))
-        forbidden_product = {
-            'CONFIG_PM_DEBUG', 'CONFIG_PM_ADVANCED_DEBUG', 'CONFIG_PM_SLEEP_DEBUG',
-            'CONFIG_KALLSYMS_ALL', 'CONFIG_FTRACE', 'CONFIG_FUNCTION_TRACER',
-            'CONFIG_FUNCTION_GRAPH_TRACER', 'CONFIG_DYNAMIC_FTRACE',
-            'CONFIG_KPROBES', 'CONFIG_KPROBE_EVENTS', 'CONFIG_UPROBES',
-            'CONFIG_UPROBE_EVENTS', 'CONFIG_FTRACE_SYSCALLS', 'CONFIG_SCHED_TRACER',
-            'CONFIG_DYNAMIC_DEBUG', 'CONFIG_DEBUG_INFO',
-            'CONFIG_DEBUG_INFO_DWARF_TOOLCHAIN_DEFAULT', 'CONFIG_DEBUG_INFO_DWARF4',
-            'CONFIG_DEBUG_INFO_DWARF5', 'CONFIG_DEBUG_INFO_REDUCED',
-            'CONFIG_DEBUG_INFO_SPLIT', 'CONFIG_DEBUG_INFO_BTF',
-            'CONFIG_DEBUG_INFO_BTF_MODULES', 'CONFIG_BPF_EVENTS',
-            'CONFIG_RAID6_PQ_BENCHMARK',
-        }
-        enabled_forbidden = sorted(forbidden_product & enabled)
-        if enabled_forbidden:
-            raise SystemExit('Forbidden product settings enabled: ' + ', '.join(enabled_forbidden))
+        if profile == 'consoleos-rc1':
+            fg = Path('drivers/power/supply/qcom_fg.c').read_text()
+            forbidden_fg = (
+                'POWER_SUPPLY_PROP_CHARGE_COUNTER,',
+                'static int qcom_fg_gen4_read_diag(',
+                'static DEVICE_ATTR_RO(gen4_diagnostics);',
+            )
+            present_fg = [marker for marker in forbidden_fg if marker in fg]
+            if present_fg:
+                raise SystemExit('Product fuel-gauge diagnostics still present: ' + ', '.join(present_fg))
+            if 'CONFIG_DEBUG_INFO_NONE=y' not in actual:
+                raise SystemExit('Product kernel debug-info exclusion missing')
+            forbidden_product = {
+                'CONFIG_PM_ADVANCED_DEBUG', 'CONFIG_KALLSYMS_ALL',
+                'CONFIG_FTRACE', 'CONFIG_FUNCTION_TRACER',
+                'CONFIG_FUNCTION_GRAPH_TRACER', 'CONFIG_DYNAMIC_FTRACE',
+                'CONFIG_KPROBES', 'CONFIG_KPROBE_EVENTS', 'CONFIG_UPROBES',
+                'CONFIG_UPROBE_EVENTS', 'CONFIG_FTRACE_SYSCALLS',
+                'CONFIG_SCHED_TRACER', 'CONFIG_DYNAMIC_DEBUG',
+                'CONFIG_DEBUG_INFO', 'CONFIG_DEBUG_INFO_DWARF_TOOLCHAIN_DEFAULT',
+                'CONFIG_DEBUG_INFO_DWARF4', 'CONFIG_DEBUG_INFO_DWARF5',
+                'CONFIG_DEBUG_INFO_REDUCED', 'CONFIG_DEBUG_INFO_SPLIT',
+                'CONFIG_DEBUG_INFO_BTF', 'CONFIG_DEBUG_INFO_BTF_MODULES',
+                'CONFIG_BPF_EVENTS', 'CONFIG_RAID6_PQ_BENCHMARK',
+            }
+            enabled_forbidden = sorted(forbidden_product & enabled)
+            if enabled_forbidden:
+                raise SystemExit('Forbidden product settings enabled: ' + ', '.join(enabled_forbidden))
+        else:
+            required_diagnostic = {
+                'CONFIG_PM_ADVANCED_DEBUG=y', 'CONFIG_KALLSYMS_ALL=y',
+                'CONFIG_FTRACE=y', 'CONFIG_FUNCTION_TRACER=y',
+                'CONFIG_FUNCTION_GRAPH_TRACER=y', 'CONFIG_DYNAMIC_FTRACE=y',
+                'CONFIG_KPROBES=y', 'CONFIG_KPROBE_EVENTS=y',
+                'CONFIG_FTRACE_SYSCALLS=y', 'CONFIG_SCHED_TRACER=y',
+                'CONFIG_DYNAMIC_DEBUG=y', 'CONFIG_BPF_EVENTS=y',
+                'CONFIG_DEBUG_INFO_DWARF_TOOLCHAIN_DEFAULT=y',
+                'CONFIG_DEBUG_INFO_BTF=y',
+            }
+            absent_diagnostic = sorted(required_diagnostic - actual)
+            if absent_diagnostic:
+                raise SystemExit('Diagnostic overlay settings missing: ' + ', '.join(absent_diagnostic))
         pcie = Path('drivers/pci/controller/dwc/pcie-qcom.c').read_text()
         required_pcie_offline = (
             'bool drv_offline;',
@@ -583,7 +620,7 @@ elif sys.argv[2] in ('adsp-no-auto-ab', 'lpass-devote-fix', 'lpass-pm-clock', 'a
         if not all(marker in pwm_fan for marker in required_pwm_fan) or \
            'fan-startup-percent' not in pwm_fan_binding:
             raise SystemExit('Configurable PWM-fan startup markers missing')
-elif sys.argv[2] == 'pcie-drv-handoff':
+elif profile == 'pcie-drv-handoff':
     required = {
         'CONFIG_PCIE_QCOM=y', 'CONFIG_PCIE_QCOM_DRV=y', 'CONFIG_RPMSG=y',
         'CONFIG_PM_SLEEP=y', 'CONFIG_PM=y',
@@ -618,7 +655,7 @@ elif sys.argv[2] == 'pcie-drv-handoff':
         raise SystemExit('PCIe DRV PM ordering markers missing')
     if not all(marker in transport for marker in required_transport):
         raise SystemExit('PCIe DRV wire-protocol markers missing')
-elif sys.argv[2] in ('slpi-integrated', 'lpm-platform'):
+elif profile in ('slpi-integrated', 'lpm-platform'):
     required = {
         'CONFIG_QCOM_SMP2P=y', 'CONFIG_QCOM_SMP2P_SLEEPSTATE=y',
         'CONFIG_PM_SLEEP=y', 'CONFIG_PM=y',
@@ -643,7 +680,7 @@ elif sys.argv[2] in ('slpi-integrated', 'lpm-platform'):
     block = pas[start:end]
     if block.count('.auto_boot = false,') != 1 or '.auto_boot = true,' in block:
         raise SystemExit('Integrated SM8250 ADSP auto-boot override missing')
-    if sys.argv[2] == 'lpm-platform':
+    if profile == 'lpm-platform':
         required_lpm = {
             'CONFIG_ARM_PSCI_FW=y', 'CONFIG_CPU_IDLE=y', 'CONFIG_CPU_PM=y',
             'CONFIG_SUSPEND=y', 'CONFIG_QCOM_LPM_PLATFORM_SUSPEND=y',
@@ -662,7 +699,7 @@ elif sys.argv[2] in ('slpi-integrated', 'lpm-platform'):
         absent_lpm_driver = sorted(required_lpm_driver - set(lpm.splitlines()))
         if absent_lpm_driver:
             raise SystemExit('Platform suspend driver markers missing: ' + ', '.join(absent_lpm_driver))
-print(f'All {sys.argv[2]} settings verified.')
+print(f'All {profile} settings verified.')
 PY
 cp .config "${out}/kernel.config"
 make "${make_args[@]}" -j"$(nproc)" prepare
@@ -794,7 +831,7 @@ elif [[ "${profile}" == pcie-drv-handoff || "${profile}" == audio-pcie-integrati
         'RP5 PCIe DRV candidate passed: exact Phase 4 wireless tree, running ADSP and opt-in RC0 handoff. Not installed or boot-tested.' \
         > BUILD-SUCCESS.txt
     cd "${source_dir}"
-elif [[ "${profile}" == consoleos-rc1 ]]; then
+elif [[ "${profile}" == consoleos-rc1 || "${profile}" == consoleos-rc1-diagnostic ]]; then
     phase4_name='sm8250-retroidpocket-rp5-reenable-display-gpu-gamepad-active-only-ufs-wireless'
     make "${make_args[@]}" -j"$(nproc)" DTC_FLAGS=-@ "qcom/${phase4_name}.dtb"
     python3 "${kit}/rocknix/verify-consoleos-rc1-dtb.py" \
@@ -855,13 +892,13 @@ source_dir="${work}/linux-7.2"
 cd "${source_dir}"
 release=$(make "${make_args[@]}" -s kernelrelease)
 test "${release}" = "${expected_release}"
-if [[ "${profile}" == diagnostic || "${profile}" == gpu-rpmh-fix || "${profile}" == sleepstate-handshake || "${profile}" == adsp-no-auto-ab || "${profile}" == lpass-devote-fix || "${profile}" == lpass-pm-clock || "${profile}" == audio-pcie-integration || "${profile}" == fg-coulomb-counter || "${profile}" == consoleos-rc1 || "${profile}" == pcie-drv-handoff || "${profile}" == slpi-integrated || "${profile}" == lpm-platform ]]; then
+if [[ "${profile}" == diagnostic || "${profile}" == gpu-rpmh-fix || "${profile}" == sleepstate-handshake || "${profile}" == adsp-no-auto-ab || "${profile}" == lpass-devote-fix || "${profile}" == lpass-pm-clock || "${profile}" == audio-pcie-integration || "${profile}" == fg-coulomb-counter || "${profile}" == consoleos-rc1 || "${profile}" == consoleos-rc1-diagnostic || "${profile}" == pcie-drv-handoff || "${profile}" == slpi-integrated || "${profile}" == lpm-platform ]]; then
     # The previous build exposed an uninitialized cstate pointer in this file.
     printf '\nCFLAGS_dpu_crtc.o += -Werror=uninitialized -Werror=maybe-uninitialized\n' >> drivers/gpu/drm/msm/disp/dpu1/Makefile
 fi
 kernel_target=Image
 kernel_source=arch/arm64/boot/Image
-if [[ "${profile}" == consoleos-rc1 ]]; then
+if [[ "${profile}" == consoleos-rc1 || "${profile}" == consoleos-rc1-diagnostic ]]; then
     kernel_target=vmlinuz.efi
     kernel_source=arch/arm64/boot/vmlinuz.efi
 fi
@@ -869,7 +906,7 @@ make "${make_args[@]}" -j"$(nproc)" "${kernel_target}" modules
 stage="${work}/stage"
 mkdir -p "${stage}/boot" "${stage}/lib/modules"
 cp "${kernel_source}" "${stage}/boot/KERNEL"
-if [[ "${profile}" == consoleos-rc1 ]]; then
+if [[ "${profile}" == consoleos-rc1 || "${profile}" == consoleos-rc1-diagnostic ]]; then
     python3 - "${kernel_source}" arch/arm64/boot/Image <<'PY'
 from pathlib import Path
 import struct
@@ -903,21 +940,21 @@ rm -f "${stage}/lib/modules/${release}/build" "${stage}/lib/modules/${release}/s
 depmod -b "${stage}" "${release}"
 cp System.map Module.symvers "${out}/"
 cp drivers/ufs/host/ufs-qcom.c drivers/ufs/host/ufs-qcom.h "${out}/"
-if [[ "${profile}" == gpu-rpmh-fix || "${profile}" == sleepstate-handshake || "${profile}" == adsp-no-auto-ab || "${profile}" == lpass-devote-fix || "${profile}" == lpass-pm-clock || "${profile}" == audio-pcie-integration || "${profile}" == fg-coulomb-counter || "${profile}" == consoleos-rc1 || "${profile}" == pcie-drv-handoff || "${profile}" == slpi-integrated || "${profile}" == lpm-platform ]]; then
+if [[ "${profile}" == gpu-rpmh-fix || "${profile}" == sleepstate-handshake || "${profile}" == adsp-no-auto-ab || "${profile}" == lpass-devote-fix || "${profile}" == lpass-pm-clock || "${profile}" == audio-pcie-integration || "${profile}" == fg-coulomb-counter || "${profile}" == consoleos-rc1 || "${profile}" == consoleos-rc1-diagnostic || "${profile}" == pcie-drv-handoff || "${profile}" == slpi-integrated || "${profile}" == lpm-platform ]]; then
     cp drivers/gpu/drm/msm/adreno/a6xx_gmu.c "${out}/"
 fi
 if [[ "${profile}" == sleepstate-handshake || "${profile}" == slpi-integrated || "${profile}" == lpm-platform ]]; then
     cp drivers/soc/qcom/smp2p_sleepstate.c "${out}/"
     cp "arch/arm64/boot/dts/qcom/${dtb_name}.dts" "${out}/"
 fi
-if [[ "${profile}" == adsp-no-auto-ab || "${profile}" == lpass-devote-fix || "${profile}" == lpass-pm-clock || "${profile}" == audio-pcie-integration || "${profile}" == fg-coulomb-counter || "${profile}" == consoleos-rc1 || "${profile}" == pcie-drv-handoff || "${profile}" == slpi-integrated || "${profile}" == lpm-platform ]]; then
+if [[ "${profile}" == adsp-no-auto-ab || "${profile}" == lpass-devote-fix || "${profile}" == lpass-pm-clock || "${profile}" == audio-pcie-integration || "${profile}" == fg-coulomb-counter || "${profile}" == consoleos-rc1 || "${profile}" == consoleos-rc1-diagnostic || "${profile}" == pcie-drv-handoff || "${profile}" == slpi-integrated || "${profile}" == lpm-platform ]]; then
     cp drivers/remoteproc/qcom_q6v5_pas.c "${out}/"
 fi
-if [[ "${profile}" == lpass-devote-fix || "${profile}" == lpass-pm-clock || "${profile}" == audio-pcie-integration || "${profile}" == fg-coulomb-counter || "${profile}" == consoleos-rc1 ]]; then
+if [[ "${profile}" == lpass-devote-fix || "${profile}" == lpass-pm-clock || "${profile}" == audio-pcie-integration || "${profile}" == fg-coulomb-counter || "${profile}" == consoleos-rc1 || "${profile}" == consoleos-rc1-diagnostic ]]; then
     cp sound/soc/qcom/qdsp6/q6afe.c "${out}/"
     objdump -drS sound/soc/qcom/qdsp6/q6afe.o > "${out}/q6afe-disassembly.txt"
 fi
-if [[ "${profile}" == lpass-pm-clock || "${profile}" == audio-pcie-integration || "${profile}" == fg-coulomb-counter || "${profile}" == consoleos-rc1 ]]; then
+if [[ "${profile}" == lpass-pm-clock || "${profile}" == audio-pcie-integration || "${profile}" == fg-coulomb-counter || "${profile}" == consoleos-rc1 || "${profile}" == consoleos-rc1-diagnostic ]]; then
     for macro in wsa va rx tx; do
         cp "sound/soc/codecs/lpass-${macro}-macro.c" "${out}/"
         objdump -drS "sound/soc/codecs/lpass-${macro}-macro.o" \
@@ -927,7 +964,7 @@ fi
 if [[ "${profile}" == lpm-platform ]]; then
     cp drivers/soc/qcom/qcom_lpm_platform_suspend.c "${out}/"
 fi
-if [[ "${profile}" == pcie-drv-handoff || "${profile}" == audio-pcie-integration || "${profile}" == fg-coulomb-counter || "${profile}" == consoleos-rc1 ]]; then
+if [[ "${profile}" == pcie-drv-handoff || "${profile}" == audio-pcie-integration || "${profile}" == fg-coulomb-counter || "${profile}" == consoleos-rc1 || "${profile}" == consoleos-rc1-diagnostic ]]; then
     cp drivers/pci/controller/dwc/pcie-qcom.c \
         drivers/pci/controller/dwc/pcie-qcom-drv.c \
         drivers/pci/controller/dwc/pcie-qcom-drv.h "${out}/"
@@ -935,11 +972,11 @@ if [[ "${profile}" == pcie-drv-handoff || "${profile}" == audio-pcie-integration
     objdump -drS drivers/pci/controller/dwc/pcie-qcom.o > "${out}/pcie-qcom-disassembly.txt"
     objdump -drS drivers/pci/controller/dwc/pcie-qcom-drv.o > "${out}/pcie-qcom-drv-disassembly.txt"
 fi
-if [[ "${profile}" == fg-coulomb-counter ]]; then
+if [[ "${profile}" == fg-coulomb-counter || "${profile}" == consoleos-rc1-diagnostic ]]; then
     cp drivers/power/supply/qcom_fg.c drivers/power/supply/qcom_fg.o "${out}/"
     objdump -drS drivers/power/supply/qcom_fg.o > "${out}/qcom-fg-disassembly.txt"
 fi
-if [[ "${profile}" == consoleos-rc1 ]]; then
+if [[ "${profile}" == consoleos-rc1 || "${profile}" == consoleos-rc1-diagnostic ]]; then
     cp drivers/input/joystick/retroid.c drivers/input/joystick/retroid.o "${out}/"
     cp drivers/leds/leds-htr3212.c drivers/leds/leds-htr3212.o "${out}/"
     cp drivers/hwmon/pwm-fan.c "${out}/"
@@ -961,7 +998,7 @@ if [[ "${profile}" == consoleos-rc1 ]]; then
     objdump -drS drivers/gpu/drm/msm/msm_mdss.o \
         > "${out}/msm-mdss-disassembly.txt"
 fi
-if [[ "${profile}" == diagnostic || "${profile}" == gpu-rpmh-fix || "${profile}" == sleepstate-handshake || "${profile}" == adsp-no-auto-ab || "${profile}" == lpass-devote-fix || "${profile}" == lpass-pm-clock || "${profile}" == audio-pcie-integration || "${profile}" == fg-coulomb-counter || "${profile}" == pcie-drv-handoff || "${profile}" == slpi-integrated || "${profile}" == lpm-platform ]]; then
+if [[ "${profile}" == diagnostic || "${profile}" == gpu-rpmh-fix || "${profile}" == sleepstate-handshake || "${profile}" == adsp-no-auto-ab || "${profile}" == lpass-devote-fix || "${profile}" == lpass-pm-clock || "${profile}" == audio-pcie-integration || "${profile}" == fg-coulomb-counter || "${profile}" == consoleos-rc1-diagnostic || "${profile}" == pcie-drv-handoff || "${profile}" == slpi-integrated || "${profile}" == lpm-platform ]]; then
     objcopy --dump-section .BTF="${out}/vmlinux.btf" vmlinux
     cp drivers/gpu/drm/msm/disp/dpu1/dpu_crtc.c drivers/gpu/drm/msm/disp/dpu1/dpu_crtc.o "${out}/"
     objdump -drS drivers/gpu/drm/msm/disp/dpu1/dpu_crtc.o > "${out}/dpu_crtc-disassembly.txt"
@@ -970,15 +1007,26 @@ elif [[ "${profile}" == gmu-clock-reset ]]; then
 fi
 test -s "${stage}/boot/KERNEL"
 test -s "${stage}/lib/modules/${release}/modules.dep"
-if [[ "${profile}" == diagnostic || "${profile}" == gpu-rpmh-fix || "${profile}" == sleepstate-handshake || "${profile}" == adsp-no-auto-ab || "${profile}" == lpass-devote-fix || "${profile}" == lpass-pm-clock || "${profile}" == audio-pcie-integration || "${profile}" == fg-coulomb-counter || "${profile}" == pcie-drv-handoff || "${profile}" == slpi-integrated || "${profile}" == lpm-platform ]]; then
+if [[ "${profile}" == diagnostic || "${profile}" == gpu-rpmh-fix || "${profile}" == sleepstate-handshake || "${profile}" == adsp-no-auto-ab || "${profile}" == lpass-devote-fix || "${profile}" == lpass-pm-clock || "${profile}" == audio-pcie-integration || "${profile}" == fg-coulomb-counter || "${profile}" == consoleos-rc1-diagnostic || "${profile}" == pcie-drv-handoff || "${profile}" == slpi-integrated || "${profile}" == lpm-platform ]]; then
     test -s "${out}/vmlinux.btf"
 fi
 tar -C "${stage}" -cf - boot lib | zstd -T0 -10 -o "${out}/${artifact_name}"
 cd "${out}"
 sha256sum "${artifact_name}" > SHA256SUMS
+if [[ "${profile}" == consoleos-rc1-diagnostic ]]; then
+    cp "${config_overlay}" diagnostic-config-delta.config
+    sha256sum diagnostic-config-delta.config \
+        > DIAGNOSTIC-CONFIG-DELTA-SHA256SUMS
+    sha256sum "${kit}/rocknix/qcom-fg-gen4-coulomb-counter.patch" \
+        > DIAGNOSTIC-PATCH-DELTA-SHA256SUMS
+fi
 if [[ "${profile}" == consoleos-rc1 ]]; then
     printf '%s\n' \
-        'ConsoleOS RC17 productpm4 passed: product debug/tracing exclusions, blocking fuel-gauge diagnostics absent, RAID6 benchmark disabled, ARM64 zstd EFI zboot format, modules, DTB and external helper bundle. Not installed or device-tested.' \
+        'ConsoleOS RC17 productpm5 passed: runtime-gated PM timing support, blocking fuel-gauge diagnostics absent, deferred QCA restore, SDAM built-in, panel/DT fixes, ARM64 zstd EFI zboot format, modules, DTB and external helper bundle. Not installed or device-tested.' \
+        > BUILD-SUCCESS.txt
+elif [[ "${profile}" == consoleos-rc1-diagnostic ]]; then
+    printf '%s\n' \
+        'ConsoleOS RC17 productpm5 diagnostic pair passed: exact product source/DT/config plus pinned debug overlay and PM8150B coulomb-counter patch. Not installed or device-tested.' \
         > BUILD-SUCCESS.txt
 else
     printf '%s\n' "Build and artifact checks passed for ${profile}. Not installed or boot-tested." > BUILD-SUCCESS.txt

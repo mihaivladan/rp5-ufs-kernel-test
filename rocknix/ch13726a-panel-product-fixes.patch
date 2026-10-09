@@ -1,0 +1,30 @@
+diff --git a/drivers/gpu/drm/panel/panel-ddic-ch13726a.c b/drivers/gpu/drm/panel/panel-ddic-ch13726a.c
+index d58cd20..a38f475 100644
+--- a/drivers/gpu/drm/panel/panel-ddic-ch13726a.c
++++ b/drivers/gpu/drm/panel/panel-ddic-ch13726a.c
+@@ -20,7 +20,7 @@
+ struct ch13726a_panel {
+ 	struct drm_panel panel;
+ 	struct mipi_dsi_device *dsi;
+-	struct regulator_bulk_data supplies[4];
++	struct regulator_bulk_data supplies[5];
+ 	struct gpio_desc *reset_gpio;
+ 	const struct drm_display_mode *display_mode;
+ 	enum drm_panel_orientation orientation;
+@@ -98,7 +98,7 @@ static int ch13726a_prepare(struct drm_panel *panel)
+ 		return ret;
+ 	}
+ 
+-	msleep(28);
++	msleep(20);
+ 
+ 	ctx->prepared = true;
+ 
+@@ -248,6 +248,7 @@ static int ch13726a_probe(struct mipi_dsi_device *dsi)
+ 	ctx->supplies[1].supply = "vddio";
+ 	ctx->supplies[2].supply = "vdd";
+ 	ctx->supplies[3].supply = "avdd";
++	ctx->supplies[4].supply = "mipi-vdd";
+ 
+ 	ret = devm_regulator_bulk_get(dev, ARRAY_SIZE(ctx->supplies),
+ 				      ctx->supplies);
