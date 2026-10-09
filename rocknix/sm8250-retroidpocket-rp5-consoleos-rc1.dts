@@ -11,7 +11,7 @@
 #include "sm8250-retroidpocket-rp5-phase4a-wireless-adsp-pcie-drv.dts"
 
 / {
-	consoleos_panel_mipi_vdd: consoleos-panel-mipi-vdd-regulator {
+	consoleos-panel-mipi-vdd-regulator {
 		/* Keep every inherited RP5 phandle stable across this one-node delta. */
 		phandle = <0x10001>;
 		compatible = "regulator-fixed";
@@ -68,7 +68,8 @@
 &{/soc@0/usb@a6f8800/usb@a600000} { status = "okay"; };
 
 &{/soc@0/display-subsystem@ae00000/dsi@ae94000/panel@0} {
-	mipi-vdd-supply = <&consoleos_panel_mipi_vdd>;
+	/* Fixed above so this reference cannot renumber inherited phandles. */
+	mipi-vdd-supply = <0x10001>;
 };
 
 &{/vreg-mcu-3v3-regulator} {
