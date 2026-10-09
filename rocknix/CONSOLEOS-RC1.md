@@ -8,6 +8,9 @@ RAID6 boot benchmark and the product-excluded debug/tracing families: DWARF and
 BTF debug info, `KALLSYMS_ALL`, ftrace, kprobes, uprobes, BPF events, dynamic
 debug and PM debug. `KALLSYMS`, `DEBUG_FS`, ordinary BPF networking support,
 the built-in early-display fallback and the external helper bundle remain.
+The generic ARM PL011 UART and its console are built in solely so the exact
+device KERNEL can produce boot evidence on QEMU's standard ARM `virt` machine;
+the RP5 has no PL011 node, so this adds no device boot or lifecycle path.
 
 This profile consolidates the device-tested native Linux fixes on the ROCKNIX
 20260901 / Linux 7.2 baseline. It deliberately excludes diagnostic changes
@@ -92,7 +95,6 @@ the PCIe0 sleep pinctrl state proven by Phase 4BL. It does not enable
 QCE, Venus, CDSP, or SLPI. It does not include speculative RPMh rail policies,
 PCIe PHY power-off, or the failed exact-PSCI-state platform driver.
 
-This profile retains BTF, ftrace, kprobes, PM diagnostics, and the fuel-gauge
-interface
-so the one-shot qualification boot can prove residency and recovery. These can
-be stripped only after the RC passes the product validation matrix.
+This profile retains the fuel-gauge interface and the read-only Qualcomm sleep
+residency files needed by the product validation matrix. Product-excluded BTF,
+ftrace, kprobes and PM debug facilities are disabled.

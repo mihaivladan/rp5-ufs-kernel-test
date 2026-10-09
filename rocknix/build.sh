@@ -507,6 +507,8 @@ elif sys.argv[2] in ('adsp-no-auto-ab', 'lpass-devote-fix', 'lpass-pm-clock', 'a
             'CONFIG_DEBUG_INFO_NONE=y',
             'CONFIG_EFI_ZBOOT=y',
             'CONFIG_KERNEL_ZSTD=y',
+            'CONFIG_SERIAL_AMBA_PL011=y',
+            'CONFIG_SERIAL_AMBA_PL011_CONSOLE=y',
         }
         absent_product = sorted(required_product - actual)
         if absent_product:
