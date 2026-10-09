@@ -206,6 +206,14 @@ def apply_patches(repo, source, fix, profile):
                 "ce33f459620b220c777e30e021926376559a07533e0302863ef43a09c8424306",
                 "Deferred QCA6390 restore patch checksum mismatch")
         extra_patches.append(deferred_qca)
+        deferred_qca_v2 = (Path(__file__).resolve().parent /
+                           "qca6390-deferred-restore-v2.patch")
+        require(deferred_qca_v2.is_file(),
+                "Missing ordered QCA6390 restore follow-up patch")
+        require(hashlib.sha256(deferred_qca_v2.read_bytes()).hexdigest() ==
+                "9fc1690c5f641293fa73b1f14119731806d56d014ef75c29095673fb020aaf10",
+                "Ordered QCA6390 restore follow-up checksum mismatch")
+        extra_patches.append(deferred_qca_v2)
         gamepad_pm = (Path(__file__).resolve().parent /
                       "retroid-mcu-rgb-system-pm.patch")
         require(gamepad_pm.is_file(),
@@ -338,15 +346,15 @@ def apply_patches(repo, source, fix, profile):
                 "CH13726A GPIO28 supply or 20 ms post-reset policy missing")
         ath11k_pci = (source /
                       "drivers/net/wireless/ath/ath11k/pci.c").read_text()
+        qrtr_mhi = (source / "net/qrtr/mhi.c").read_text()
         require("module_param_cb(orderly_qca_restore," in ath11k_pci and
                 "module_param_cb(qca_restore_pending," in ath11k_pci and
-                "module_param(defer_qca_resume, bool, 0644);" in ath11k_pci and
-                "ORDERLY_RESTORE_FALLBACK_MS\t30000" in ath11k_pci and
-                "mod_delayed_work(system_wq, &ab_pci->orderly_restore_work" in ath11k_pci and
-                "qcom_pcie_orderly_restore_root(ab_pci->pdev);" in ath11k_pci and
+                "MHI_CHANNEL_SUSPEND_DEFERRED" in ath11k_pci and
+                "orderly_restore_failed" in ath11k_pci and
                 "QCA resume deferred; skipping blocking MHI/firmware resume" in ath11k_pci and
-                "skipping blocking system resume" in ath11k_pci,
-                "Deferred QCA restore ownership markers missing")
+                "deferred autoqueue restore completed" in qrtr_mhi and
+                ".status_cb = qcom_mhi_qrtr_status_cb," in qrtr_mhi,
+                "Ordered deferred QCA/QRTR restore ownership markers missing")
         rpmh_regulator = (source / "drivers/regulator/qcom-rpmh-regulator.c").read_text()
         regulator_core = (source / "drivers/regulator/core.c").read_text()
         required_rpmh = (
@@ -601,7 +609,7 @@ def main():
             if profile in ("consoleos-rc1", "consoleos-rc1-diagnostic") else None
         ),
         "qca6390_orderly_poweroff": (
-            "Opt-in firmware OFF, WLAON shutdown, MHI down, PCIe L23, true-zero ICC release, then foreground-first deferred restore"
+            "Opt-in firmware OFF, WLAON shutdown, MHI down, PCIe L23 and true-zero ICC release; foreground-first restore with MHI mission-mode QRTR ordering and fail-closed single attempt"
             if profile in ("consoleos-rc1", "consoleos-rc1-diagnostic") else None
         ),
         "diagnostic_delta": (

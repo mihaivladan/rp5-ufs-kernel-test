@@ -45,7 +45,7 @@ STATIC_EXPECTED = {f"{node}/status" for node in STATUS_NODES} | {
     f"{PCIE_SLEEP}/phandle", f"{PCIE_SLEEP_CLKREQ}/pins",
     f"{PCIE_SLEEP_CLKREQ}/function", f"{PCIE_SLEEP_CLKREQ}/drive-strength",
     f"{PCIE_SLEEP_CLKREQ}/bias-pull-up",
-    f"{PANEL}/mipi-vdd-supply", f"{TYPEC_MUX_1C}/status",
+    f"{PANEL}/mipi-vdd-supply",
     f"{PANEL_MIPI_VDD}/compatible", f"{PANEL_MIPI_VDD}/regulator-name",
     f"{PANEL_MIPI_VDD}/regulator-boot-on", f"{PANEL_MIPI_VDD}/gpio",
     f"{PANEL_MIPI_VDD}/enable-active-high", f"{PANEL_MIPI_VDD}/phandle",
@@ -139,8 +139,9 @@ def main() -> None:
         raise SystemExit("wrong PCIe interconnect providers, endpoints or tags")
     if candidate[f"{PWM_FAN}/fan-startup-percent"] != struct.pack(">I", 0):
         raise SystemExit("RP5 fan does not request a silent kernel startup")
-    if status(candidate[f"{TYPEC_MUX_1C}/status"]) != b"disabled":
-        raise SystemExit("misidentified 15-001c node is not statically disabled")
+    if base.get(f"{TYPEC_MUX_1C}/status") != candidate.get(f"{TYPEC_MUX_1C}/status") or \
+       status(candidate[f"{TYPEC_MUX_1C}/status"]) != b"okay":
+        raise SystemExit("15-001c Type-C/DP retimer must remain enabled and unchanged")
     if candidate[f"{PANEL_MIPI_VDD}/compatible"] != b"regulator-fixed\0" or \
        candidate[f"{PANEL_MIPI_VDD}/regulator-name"] != \
        b"consoleos_panel_mipi_vdd\0":
@@ -186,7 +187,7 @@ def main() -> None:
     ):
         if status(candidate[f"{node}/status"]) != b"disabled":
             raise SystemExit(f"unvalidated subsystem enabled: {node}")
-    print("VERIFIED: product stack plus MCU/RGB PM, GPIO80, GPIO28 panel supply and disabled 15-001c")
+    print("VERIFIED: product stack plus MCU/RGB PM, GPIO80, GPIO28 panel supply and enabled 15-001c retimer")
 
 
 if __name__ == "__main__":

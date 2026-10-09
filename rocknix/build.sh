@@ -53,14 +53,14 @@ fg-coulomb-counter)
     ;;
 consoleos-rc1)
     config_fragment="${kit}/rocknix/consoleos-rc1.config"
-    expected_release='7.2.0-consoleos-rc17-productpm5'
+    expected_release='7.2.0-consoleos-rc17-productpm6'
     artifact_name="rocknix-${expected_release}.tar.zst"
     dtb_name='sm8250-retroidpocket-rp5-consoleos-rc1'
     ;;
 consoleos-rc1-diagnostic)
     config_fragment="${kit}/rocknix/consoleos-rc1.config"
     config_overlay="${kit}/rocknix/consoleos-rc1-diagnostic.delta.config"
-    expected_release='7.2.0-consoleos-rc17-productpm5-diagcc1'
+    expected_release='7.2.0-consoleos-rc17-productpm6-diagcc2'
     artifact_name="rocknix-${expected_release}.tar.zst"
     dtb_name='sm8250-retroidpocket-rp5-consoleos-rc1'
     ;;
@@ -978,6 +978,11 @@ if [[ "${profile}" == fg-coulomb-counter || "${profile}" == consoleos-rc1-diagno
     objdump -drS drivers/power/supply/qcom_fg.o > "${out}/qcom-fg-disassembly.txt"
 fi
 if [[ "${profile}" == consoleos-rc1 || "${profile}" == consoleos-rc1-diagnostic ]]; then
+    cp drivers/net/wireless/ath/ath11k/pci.c \
+        "${out}/consoleos-ath11k-pci.c"
+    cp drivers/net/wireless/ath/ath11k/pci.h \
+        "${out}/consoleos-ath11k-pci.h"
+    cp net/qrtr/mhi.c "${out}/consoleos-qrtr-mhi.c"
     cp drivers/input/joystick/retroid.c drivers/input/joystick/retroid.o "${out}/"
     cp drivers/leds/leds-htr3212.c drivers/leds/leds-htr3212.o "${out}/"
     cp drivers/hwmon/pwm-fan.c "${out}/"
@@ -1023,11 +1028,11 @@ if [[ "${profile}" == consoleos-rc1-diagnostic ]]; then
 fi
 if [[ "${profile}" == consoleos-rc1 ]]; then
     printf '%s\n' \
-        'ConsoleOS RC17 productpm5 passed: runtime-gated PM timing support, blocking fuel-gauge diagnostics absent, deferred QCA restore, SDAM built-in, panel/DT fixes, ARM64 zstd EFI zboot format, modules, DTB and external helper bundle. Not installed or device-tested.' \
+        'ConsoleOS RC17 productpm6 passed: runtime-gated PM timing support, blocking fuel-gauge diagnostics absent, ordered single-attempt deferred QCA/QRTR restore, SDAM built-in, corrected panel/Type-C DT, ARM64 zstd EFI zboot format, modules, DTB and external helper bundle. Not installed or device-tested.' \
         > BUILD-SUCCESS.txt
 elif [[ "${profile}" == consoleos-rc1-diagnostic ]]; then
     printf '%s\n' \
-        'ConsoleOS RC17 productpm5 diagnostic pair passed: exact product source/DT/config plus pinned debug overlay and PM8150B coulomb-counter patch. Not installed or device-tested.' \
+        'ConsoleOS RC17 productpm6 diagnostic pair passed: exact product source/DT/config plus pinned debug overlay and PM8150B coulomb-counter patch. Not installed or device-tested.' \
         > BUILD-SUCCESS.txt
 else
     printf '%s\n' "Build and artifact checks passed for ${profile}. Not installed or boot-tested." > BUILD-SUCCESS.txt

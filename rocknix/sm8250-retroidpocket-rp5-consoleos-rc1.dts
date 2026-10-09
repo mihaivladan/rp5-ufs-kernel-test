@@ -44,7 +44,6 @@
 &{/soc@0/codec@3370000} { status = "okay"; };
 &{/soc@0/display-subsystem@ae00000/displayport-controller@ae90000} { status = "okay"; };
 &{/soc@0/geniqup@8c0000/i2c@884000} { status = "okay"; };
-&{/soc@0/geniqup@8c0000/i2c@884000/typec-mux@1c} { status = "disabled"; };
 &{/soc@0/geniqup@9c0000/i2c@98c000} { status = "okay"; };
 &{/soc@0/geniqup@9c0000/i2c@994000} { status = "okay"; };
 &{/soc@0/geniqup@ac0000} { status = "okay"; };

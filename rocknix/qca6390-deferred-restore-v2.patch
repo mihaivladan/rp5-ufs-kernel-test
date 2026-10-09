@@ -1,0 +1,200 @@
+diff --git a/include/linux/mhi.h b/include/linux/mhi.h
+--- a/include/linux/mhi.h
++++ b/include/linux/mhi.h
+@@ -306,5 +306,6 @@ enum mhi_channel_suspend_state {
+ 	MHI_CHANNEL_SUSPEND_DEFAULT,
+ 	MHI_CHANNEL_SUSPEND_RETAINED,
++	MHI_CHANNEL_SUSPEND_DEFERRED,
+ 	MHI_CHANNEL_SUSPEND_RESET,
+ };
+ 
+diff --git a/drivers/net/wireless/ath/ath11k/pci.h b/drivers/net/wireless/ath/ath11k/pci.h
+--- a/drivers/net/wireless/ath/ath11k/pci.h
++++ b/drivers/net/wireless/ath/ath11k/pci.h
+@@ -77,6 +77,7 @@ struct ath11k_pci {
+ 	u64 dma_mask;
+ 	bool orderly_restore_pending;
+ 	bool orderly_restore_running;
++	bool orderly_restore_failed;
+ 	struct delayed_work orderly_restore_work;
+ };
+ 
+diff --git a/drivers/net/wireless/ath/ath11k/pci.c b/drivers/net/wireless/ath/ath11k/pci.c
+--- a/drivers/net/wireless/ath/ath11k/pci.c
++++ b/drivers/net/wireless/ath/ath11k/pci.c
+@@ -89,6 +89,8 @@ static int orderly_qca_restore_set(const char *val,
+ 	ab_pci = orderly_qca_restore_target;
+ 	if (!ab_pci) {
+ 		ret = -ENODEV;
++	} else if (READ_ONCE(ab_pci->orderly_restore_failed)) {
++		ret = -EIO;
+ 	} else if (!READ_ONCE(ab_pci->orderly_restore_pending)) {
+ 		orderly_qca_restore = false;
+ 	} else if (!ab_pci->orderly_restore_running) {
+@@ -999,7 +1001,6 @@ static void ath11k_pci_orderly_restore_work(struct work_struct *work)
+ 			     orderly_restore_work);
+ 	struct ath11k_base *ab = ab_pci->ab;
+ 	bool restore_root;
+-	bool retry;
+ 	int ret;
+ 
+ 	mutex_lock(&orderly_qca_restore_lock);
+@@ -1015,6 +1016,7 @@ static void ath11k_pci_orderly_restore_work(struct work_struct *work)
+ 	if (!ret)
+ 		ret = ath11k_core_resume(ab);
+ 	if (ret) {
++		WRITE_ONCE(ab_pci->orderly_restore_failed, true);
+ 		ath11k_err(ab, "deferred orderly QCA restore failed: %d\n", ret);
+ 	} else {
+ 		if (restore_root)
+@@ -1026,10 +1028,6 @@ static void ath11k_pci_orderly_restore_work(struct work_struct *work)
+ 	mutex_lock(&orderly_qca_restore_lock);
+ 	ab_pci->orderly_restore_running = false;
+ 	orderly_qca_restore = false;
+-	retry = ret && orderly_qca_restore_target == ab_pci;
+-	if (retry)
+-		queue_delayed_work(system_wq, &ab_pci->orderly_restore_work,
+-				   msecs_to_jiffies(ORDERLY_RESTORE_FALLBACK_MS));
+ 	mutex_unlock(&orderly_qca_restore_lock);
+ }
+ 
+@@ -1436,6 +1434,11 @@ static __maybe_unused int ath11k_pci_pm_suspend(struct device *dev)
+ 						 MHI_CHANNEL_SUSPEND_RETAINED);
+ 		ath11k_info(ab,
+ 			    "orderly QCA power-off: preserving QMI transport for late firmware stop\n");
++	} else if (defer_qca_resume &&
++		   ab_pci->dev_id == QCA6390_DEVICE_ID &&
++		   ab->actual_pm_policy == ATH11K_PM_DEFAULT) {
++		mhi_pm_set_channel_suspend_state(ab_pci->mhi_ctrl,
++						 MHI_CHANNEL_SUSPEND_DEFERRED);
+ 	}
+ 
+ 	return 0;
+@@ -1490,6 +1493,7 @@ static __maybe_unused int ath11k_pci_pm_resume_early(struct device *dev)
+ 	int ret;
+ 
+ 	if (qcom_pcie_orderly_restore_pending(ab_pci->pdev)) {
++		WRITE_ONCE(ab_pci->orderly_restore_failed, false);
+ 		WRITE_ONCE(ab_pci->orderly_restore_pending, true);
+ 		mod_delayed_work(system_wq, &ab_pci->orderly_restore_work,
+ 				 msecs_to_jiffies(ORDERLY_RESTORE_FALLBACK_MS));
+@@ -1498,6 +1502,7 @@ static __maybe_unused int ath11k_pci_pm_resume_early(struct device *dev)
+ 
+ 	if (defer_qca_resume && ab_pci->dev_id == QCA6390_DEVICE_ID &&
+ 	    ab->actual_pm_policy == ATH11K_PM_DEFAULT) {
++		WRITE_ONCE(ab_pci->orderly_restore_failed, false);
+ 		WRITE_ONCE(ab_pci->orderly_restore_pending, true);
+ 		mod_delayed_work(system_wq, &ab_pci->orderly_restore_work,
+ 				 msecs_to_jiffies(ORDERLY_RESTORE_FALLBACK_MS));
+diff --git a/net/qrtr/mhi.c b/net/qrtr/mhi.c
+--- a/net/qrtr/mhi.c
++++ b/net/qrtr/mhi.c
+@@ -6,6 +6,7 @@
+ #include <linux/mhi.h>
+ #include <linux/module.h>
+ #include <linux/skbuff.h>
++#include <linux/workqueue.h>
+ #include <net/sock.h>
+ 
+ #include "qrtr.h"
+@@ -14,6 +15,8 @@ struct qrtr_mhi_dev {
+ 	struct qrtr_endpoint ep;
+ 	struct mhi_device *mhi_dev;
+ 	struct device *dev;
++	struct work_struct resume_work;
++	atomic_t resume_deferred;
+ };
+ 
+ /* From MHI to QRTR */
+@@ -106,6 +109,40 @@ static int qcom_mhi_qrtr_queue_dl_buffers(struct mhi_device *mhi_dev)
+ 	return 0;
+ }
+ 
++static void qcom_mhi_qrtr_resume_work(struct work_struct *work)
++{
++	struct qrtr_mhi_dev *qdev =
++		container_of(work, struct qrtr_mhi_dev, resume_work);
++	struct mhi_controller *mhi_cntrl = qdev->mhi_dev->mhi_cntrl;
++	int rc;
++
++	if (!atomic_xchg(&qdev->resume_deferred, 0))
++		return;
++
++	rc = mhi_prepare_for_transfer(qdev->mhi_dev);
++	if (!rc)
++		rc = qcom_mhi_qrtr_queue_dl_buffers(qdev->mhi_dev);
++	if (rc) {
++		dev_err(qdev->dev,
++			"deferred autoqueue restore failed: %d\n", rc);
++		return;
++	}
++
++	mhi_pm_set_channel_suspend_state(mhi_cntrl,
++					 MHI_CHANNEL_SUSPEND_DEFAULT);
++	dev_info(qdev->dev, "deferred autoqueue restore completed\n");
++}
++
++static void qcom_mhi_qrtr_status_cb(struct mhi_device *mhi_dev,
++				    enum mhi_callback callback)
++{
++	struct qrtr_mhi_dev *qdev = dev_get_drvdata(&mhi_dev->dev);
++
++	if (qdev && callback == MHI_CB_EE_MISSION_MODE &&
++	    atomic_read(&qdev->resume_deferred))
++		schedule_work(&qdev->resume_work);
++}
++
+ static int qcom_mhi_qrtr_probe(struct mhi_device *mhi_dev,
+ 			       const struct mhi_device_id *id)
+ {
+@@ -119,6 +156,8 @@ static int qcom_mhi_qrtr_probe(struct mhi_device *mhi_dev,
+ 	qdev->mhi_dev = mhi_dev;
+ 	qdev->dev = &mhi_dev->dev;
+ 	qdev->ep.xmit = qcom_mhi_qrtr_send;
++	INIT_WORK(&qdev->resume_work, qcom_mhi_qrtr_resume_work);
++	atomic_set(&qdev->resume_deferred, 0);
+ 
+ 	dev_set_drvdata(&mhi_dev->dev, qdev);
+ 
+@@ -151,6 +190,7 @@ static void qcom_mhi_qrtr_remove(struct mhi_device *mhi_dev)
+ {
+ 	struct qrtr_mhi_dev *qdev = dev_get_drvdata(&mhi_dev->dev);
+ 
++	cancel_work_sync(&qdev->resume_work);
+ 	qrtr_endpoint_unregister(&qdev->ep);
+ 	mhi_unprepare_from_transfer(mhi_dev);
+ 	dev_set_drvdata(&mhi_dev->dev, NULL);
+@@ -191,6 +231,7 @@ static int __maybe_unused qcom_mhi_qrtr_pm_resume_early(struct device *dev)
+ {
+ 	struct mhi_device *mhi_dev = container_of(dev, struct mhi_device, dev);
+ 	struct mhi_controller *mhi_cntrl = mhi_dev->mhi_cntrl;
++	struct qrtr_mhi_dev *qdev = dev_get_drvdata(dev);
+ 	enum mhi_channel_suspend_state channel_state;
+ 	enum mhi_state state;
+ 	int rc;
+@@ -211,9 +252,14 @@ static int __maybe_unused qcom_mhi_qrtr_pm_resume_early(struct device *dev)
+ 			 "reusing retained IPCR channels after aborted orderly QCA power-off\n");
+ 		return 0;
+ 	}
+-	if (channel_state == MHI_CHANNEL_SUSPEND_RESET)
+-		mhi_pm_set_channel_suspend_state(mhi_cntrl,
+-						 MHI_CHANNEL_SUSPEND_DEFAULT);
++	if (channel_state == MHI_CHANNEL_SUSPEND_DEFERRED ||
++	    channel_state == MHI_CHANNEL_SUSPEND_RESET) {
++		atomic_set(&qdev->resume_deferred, 1);
++		if (state == MHI_STATE_M0)
++			schedule_work(&qdev->resume_work);
++		dev_info(dev, "deferring autoqueue restore until MHI mission mode\n");
++		return 0;
++	}
+ 
+ 	rc = mhi_prepare_for_transfer(mhi_dev);
+ 	if (rc) {
+@@ -234,6 +280,7 @@ static struct mhi_driver qcom_mhi_qrtr_driver = {
+ 	.remove = qcom_mhi_qrtr_remove,
+ 	.dl_xfer_cb = qcom_mhi_qrtr_dl_callback,
+ 	.ul_xfer_cb = qcom_mhi_qrtr_ul_callback,
++	.status_cb = qcom_mhi_qrtr_status_cb,
+ 	.id_table = qcom_mhi_qrtr_id_table,
+ 	.driver = {
+ 		.name = "qcom_mhi_qrtr",

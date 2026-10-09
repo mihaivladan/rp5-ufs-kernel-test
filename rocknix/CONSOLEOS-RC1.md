@@ -1,6 +1,6 @@
 # ConsoleOS RP5 RC17 product-PM kernel
 
-## Product PM5 kernel packaging
+## Product PM6 kernel packaging
 
 The product build emits Linux 7.2's ARM64 `vmlinuz.efi` zboot image with a
 zstd-compressed payload as `boot/KERNEL`. The resolved config must disable the
@@ -79,14 +79,17 @@ Included kernel changes:
 - Retroid gamepad and HTR3212 bound-driver system PM for the shared rail.
 - opt-in pwm-fan startup policy, with RP5 starting at 0% rather than
   ROCKNIX's fixed PWM 70 probe policy.
-- opt-in stage-1 and stage-2 QCA6390 resume deferral. Stage 1 defers
-  ath11k/MHI/firmware; stage 2 additionally defers PCIe root and rail restore.
-  Userspace can request immediate restore, a readable pending flag supports
-  crash recovery, and a 30-second kernel delayed-work fallback prevents an
-  orphaned restore.
+- the accepted opt-in orderly QCA6390 suspend path plus corrected deferred
+  resume. PM6 marks the MHI/QRTR autoqueue as deferred before system suspend,
+  restores it only after MHI reaches mission mode, and permits exactly one
+  restore attempt. This replaces PM5's invalid child-before-parent resume and
+  repeated fallback, which timed out and produced unbalanced IRQ enables.
+  Userspace can request that attempt immediately; if the request is orphaned,
+  the kernel starts the same single attempt after 30 seconds.
 - built-in PM8150B SDAM NVMEM support, the CH13726A panel's GPIO28 MIPI-VDD
-  supply, a 20 ms post-reset wait, and static disablement of the misidentified
-  `15-001c` Type-C mux node.
+  supply, and a 20 ms post-reset wait. `15-001c` remains enabled: device A/B
+  proved it is the bound `nb7vpq904m` Type-C/DisplayPort retimer and disabling
+  it prevents the MSM DRM aggregate from registering.
 - `CONFIG_RAID6_PQ_BENCHMARK=n`; the unused boot-time RAID6 implementation
   benchmark is not run.
 
@@ -115,9 +118,9 @@ ftrace and kprobes remain disabled.
 ## Paired diagnostic kernel
 
 `consoleos-rc1-diagnostic` is built from the exact same repository commit,
-patch stack, product config and DT as PM5. Its only deltas are the pinned
+patch stack, product config and DT as PM6. Its only deltas are the pinned
 `consoleos-rc1-diagnostic.delta.config` debug/tracing overlay and the pinned
-PM8150B Gen4 coulomb-counter patch. It has a distinct `-diagcc1` release suffix
+PM8150B Gen4 coulomb-counter patch. It has a distinct `-diagcc2` release suffix
 and is retained for the 2–4 hour product-path drain gate; it is not deployed
 for normal product qualification. Both workflows use the same established
 GitHub Actions ccache key family and record cache statistics.
