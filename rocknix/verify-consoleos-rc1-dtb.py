@@ -139,8 +139,11 @@ def main() -> None:
         raise SystemExit("wrong PCIe interconnect providers, endpoints or tags")
     if candidate[f"{PWM_FAN}/fan-startup-percent"] != struct.pack(">I", 0):
         raise SystemExit("RP5 fan does not request a silent kernel startup")
-    if base.get(f"{TYPEC_MUX_1C}/status") != candidate.get(f"{TYPEC_MUX_1C}/status") or \
-       status(candidate[f"{TYPEC_MUX_1C}/status"]) != b"okay":
+    base_retimer_status = base.get(f"{TYPEC_MUX_1C}/status")
+    candidate_retimer_status = candidate.get(f"{TYPEC_MUX_1C}/status")
+    if base_retimer_status != candidate_retimer_status or \
+       (candidate_retimer_status is not None and
+        status(candidate_retimer_status) not in (b"ok", b"okay")):
         raise SystemExit("15-001c Type-C/DP retimer must remain enabled and unchanged")
     if candidate[f"{PANEL_MIPI_VDD}/compatible"] != b"regulator-fixed\0" or \
        candidate[f"{PANEL_MIPI_VDD}/regulator-name"] != \
