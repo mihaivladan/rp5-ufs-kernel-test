@@ -16,9 +16,7 @@ index cbd875a1..081d9583 100644
     if (savestates_enabled)
     {
        size_t info_size;
-@@ -844,7 +843,10 @@ bool command_load_state_slot(command_t *cmd, const char *arg)
-          command_post_state_loaded();
-    }
+@@ -847,6 +846,9 @@ bool command_load_state_slot(command_t *cmd, const char *arg)
     else
        ret = false;
  
@@ -27,15 +25,13 @@ index cbd875a1..081d9583 100644
 +         slot, ret ? "QUEUED" : "FAILED", generation);
     cmd->replier(cmd, reply, _len);
     return ret;
-@@ -874,10 +876,42 @@ bool command_save_state_slot(command_t* cmd, const char* arg)
-    else
-       ret = false;
--
-+
+ }
+@@ -877,5 +879,37 @@ bool command_save_state_slot(command_t* cmd, const char* arg)
     cmd->replier(cmd, reply, _len);
     return ret;
  }
- 
+-
++
 +bool command_get_load_state_status(command_t *cmd, const char *arg)
 +{
 +   uint64_t generation = 0;
