@@ -1,0 +1,199 @@
+diff --git a/command.c b/command.c
+index cbd875a1..081d9583 100644
+--- a/command.c
++++ b/command.c
+@@ -825,12 +825,11 @@ bool command_load_state_slot(command_t *cmd, const char *arg)
+ {
+    char state_path[PATH_MAX_LENGTH] = "";
+    size_t _len                  = 0;
++   uint64_t generation          = 0;
+    char reply[128]              = "";
+    unsigned int slot            = (unsigned int)strtoul(arg, NULL, 10);
+    bool savestates_enabled      = core_info_current_supports_savestate();
+    bool ret                     = false;
+-   _len  = strlcpy(reply, "LOAD_STATE_SLOT ", sizeof(reply));
+-   _len += snprintf(reply + _len, sizeof(reply) - _len, "%d", slot);
+    if (savestates_enabled)
+    {
+       size_t info_size;
+@@ -874,10 +873,45 @@ bool command_save_state_slot(command_t* cmd, const char* arg)
+    else
+       ret = false;
+ 
++   content_get_load_state_status(&generation);
++   _len = snprintf(reply, sizeof(reply), "LOAD_STATE_SLOT %u %s %" PRIu64 "\n",
++         slot, ret ? "QUEUED" : "FAILED", generation);
+    cmd->replier(cmd, reply, _len);
+    return ret;
+ }
+ 
++bool command_get_load_state_status(command_t *cmd, const char *arg)
++{
++   uint64_t generation = 0;
++   char reply[96];
++   const char *name;
++   enum content_load_state_status status =
++      content_get_load_state_status(&generation);
++   size_t len;
++
++   (void)arg;
++   switch (status)
++   {
++      case CONTENT_LOAD_STATE_PENDING:
++         name = "PENDING";
++         break;
++      case CONTENT_LOAD_STATE_SUCCEEDED:
++         name = "SUCCEEDED";
++         break;
++      case CONTENT_LOAD_STATE_FAILED:
++         name = "FAILED";
++         break;
++      case CONTENT_LOAD_STATE_IDLE:
++      default:
++         name = "IDLE";
++         break;
++   }
++   len = snprintf(reply, sizeof(reply), "LOAD_STATE_STATUS %" PRIu64 " %s\n",
++         generation, name);
++   cmd->replier(cmd, reply, len);
++   return true;
++}
++
+ bool command_play_replay_slot(command_t *cmd, const char *arg)
+ {
+ #ifdef HAVE_BSV_MOVIE
+diff --git a/command.h b/command.h
+index 7c41d382..d50c6c83 100644
+--- a/command.h
++++ b/command.h
+@@ -435,6 +435,7 @@ bool command_get_status(command_t *cmd, const char* arg);
+ bool command_get_config_param(command_t *cmd, const char* arg);
+ bool command_show_osd_msg(command_t *cmd, const char* arg);
+ bool command_load_state_slot(command_t *cmd, const char* arg);
++bool command_get_load_state_status(command_t *cmd, const char* arg);
+ bool command_save_state_slot(command_t* cmd, const char* arg);
+ bool command_play_replay_slot(command_t *cmd, const char* arg);
+ bool command_seek_replay(command_t *cmd, const char *arg);
+@@ -466,6 +467,7 @@ static const struct cmd_action_map action_map[] = {
+    { "WRITE_CORE_MEMORY",command_write_memory,     "<address> <byte1> <byte2> ..." },
+ 
+    { "LOAD_STATE_SLOT",command_load_state_slot, "<slot number>"},
++   { "GET_LOAD_STATE_STATUS",command_get_load_state_status, "No argument"},
+    { "SAVE_STATE_SLOT",command_save_state_slot, "<slot number>"},
+    { "PLAY_REPLAY_SLOT",command_play_replay_slot, "<slot number>"},
+    { "SEEK_REPLAY",command_seek_replay, "<frame number>"},
+diff --git a/content.h b/content.h
+index 9aa48615..b9c011f9 100644
+--- a/content.h
++++ b/content.h
+@@ -39,6 +39,14 @@ typedef struct content_ctx_info
+    int argc;                       /* Argument count. */
+ } content_ctx_info_t;
+ 
++enum content_load_state_status
++{
++   CONTENT_LOAD_STATE_IDLE = 0,
++   CONTENT_LOAD_STATE_PENDING,
++   CONTENT_LOAD_STATE_SUCCEEDED,
++   CONTENT_LOAD_STATE_FAILED
++};
++
+ /* Load a state from memory. */
+ bool content_load_state_from_ram(void);
+ 
+@@ -51,6 +59,10 @@ bool content_ram_state_to_file(const char *path);
+ /* Load a state from disk to memory. */
+ bool content_load_state(const char* path, bool load_to_backup_buffer, bool autoload);
+ 
++/* Get the final result of the most recently queued disk load. */
++enum content_load_state_status content_get_load_state_status(
++      uint64_t *generation);
++
+ /* Save a state from memory to disk. */
+ bool content_save_state(const char *path, bool save_to_disk);
+ 
+diff --git a/tasks/task_save.c b/tasks/task_save.c
+index 551193d3..70532dc6 100644
+--- a/tasks/task_save.c
++++ b/tasks/task_save.c
+@@ -116,6 +116,7 @@ typedef struct
+    ssize_t bytes_read;
+    int state_slot;
+    uint8_t flags;
++   uint64_t load_generation;
+    char path[PATH_MAX_LENGTH];
+ } save_task_state_t;
+ 
+@@ -139,6 +140,9 @@ static bool save_state_disable_undo        = false;
+ /* Time tracking for automatic savestate interval */
+ static time_t last_savestate_automatic_time = 0;
+ 
++static uint64_t load_state_generation;
++static enum content_load_state_status load_state_status = CONTENT_LOAD_STATE_IDLE;
++
+ typedef struct rastate_size_info
+ {
+    size_t total_size;
+@@ -1174,12 +1178,17 @@ static void content_load_state_cb(retro_task_t *task,
+    if (!ret)
+       goto error;
+ 
++   if (load_data->load_generation == load_state_generation)
++      load_state_status = CONTENT_LOAD_STATE_SUCCEEDED;
++
+    free(buf);
+    free(load_data);
+ 
+    return;
+ 
+ error:
++   if (load_data->load_generation == load_state_generation)
++      load_state_status = CONTENT_LOAD_STATE_FAILED;
+    RARCH_ERR("[State] %s \"%s\".\n",
+          msg_hash_to_str(MSG_FAILED_TO_LOAD_STATE),
+          load_data->path);
+@@ -1621,6 +1630,14 @@ void content_wait_for_load_state_task(void)
+    task_queue_wait(content_load_state_in_progress, NULL);
+ }
+ 
++enum content_load_state_status content_get_load_state_status(
++      uint64_t *generation)
++{
++   if (generation)
++      *generation = load_state_generation;
++   return load_state_status;
++}
++
+ /**
+  * content_load_state:
+  * @path                  : path that state will be loaded from.
+@@ -1655,6 +1672,13 @@ bool content_load_state(const char *path,
+       state->flags             |= SAVE_TASK_FLAG_LOAD_TO_BACKUP_BUFF;
+    if (autoload)
+       state->flags             |= SAVE_TASK_FLAG_AUTOLOAD;
++   if (!load_to_backup_buffer)
++   {
++      state->load_generation    = ++load_state_generation;
++      if (!load_state_generation)
++         state->load_generation = load_state_generation = 1;
++      load_state_status         = CONTENT_LOAD_STATE_PENDING;
++   }
+    state->state_slot            = settings->ints.state_slot;
+    if (video_driver_cached_frame_is_hw_render())
+       state->flags             |= SAVE_TASK_FLAG_HAS_VALID_FB;
+@@ -1676,7 +1700,14 @@ bool content_load_state(const char *path,
+    else
+       task->flags               &= ~RETRO_TASK_FLG_MUTE;
+ 
+-   task_queue_push(task);
++   if (!task_queue_push(task))
++   {
++      if (state->load_generation == load_state_generation)
++         load_state_status = CONTENT_LOAD_STATE_FAILED;
++      free(state);
++      free(task);
++      return false;
++   }
+ 
+    return true;
+ 

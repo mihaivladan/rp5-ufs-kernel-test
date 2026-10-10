@@ -1,0 +1,120 @@
+name: ROCKNIX RP5 ConsoleOS RetroArch
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  retroarch:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    env:
+      PROJECT: ROCKNIX
+      DEVICE: SM8250
+      ARCH: aarch64
+      AUTOREMOVE: "yes"
+      DISABLE_COLORS: "yes"
+      CCACHE_COMPILERCHECK: content
+      CCACHE_COMPRESS: "1"
+      CCACHE_COMPRESSLEVEL: "6"
+      CCACHE_SLOPPINESS: pch_defines,time_macros,include_file_mtime,include_file_ctime
+      ROCKNIX_COMMIT: 1ebff24f36501fb6493beb2bf83bf2604536d9aa
+      RETROARCH_COMMIT: bdba046fa6766380bc2457532f38e589df769aaf
+    steps:
+      - name: Check out ConsoleOS GPL sources
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: Check out exact ROCKNIX source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: ROCKNIX/distribution
+          ref: 1ebff24f36501fb6493beb2bf83bf2604536d9aa
+          path: distribution
+          persist-credentials: false
+
+      - name: Maximize runner build space
+        uses: justinthelaw/maximize-github-runner-space@v0.9.0
+        with:
+          skip-components: docker-engine
+
+      - name: Pin recipe and install ConsoleOS patch
+        run: |
+          set -euo pipefail
+          recipe=distribution/projects/ROCKNIX/packages/emulators/libretro/retroarch/package.mk
+          grep -Fq 'PKG_VERSION="bdba046fa6766380bc2457532f38e589df769aaf"' "$recipe"
+          echo 'f7308eb1782687eba0c30789aee6a2e99da105487162de8f7dd0bfad94c3695a  '"$recipe" | sha256sum -c -
+          install -m 0644 rocknix/retroarch/0001-consoleos-correlated-load-completion.patch \
+            distribution/projects/ROCKNIX/packages/emulators/libretro/retroarch/patches/0099-consoleos-correlated-load-completion.patch
+          sha256sum "$recipe" rocknix/retroarch/0001-consoleos-correlated-load-completion.patch
+
+      - name: Restore exact-scope ROCKNIX compiler caches
+        working-directory: distribution
+        run: |
+          set -euo pipefail
+          base=https://github.com/ROCKNIX/distribution-cache/releases/download/ccache
+          curl -fL --retry 3 "$base/ccache-aarch64-SM8250-toolchain.tar" -o /tmp/ccache-toolchain.tar
+          curl -fL --retry 3 "$base/ccache-aarch64-SM8250.tar" -o /tmp/ccache-base.tar
+          for suffix in aa ab ac; do
+            curl -fL --retry 3 "$base/ccache-aarch64-SM8250-emu-standalone.tar.part-$suffix" \
+              -o "/tmp/ccache-emu-$suffix"
+          done
+          tar -xf /tmp/ccache-toolchain.tar
+          tar -xf /tmp/ccache-base.tar
+          cat /tmp/ccache-emu-aa /tmp/ccache-emu-ab /tmp/ccache-emu-ac | tar -xf -
+          du -sh build.ROCKNIX-SM8250.aarch64/.ccache
+
+      - name: Build exact ROCKNIX RetroArch package
+        working-directory: distribution
+        run: |
+          set -euo pipefail
+          ./scripts/get_env > .env
+          docker run --init --env-file .env -e USER=docker --rm \
+            --user "$(id -u):$(id -g)" -v "$PWD:$PWD" -w "$PWD" \
+            ghcr.io/rocknix/rocknix-build:latest \
+            bash -c './scripts/build retroarch' 2>&1 | tee ../retroarch-build.log
+
+      - name: Verify and package result
+        run: |
+          set -euo pipefail
+          binary=$(find distribution/build.ROCKNIX-SM8250.aarch64/install_pkg \
+            -path '*/retroarch-*/usr/bin/retroarch' -type f -print -quit)
+          test -n "$binary"
+          file "$binary" | grep -Fq 'ARM aarch64'
+          strings "$binary" | grep -Fxq 'GET_LOAD_STATE_STATUS'
+          strings "$binary" | grep -Fq 'LOAD_STATE_STATUS'
+          mkdir -p retroarch-artifact
+          install -m 0755 "$binary" retroarch-artifact/retroarch
+          install -m 0644 rocknix/retroarch/0001-consoleos-correlated-load-completion.patch \
+            retroarch-artifact/
+          {
+            printf 'rocknix_commit=%s\n' "$ROCKNIX_COMMIT"
+            printf 'retroarch_commit=%s\n' "$RETROARCH_COMMIT"
+            printf 'project=%s\n' "$PROJECT"
+            printf 'device=%s\n' "$DEVICE"
+            printf 'arch=%s\n' "$ARCH"
+            printf 'source_repository=%s\n' "$GITHUB_REPOSITORY"
+            printf 'source_commit=%s\n' "$GITHUB_SHA"
+          } > retroarch-artifact/PROVENANCE
+          sha256sum retroarch-artifact/retroarch \
+            retroarch-artifact/0001-consoleos-correlated-load-completion.patch \
+            retroarch-artifact/PROVENANCE > retroarch-artifact/SHA256SUMS
+          distribution/build.ROCKNIX-SM8250.aarch64/toolchain/bin/ccache -s -v \
+            > retroarch-artifact/CCACHE-STATS.txt
+          cat retroarch-artifact/SHA256SUMS
+
+      - name: Upload RetroArch and provenance
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: consoleos-rocknix-sm8250-retroarch
+          retention-days: 14
+          compression-level: 0
+          if-no-files-found: error
+          path: |
+            retroarch-artifact/
+            retroarch-build.log
+
