@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - codex/retroarch-load-completion
+    paths:
+      - .github/workflows/rocknix-retroarch.yml
+      - rocknix/retroarch/**
   workflow_dispatch:
 
 permissions:
@@ -12,111 +15,148 @@ permissions:
 jobs:
   retroarch:
     runs-on: ubuntu-24.04
-    timeout-minutes: 180
+    timeout-minutes: 45
     env:
-      PROJECT: ROCKNIX
-      DEVICE: SM8250
-      ARCH: aarch64
-      AUTOREMOVE: "yes"
-      DISABLE_COLORS: "yes"
-      CCACHE_COMPILERCHECK: content
-      CCACHE_COMPRESS: "1"
-      CCACHE_COMPRESSLEVEL: "6"
-      CCACHE_SLOPPINESS: pch_defines,time_macros,include_file_mtime,include_file_ctime
       ROCKNIX_COMMIT: 1ebff24f36501fb6493beb2bf83bf2604536d9aa
       RETROARCH_COMMIT: bdba046fa6766380bc2457532f38e589df769aaf
+      ROCKNIX_RELEASE_URL: https://github.com/ROCKNIX/distribution/releases/download/20260901/ROCKNIX-SM8250.aarch64-20260901.tar
+      ROCKNIX_RELEASE_SHA256: 3c23a04b76a9237b4d824819d80cc83c98ce118d33e1bd979a2a68ff40f034cb
+      BUILD_CONTAINER: ubuntu:25.04@sha256:34e8533bf27ac50f60bec267f6ce18c9aeb9556574e1ec1a8ce89926d32ea8f3
+      PATCH_PATH: rocknix/retroarch/0001-consoleos-correlated-load-completion.patch
+      ARTIFACT_DIR: retroarch-artifact
+      TARGET_ROOT: rocknix-target-root
     steps:
       - name: Check out ConsoleOS GPL sources
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
 
-      - name: Check out exact ROCKNIX source
+      - name: Check out pinned ROCKNIX RetroArch recipe
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: ROCKNIX/distribution
           ref: 1ebff24f36501fb6493beb2bf83bf2604536d9aa
           path: distribution
           persist-credentials: false
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            /projects/ROCKNIX/packages/emulators/libretro/retroarch/
 
-      - name: Maximize runner build space
-        uses: justinthelaw/maximize-github-runner-space@v0.9.0
+      - name: Check out pinned RetroArch source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
-          skip-components: docker-engine
+          repository: libretro/RetroArch
+          ref: bdba046fa6766380bc2457532f38e589df769aaf
+          path: retroarch
+          persist-credentials: false
 
-      - name: Pin recipe and install ConsoleOS patch
+      - name: Verify pinned inputs
+        id: inputs
+        shell: bash
         run: |
           set -euo pipefail
           recipe=distribution/projects/ROCKNIX/packages/emulators/libretro/retroarch/package.mk
           grep -Fq 'PKG_VERSION="bdba046fa6766380bc2457532f38e589df769aaf"' "$recipe"
           echo 'f7308eb1782687eba0c30789aee6a2e99da105487162de8f7dd0bfad94c3695a  '"$recipe" | sha256sum -c -
-          install -m 0644 rocknix/retroarch/0001-consoleos-correlated-load-completion.patch \
-            distribution/projects/ROCKNIX/packages/emulators/libretro/retroarch/patches/0099-consoleos-correlated-load-completion.patch
-          sha256sum "$recipe" rocknix/retroarch/0001-consoleos-correlated-load-completion.patch
+          patch_sha=$(sha256sum "$PATCH_PATH" | awk '{print $1}')
+          printf 'patch_sha=%s\n' "$patch_sha" >> "$GITHUB_OUTPUT"
+          printf 'cache_key=consoleos-retroarch-aarch64-%s-%s-%s\n' \
+            "$RETROARCH_COMMIT" "$ROCKNIX_COMMIT" "$patch_sha" >> "$GITHUB_OUTPUT"
 
-      - name: Restore exact-scope ROCKNIX compiler caches
-        working-directory: distribution
+      - name: Restore exact cached RetroArch artifact
+        id: artifact-cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: retroarch-artifact
+          key: ${{ steps.inputs.outputs.cache_key }}
+
+      - name: Restore pinned ROCKNIX runtime root
+        if: steps.artifact-cache.outputs.cache-hit != 'true'
+        id: runtime-cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: rocknix-target-root
+          key: rocknix-sm8250-runtime-${{ env.ROCKNIX_COMMIT }}-${{ env.ROCKNIX_RELEASE_SHA256 }}
+
+      - name: Extract checksum-verified ROCKNIX runtime root
+        if: steps.artifact-cache.outputs.cache-hit != 'true' && steps.runtime-cache.outputs.cache-hit != 'true'
+        shell: bash
         run: |
           set -euo pipefail
-          base=https://github.com/ROCKNIX/distribution-cache/releases/download/ccache
-          curl -fL --retry 3 "$base/ccache-aarch64-SM8250-toolchain.tar" -o /tmp/ccache-toolchain.tar
-          curl -fL --retry 3 "$base/ccache-aarch64-SM8250.tar" -o /tmp/ccache-base.tar
-          curl -fL --retry 3 "$base/ccache-aarch64-SM8250-emu-libretro.tar" \
-            -o /tmp/ccache-emu-libretro.tar
-          tar -xf /tmp/ccache-toolchain.tar
-          tar -xf /tmp/ccache-base.tar
-          tar -xf /tmp/ccache-emu-libretro.tar
-          du -sh build.ROCKNIX-SM8250.aarch64/.ccache
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends squashfs-tools
+          rocknix/retroarch/extract-rocknix-runtime.sh \
+            "$ROCKNIX_RELEASE_URL" "$ROCKNIX_RELEASE_SHA256" "$TARGET_ROOT"
 
-      - name: Build exact ROCKNIX RetroArch package
-        working-directory: distribution
+      - name: Apply pinned ROCKNIX and ConsoleOS patches
+        if: steps.artifact-cache.outputs.cache-hit != 'true'
+        shell: bash
         run: |
           set -euo pipefail
-          ./scripts/get_env > .env
-          docker run --init --env-file .env -e USER=docker --rm \
-            --user "$(id -u):$(id -g)" -v "$PWD:$PWD" -w "$PWD" \
-            ghcr.io/rocknix/rocknix-build:latest \
-            bash -c './scripts/build retroarch' 2>&1 | tee ../retroarch-build.log
+          patch_dir=distribution/projects/ROCKNIX/packages/emulators/libretro/retroarch/patches
+          while IFS= read -r patch_file; do
+            patch -d retroarch -p1 --forward --batch < "$patch_file"
+          done < <(find "$patch_dir" -maxdepth 1 -type f -name '*.patch' | LC_ALL=C sort)
+          patch -d retroarch -p1 --forward --batch < "$PATCH_PATH"
 
-      - name: Verify and package result
+      - name: Cross-compile against the ROCKNIX runtime ABI
+        if: steps.artifact-cache.outputs.cache-hit != 'true'
+        shell: bash
         run: |
           set -euo pipefail
-          binary=$(find distribution/build.ROCKNIX-SM8250.aarch64/install_pkg \
-            -path '*/retroarch-*/usr/bin/retroarch' -type f -print -quit)
-          test -n "$binary"
-          file "$binary" | grep -Fq 'ARM aarch64'
-          strings "$binary" > /tmp/retroarch.strings
-          grep -Fxq 'GET_LOAD_STATE_STATUS' /tmp/retroarch.strings
-          grep -Fq 'LOAD_STATE_STATUS' /tmp/retroarch.strings
-          mkdir -p retroarch-artifact
-          install -m 0755 "$binary" retroarch-artifact/retroarch
-          install -m 0644 rocknix/retroarch/0001-consoleos-correlated-load-completion.patch \
-            retroarch-artifact/
+          docker run --rm \
+            -v "$PWD:/work" -w /work \
+            "$BUILD_CONTAINER" \
+            bash rocknix/retroarch/build-in-container.sh \
+              /work/retroarch /work/$ARTIFACT_DIR /work/$TARGET_ROOT \
+            2>&1 | tee retroarch-build.log
+
+      - name: Complete artifact provenance
+        if: steps.artifact-cache.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          install -m 0644 "$PATCH_PATH" "$ARTIFACT_DIR/"
+          install -m 0755 rocknix/retroarch/build-in-container.sh \
+            rocknix/retroarch/build-standalone-aarch64.sh \
+            rocknix/retroarch/extract-rocknix-runtime.sh \
+            rocknix/retroarch/verify-rocknix-abi.sh "$ARTIFACT_DIR/"
           {
             printf 'rocknix_commit=%s\n' "$ROCKNIX_COMMIT"
             printf 'retroarch_commit=%s\n' "$RETROARCH_COMMIT"
-            printf 'project=%s\n' "$PROJECT"
-            printf 'device=%s\n' "$DEVICE"
-            printf 'arch=%s\n' "$ARCH"
+            printf 'patch_sha256=%s\n' '${{ steps.inputs.outputs.patch_sha }}'
+            printf 'rocknix_release_sha256=%s\n' "$ROCKNIX_RELEASE_SHA256"
+            printf 'build_container=%s\n' "$BUILD_CONTAINER"
+            printf 'build_mode=standalone-aarch64-cross-rocknix-runtime-link\n'
             printf 'source_repository=%s\n' "$GITHUB_REPOSITORY"
             printf 'source_commit=%s\n' "$GITHUB_SHA"
-          } > retroarch-artifact/PROVENANCE
-          (cd retroarch-artifact && sha256sum retroarch \
-            0001-consoleos-correlated-load-completion.patch \
-            PROVENANCE > SHA256SUMS)
-          distribution/build.ROCKNIX-SM8250.aarch64/toolchain/bin/ccache -s -v \
-            > retroarch-artifact/CCACHE-STATS.txt
-          cat retroarch-artifact/SHA256SUMS
+            printf 'artifact_cache_key=%s\n' '${{ steps.inputs.outputs.cache_key }}'
+            printf 'device_smoke_required=true\n'
+          } > "$ARTIFACT_DIR/PROVENANCE"
+          (cd "$ARTIFACT_DIR" && find . -maxdepth 1 -type f ! -name SHA256SUMS \
+            -print0 | LC_ALL=C sort -z | xargs -0 sha256sum > SHA256SUMS)
 
-      - name: Upload RetroArch and provenance
-        if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+      - name: Verify cached or newly built artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          (cd "$ARTIFACT_DIR" && sha256sum -c SHA256SUMS)
+          file "$ARTIFACT_DIR/retroarch" | grep -Fq 'ARM aarch64'
+          strings "$ARTIFACT_DIR/retroarch" > /tmp/retroarch.strings
+          grep -Fxq 'GET_LOAD_STATE_STATUS' /tmp/retroarch.strings
+          grep -Fq 'LOAD_STATE_STATUS' /tmp/retroarch.strings
+          grep -Fxq "rocknix_commit=$ROCKNIX_COMMIT" "$ARTIFACT_DIR/PROVENANCE"
+          grep -Fxq "retroarch_commit=$RETROARCH_COMMIT" "$ARTIFACT_DIR/PROVENANCE"
+          grep -Fxq "patch_sha256=${{ steps.inputs.outputs.patch_sha }}" "$ARTIFACT_DIR/PROVENANCE"
+          grep -Fxq 'abi_gate=pass' "$ARTIFACT_DIR/ABI-REPORT.txt"
+          grep -Fxq 'feature_parity=pass' "$ARTIFACT_DIR/ABI-REPORT.txt"
+          cat "$ARTIFACT_DIR/SHA256SUMS"
+
+      - name: Upload RetroArch and GPL build records
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: consoleos-rocknix-sm8250-retroarch
           retention-days: 14
           compression-level: 0
           if-no-files-found: error
-          path: |
-            retroarch-artifact/
-            retroarch-build.log
-
+          path: retroarch-artifact/
