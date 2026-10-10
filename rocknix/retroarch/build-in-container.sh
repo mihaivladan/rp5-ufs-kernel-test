@@ -11,9 +11,20 @@ source_dir=$1
 artifact_dir=$2
 target_root=$3
 
-# Ubuntu 25.04 has glibc 2.41 and FFmpeg 7 headers. Its pinned container
-# archive exposes both amd64 host and arm64 target packages. Final linking is
-# against checksum-verified ROCKNIX libraries, not these Ubuntu libraries.
+# Ubuntu 25.04 has glibc 2.41 and FFmpeg 7 headers. Restrict the container's
+# archive/security mirrors to amd64 host packages and use Ubuntu Ports for the
+# arm64 target packages. Final linking is against checksum-verified ROCKNIX
+# libraries, not these Ubuntu libraries.
+sed -i '/^Signed-By:/i Architectures: amd64' \
+  /etc/apt/sources.list.d/ubuntu.sources
+cat > /etc/apt/sources.list.d/ubuntu-arm64.sources <<'EOF'
+Types: deb
+URIs: http://ports.ubuntu.com/ubuntu-ports
+Suites: plucky plucky-updates plucky-backports plucky-security
+Components: main universe
+Architectures: arm64
+Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg
+EOF
 dpkg --add-architecture arm64
 apt-get update
 DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
