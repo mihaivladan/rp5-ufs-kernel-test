@@ -1,6 +1,9 @@
 name: ROCKNIX RP5 ConsoleOS RetroArch
 
 on:
+  push:
+    branches:
+      - codex/retroarch-load-completion
   workflow_dispatch:
 
 permissions:
