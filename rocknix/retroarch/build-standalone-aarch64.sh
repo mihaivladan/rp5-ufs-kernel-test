@@ -38,7 +38,7 @@ export CXXFLAGS="-O2 -pipe -DUDEV_TOUCH_SUPPORT"
 # supplies headers and pkg-config metadata only; every shared-library lookup is
 # directed to the extracted ROCKNIX runtime first.
 while IFS= read -r library; do
-  soname=$($READELF -d "$library" 2>/dev/null | \
+  soname=$({ $READELF -d "$library" 2>/dev/null || true; } | \
     sed -n 's/.*(SONAME).*\[\(.*\)\].*/\1/p' | head -1)
   [ -n "$soname" ] || continue
   ln -sfn "$library" "$target_link/$soname"
