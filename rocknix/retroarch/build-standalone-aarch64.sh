@@ -49,7 +49,10 @@ done < <(find "$target_lib" -type f -name '*.so*' | LC_ALL=C sort)
 interpreter=$($READELF -l "$target_root/usr/bin/retroarch" | \
   sed -n 's/.*Requesting program interpreter: \(.*\)]/\1/p')
 test -n "$interpreter"
-export LDFLAGS="-L$target_link -Wl,-rpath-link,$target_lib -Wl,--dynamic-linker=$interpreter"
+rpath_link=$(find "$target_lib" -type f -name '*.so*' -exec dirname {} \; | \
+  LC_ALL=C sort -u | paste -sd: -)
+test -n "$rpath_link"
+export LDFLAGS="-L$target_link -Wl,-rpath-link,$rpath_link -Wl,--dynamic-linker=$interpreter -Wl,--no-as-needed $target_root$interpreter -Wl,--as-needed"
 
 configure_flags=(
   --host=aarch64-linux-gnu
