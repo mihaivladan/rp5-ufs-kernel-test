@@ -61,13 +61,11 @@ jobs:
           base=https://github.com/ROCKNIX/distribution-cache/releases/download/ccache
           curl -fL --retry 3 "$base/ccache-aarch64-SM8250-toolchain.tar" -o /tmp/ccache-toolchain.tar
           curl -fL --retry 3 "$base/ccache-aarch64-SM8250.tar" -o /tmp/ccache-base.tar
-          for suffix in aa ab ac; do
-            curl -fL --retry 3 "$base/ccache-aarch64-SM8250-emu-standalone.tar.part-$suffix" \
-              -o "/tmp/ccache-emu-$suffix"
-          done
+          curl -fL --retry 3 "$base/ccache-aarch64-SM8250-emu-libretro.tar" \
+            -o /tmp/ccache-emu-libretro.tar
           tar -xf /tmp/ccache-toolchain.tar
           tar -xf /tmp/ccache-base.tar
-          cat /tmp/ccache-emu-aa /tmp/ccache-emu-ab /tmp/ccache-emu-ac | tar -xf -
+          tar -xf /tmp/ccache-emu-libretro.tar
           du -sh build.ROCKNIX-SM8250.aarch64/.ccache
 
       - name: Build exact ROCKNIX RetroArch package
