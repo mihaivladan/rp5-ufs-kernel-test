@@ -16,13 +16,22 @@ index cbd875a1..081d9583 100644
     if (savestates_enabled)
     {
        size_t info_size;
-@@ -874,10 +873,45 @@ bool command_save_state_slot(command_t* cmd, const char* arg)
+@@ -844,7 +843,10 @@ bool command_load_state_slot(command_t *cmd, const char *arg)
+          command_post_state_loaded();
+    }
     else
        ret = false;
  
 +   content_get_load_state_status(&generation);
 +   _len = snprintf(reply, sizeof(reply), "LOAD_STATE_SLOT %u %s %" PRIu64 "\n",
 +         slot, ret ? "QUEUED" : "FAILED", generation);
+    cmd->replier(cmd, reply, _len);
+    return ret;
+@@ -874,10 +876,42 @@ bool command_save_state_slot(command_t* cmd, const char* arg)
+    else
+       ret = false;
+-
++
     cmd->replier(cmd, reply, _len);
     return ret;
  }
@@ -181,7 +190,7 @@ index 551193d3..70532dc6 100644
     state->state_slot            = settings->ints.state_slot;
     if (video_driver_cached_frame_is_hw_render())
        state->flags             |= SAVE_TASK_FLAG_HAS_VALID_FB;
-@@ -1676,7 +1700,14 @@ bool content_load_state(const char *path,
+@@ -1676,7 +1700,16 @@ bool content_load_state(const char *path,
     else
        task->flags               &= ~RETRO_TASK_FLG_MUTE;
  
@@ -190,6 +199,8 @@ index 551193d3..70532dc6 100644
 +   {
 +      if (state->load_generation == load_state_generation)
 +         load_state_status = CONTENT_LOAD_STATE_FAILED;
++      if (task->title)
++         task_free_title(task);
 +      free(state);
 +      free(task);
 +      return false;

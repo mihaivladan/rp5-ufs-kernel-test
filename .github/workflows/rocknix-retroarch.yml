@@ -87,8 +87,9 @@ jobs:
             -path '*/retroarch-*/usr/bin/retroarch' -type f -print -quit)
           test -n "$binary"
           file "$binary" | grep -Fq 'ARM aarch64'
-          strings "$binary" | grep -Fxq 'GET_LOAD_STATE_STATUS'
-          strings "$binary" | grep -Fq 'LOAD_STATE_STATUS'
+          strings "$binary" > /tmp/retroarch.strings
+          grep -Fxq 'GET_LOAD_STATE_STATUS' /tmp/retroarch.strings
+          grep -Fq 'LOAD_STATE_STATUS' /tmp/retroarch.strings
           mkdir -p retroarch-artifact
           install -m 0755 "$binary" retroarch-artifact/retroarch
           install -m 0644 rocknix/retroarch/0001-consoleos-correlated-load-completion.patch \
@@ -102,9 +103,9 @@ jobs:
             printf 'source_repository=%s\n' "$GITHUB_REPOSITORY"
             printf 'source_commit=%s\n' "$GITHUB_SHA"
           } > retroarch-artifact/PROVENANCE
-          sha256sum retroarch-artifact/retroarch \
-            retroarch-artifact/0001-consoleos-correlated-load-completion.patch \
-            retroarch-artifact/PROVENANCE > retroarch-artifact/SHA256SUMS
+          (cd retroarch-artifact && sha256sum retroarch \
+            0001-consoleos-correlated-load-completion.patch \
+            PROVENANCE > SHA256SUMS)
           distribution/build.ROCKNIX-SM8250.aarch64/toolchain/bin/ccache -s -v \
             > retroarch-artifact/CCACHE-STATS.txt
           cat retroarch-artifact/SHA256SUMS
