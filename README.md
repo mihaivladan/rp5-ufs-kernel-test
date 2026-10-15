@@ -3,10 +3,9 @@
 This repository is the public kernel lab used to understand and improve native
 Linux power management on the Retroid Pocket 5.
 
-It contains reproducible GitHub Actions builds, kernel patches, configuration
-fragments, Device Trees and verification scripts. It does **not** contain the
-ConsoleOS shell or services, build a complete operating-system image, connect
-to a handheld, or install anything on a device.
+This repository contains the kernel and Device Tree sources, patches, build
+configuration and verification materials. ConsoleOS userspace is maintained
+separately and is not included.
 
 The work is based on the RP5 build from ROCKNIX 20260901, pinned to distribution
 commit `1ebff24f36501fb6493beb2bf83bf2604536d9aa` and Linux 7.2. The older
@@ -68,9 +67,8 @@ The important results behind this history are:
    plausible fixes were correctly rejected because suspend succeeded but the
    residency counters did not move.
 5. The resulting RC17/PM8 lineage combines the selected kernel fixes and
-   guarded low-level interfaces needed by the product power owner. The product
-   transaction order, timing, admission gates and recovery policy are private
-   ConsoleOS behavior and are intentionally not described here.
+   guarded low-level interfaces needed by the current product-kernel
+   configuration.
 6. The product kernel deliberately excludes the synchronous fuel-gauge
    diagnostics. The matching diagnostic kernel retains them only for bounded
    drain measurement.
@@ -87,10 +85,8 @@ calibration. Short runs also include proportionally more entry and wake
 overhead than the eight-hour runs, so values from different durations should
 not be subtracted as if they were matched A/B tests.
 
-These are independent experimental states listed in research order. They are
-**not** the ConsoleOS sleep sequence. The userspace order, timing, admission
-gates and recovery policy are private and are not required to build or use the
-GPL kernel sources in this repository.
+These are independent experimental states listed in research order; they
+should not be read as one supported configuration.
 
 | Result | Interval | Residency result | Average current / estimate | What the number established |
 | --- | ---: | --- | ---: | --- |
@@ -133,13 +129,13 @@ commit subjects.
 | `d98111e`–`8f1e6e1` | Assemble RC1, add endpoint-absent PCIe/CLKREQ kernel support in RC2, then add RPMh regulator SLEEP/WAKE support in RC3. | First consolidated product candidates. Later RCs build on this source and DT boundary. |
 | `4c65445`–`573ccbd` | Gate the PM8150B USB-PD PHY and its regulator while unplugged, preserve it across PD hard reset, fix locking, and restore compiler caching. | The corrected RC6 implementation is retained in PM8. CC detection remains alive while the heavier PD PHY is powered only for an attached session. |
 | `9591d76`–`a12b330` | Probe the SM8250 display RSCC clock path with explicit guards and a separately identified diagnostic release. | A diagnostic discriminator, not a product fix. Its result prevented an unsupported display-clock theory from silently entering the product stack. |
-| `c35d5b8`–`e32a0cd` | Add guarded QCA6390 shutdown support, preserve the required QMI transport boundary, handle the endpoint-absent PCIe case and test PCIe interconnect release. | Established low-level kernel mechanisms and diagnostics. Their product-level ordering is intentionally outside this public repository. |
+| `c35d5b8`–`e32a0cd` | Add guarded QCA6390 shutdown support, preserve the required QMI transport boundary, handle the endpoint-absent PCIe case and test PCIe interconnect release. | Established low-level kernel mechanisms and diagnostics. Not every experimental combination is part of the current product kernel. |
 | `b28764e`–`f91dba5` | Test ADSP all-state votes, QCA shutdown boundaries, MHI behavior, PCIe0 power-domain collapse, noirq timing, MMIO/MSI guards, rootless GDSC handling and a persistent crash console. | A set of deliberately narrow kernel discriminators. Some fixed real defects; others were rejected or retained only as diagnostics. Only the selected kernel changes entered RC17. |
 | `b9804f4`–`7c1c213` | Add an awake PCIe idle-cycle control and keep DT phandle numbering stable for byte/semantic comparison. | Diagnostic control and reproducibility work; not an additional product power policy. |
 | `e08db9c`–`ffa6f5b` | Move Retroid gamepad/RGB shared-rail handling into bound-driver system PM and make the RP5 fan start silently under an opt-in property. | Product kernel behavior: the shared rail is released/restored by its drivers, and the RP5 no longer gets the fixed fan pulse at kernel startup. |
 | `260e8b1`–`6279872` | Preserve the firmware framebuffer through MSM takeover, verify visible display ownership, separate UEFI and Linux rotation, and externalize the early-display helper/assets behind hashes. | Product boot-display path with an embedded fallback and a replaceable, verified external bundle. |
 | `8081392`–`de8e0c4` | Package the kernel as ARM64 EFI zboot, exercise the real init path in QEMU, remove blocking coulomb diagnostics from the product, create the source-equivalent product/diagnostic pair, share the compiler cache and correct the panel/retimer DT boundary. | Defines the product-versus-diagnostic build contract used today. Tag `phase1-baseline-2026-10-09` points at `f05b974`, an important frozen baseline rather than the current branch tip. |
-| `1d9958f`–`ac7a8cd` | Add observable deferred QCA restore state, correct the kernel resume dependency order, and provide a bounded kernel fallback. | Current PM8 kernel tip. The kernel interface and fail-safe behavior are public; when and how the private product owner uses them is not documented here. |
+| `1d9958f`–`ac7a8cd` | Add observable deferred QCA restore state, correct the kernel resume dependency order, and provide a bounded kernel fallback. | Current PM8 kernel tip. Its observable interface and fail-safe behavior are documented by the source and build artifacts. |
 
 ## Why some commits look administrative
 
@@ -191,23 +187,6 @@ Branches are retained as experiment records. The most useful entry points are:
 Older branch names describe the experiment at the point where the branch was
 created; they are not release rankings, and a larger RC number does not mean a
 branch is safer or newer than the current product tip.
-
-## Public and private boundary
-
-This repository documents the GPL-facing kernel and Device Tree work: patches,
-configuration, build provenance, compiled-artifact verification and the
-behavior of kernel interfaces themselves.
-
-It intentionally does **not** document the ConsoleOS product sleep state
-machine, the order or timing of its stages, readiness/admission rules, retry
-policy, service coordination, presentation behavior or success criteria beyond
-the hardware-residency definition used to classify kernel experiments. Those
-parts are original private ConsoleOS implementation and are not required to
-build or understand the licensed kernel changes.
-
-Individual GPL patches necessarily show what their kernel callbacks, module
-parameters and fail-safe paths do. That source disclosure does not make the
-private userspace orchestration part of this repository.
 
 ## Repository layout
 
