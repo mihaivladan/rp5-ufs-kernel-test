@@ -205,9 +205,9 @@ Important ROCKNIX references:
   deliberately stripped `minsleep4` proof kernel.
 - [`rocknix/README.md`](rocknix/README.md) documents the diagnostic profiles,
   subsystem matrix and early-display bundle.
-- [`rocknix/FG-COULOMB-COUNTER.md`](rocknix/FG-COULOMB-COUNTER.md) explains the
+- [`rocknix/FG-COULOMB-COUNTER.md`](https://github.com/mihaivladan/rp5-ufs-kernel-test/blob/codex/rp5-rc6-pdphy-product/rocknix/FG-COULOMB-COUNTER.md) explains the
   diagnostic fuel-gauge interface and its measurement limits.
-- [`rocknix/CONSOLEOS-RC1.md`](rocknix/CONSOLEOS-RC1.md) is the authoritative
+- [`rocknix/CONSOLEOS-RC1.md`](https://github.com/mihaivladan/rp5-ufs-kernel-test/blob/codex/rp5-rc6-pdphy-product/rocknix/CONSOLEOS-RC1.md) is the authoritative
   description of the current PM8 product and paired diagnostic profiles.
 
 ## Build and safety boundary
