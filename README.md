@@ -36,13 +36,13 @@ The current branch builds two kernels from the same commit:
   configuration and PM8150B fuel-gauge patch.
 
 The pair is built by the manually dispatched
-[`ConsoleOS RP5 paired product and diagnostic zboot`](.github/workflows/rocknix-lpm-platform.yml)
+[`ConsoleOS RP5 paired product and diagnostic zboot`](https://github.com/mihaivladan/rp5-ufs-kernel-test/blob/codex/rp5-rc6-pdphy-product/.github/workflows/rocknix-lpm-platform.yml)
 workflow. Both jobs use the same compiler-cache family, publish their build
 logs and provenance, and receive different release suffixes so they cannot be
 mistaken for one another.
 
 For the exact current patch set and packaging boundary, read
-[`rocknix/CONSOLEOS-RC1.md`](rocknix/CONSOLEOS-RC1.md).
+[`rocknix/CONSOLEOS-RC1.md`](https://github.com/mihaivladan/rp5-ufs-kernel-test/blob/codex/rp5-rc6-pdphy-product/rocknix/CONSOLEOS-RC1.md).
 
 ## What the investigation established
 
