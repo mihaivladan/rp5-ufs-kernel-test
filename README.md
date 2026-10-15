@@ -1,7 +1,8 @@
-# Retroid Pocket 5 Linux kernel experiments
+# Retroid Pocket 5 Linux deep-sleep kernel research
 
-This repository is the public kernel lab used to understand and improve native
-Linux power management on the Retroid Pocket 5.
+Reproducible ROCKNIX/Linux kernel and Device Tree experiments for
+suspend-to-idle and deep residency on the Retroid Pocket 5 (RP5, Qualcomm
+SM8250), including AOSD/CXSD/DDR evidence and measured standby current.
 
 This repository contains the kernel and Device Tree sources, patches, build
 configuration and verification materials. ConsoleOS userspace is maintained
