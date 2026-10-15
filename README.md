@@ -13,14 +13,20 @@ commit `1ebff24f36501fb6493beb2bf83bf2604536d9aa` and Linux 7.2. The older
 Armada UFS experiment is kept at the repository root; nearly all later RP5 work
 lives under [`rocknix/`](rocknix/).
 
+> **Stock starting point: about 115 mA.** Out-of-the-box ROCKNIX 20260901 fell
+> from 39% to 32% during a 3 h 1 min 38 s in-game suspend. This is a coarse
+> estimate based on the whole-percent gauge and the RP5's nominal battery
+> capacity, not a fuel-gauge charge-counter measurement. AOSD and CXSD remained
+> at zero, so the stock run did not demonstrate deep residency.
+
 ## Where to start
 
 The active product-kernel history is on
 [`codex/rp5-rc6-pdphy-product`](https://github.com/mihaivladan/rp5-ufs-kernel-test/tree/codex/rp5-rc6-pdphy-product),
-currently ending at `ac7a8cd`. The branch name is historical: it began with the
-RC6 USB-C work and later became the lineage for the PM8 kernel. The default
-`main` branch stops earlier, at the exact-state platform-suspend experiment
-`d150944`.
+whose current kernel-code tip is `ac7a8cd`. The branch name is historical: it
+began with the RC6 USB-C work and later became the lineage for the PM8 kernel.
+The default `main` branch stops earlier, at the exact-state platform-suspend
+experiment `d150944`.
 
 The current branch builds two kernels from the same commit:
 
@@ -86,8 +92,9 @@ These are independent experimental states listed in research order. They are
 gates and recovery policy are private and are not required to build or use the
 GPL kernel sources in this repository.
 
-| Result | Qualified interval | Residency result | Measured average | What the number established |
+| Result | Interval | Residency result | Average current / estimate | What the number established |
 | --- | ---: | --- | ---: | --- |
+| Stock ROCKNIX 20260901 | 3 h 1 min 38 s | **No AOSD/CXSD residency** | **about 115 mA (coarse estimate)** | The out-of-box starting point, inferred from a 39% -> 32% whole-percentage change with a game suspended. It is not a qualified charge-counter measurement. |
 | `minsleep4` (`2f447f7`) | about 474 s | Strict deep residency | **Not measured** | First conclusive native-Linux deep-residency entry. The observed whole-percent battery change was too coarse to publish as current. |
 | Phase 4AT full-stack reference | 630.671 s | 99.999% AOSD/CXSD/DDR | **73.482 mA** | Proved that the high draw was present during genuine deep residency, rather than being explained by shallow fallback. |
 | Phase 4AU radios soft-blocked | 690.459 s | 99.999% AOSD/CXSD/DDR | **67.572 mA** | A matched reduction of **5.910 mA** from the 4AT reference. |
