@@ -8,6 +8,10 @@ This repository contains the kernel and Device Tree sources, patches, build
 configuration and verification materials. ConsoleOS userspace is maintained
 separately and is not included.
 
+The GPLv3 RetroArch and SwanStation modifications are maintained separately in
+[`consoleos-emulator-gpl-sources`](https://github.com/mihaivladan/consoleos-emulator-gpl-sources),
+along with their pinned ROCKNIX build and verification workflows.
+
 The work is based on the RP5 build from ROCKNIX 20260901, pinned to distribution
 commit `1ebff24f36501fb6493beb2bf83bf2604536d9aa` and Linux 7.2. The older
 Armada UFS experiment is kept at the repository root; nearly all later RP5 work
